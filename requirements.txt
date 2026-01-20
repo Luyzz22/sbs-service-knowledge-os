@@ -1,0 +1,11 @@
+streamlit>=1.31.0
+llama-index>=0.10.0
+llama-parse>=0.4.0
+llama-index-llms-openai>=0.1.0
+llama-index-embeddings-openai>=0.1.0
+llama-index-vector-stores-qdrant>=0.2.0
+qdrant-client>=1.7.0
+openai>=1.10.0
+python-dotenv>=1.0.0
+nest-asyncio>=1.6.0
+httpx>=0.26.0

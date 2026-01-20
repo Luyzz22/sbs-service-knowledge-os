@@ -1,0 +1,31 @@
+# Virtual Environment
+venv/
+.venv/
+
+# Environment Variables (WICHTIG - niemals committen!)
+.env
+.env.local
+
+# Python
+__pycache__/
+*.py[cod]
+*.so
+
+# Logs
+logs/
+*.log
+
+# macOS
+.DS_Store
+
+# Streamlit
+.streamlit/secrets.toml
+
+# Uploads & Data
+uploads/
+data/
+*.pdf
+
+# IDE
+.idea/
+.vscode/
