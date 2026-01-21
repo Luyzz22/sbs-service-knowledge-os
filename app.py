@@ -1,8 +1,9 @@
 """
 ================================================================================
-SBS DEUTSCHLAND GMBH - SERVICE KNOWLEDGE OS
+HYDRAULIKDOC AI - Enterprise Edition v1.0
 ================================================================================
-Enterprise Edition v4.0 - Multi-PDF + Authentication
+KI-gestützte Suche in Hydraulik-Dokumentation
+by SBS Deutschland GmbH
 ================================================================================
 """
 
@@ -12,7 +13,6 @@ import os
 from pathlib import Path
 from typing import Optional, List, Tuple, Dict
 import hashlib
-import hmac
 
 # ══════════════════════════════════════════════════════════════════════════════
 # IMPORTS
@@ -40,104 +40,114 @@ except ImportError as e:
 # PAGE CONFIG
 # ══════════════════════════════════════════════════════════════════════════════
 st.set_page_config(
-    page_title="Service Knowledge OS | SBS Deutschland",
+    page_title="HydraulikDoc AI | Technische Dokumentation durchsuchen",
     page_icon="🔧",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
 # ══════════════════════════════════════════════════════════════════════════════
-# AUTHENTICATION SYSTEM
+# AUTHENTICATION
 # ══════════════════════════════════════════════════════════════════════════════
 def get_users_from_secrets():
-    """Load users from Streamlit Secrets"""
     try:
         if hasattr(st, 'secrets') and 'users' in st.secrets:
             return dict(st.secrets['users'])
     except:
         pass
-    # Default demo users (password hashes for: admin123, user123, demo123)
     return {
         "admin": {
             "name": "Administrator",
-            "password": "240be518fabd2724ddb6f04eeb9d5b75",  # admin123
+            "password": "0192023a7bbd73250516f069df18b500",
             "role": "admin"
-        },
-        "user": {
-            "name": "Servicetechniker",
-            "password": "6ad14ba9986e3615423dfca256d04e3f",  # user123
-            "role": "user"
         },
         "demo": {
             "name": "Demo Benutzer",
-            "password": "62cc2d8b4bf2d8728120d052163a77df",  # demo123
+            "password": "62cc2d8b4bf2d8728120d052163a77df",
             "role": "demo"
         }
     }
 
 def hash_password(password: str) -> str:
-    """Create MD5 hash of password"""
     return hashlib.md5(password.encode()).hexdigest()
 
 def verify_password(password: str, hashed: str) -> bool:
-    """Verify password against hash"""
     return hash_password(password) == hashed
 
 def check_login(username: str, password: str) -> Tuple[bool, Optional[Dict]]:
-    """Check login credentials"""
     users = get_users_from_secrets()
     if username in users:
         user = users[username]
         if verify_password(password, user['password']):
-            return True, {
-                "username": username,
-                "name": user['name'],
-                "role": user['role']
-            }
+            return True, {"username": username, "name": user['name'], "role": user['role']}
     return False, None
 
 def render_login_page():
-    """Render the login page"""
     st.markdown("""
     <style>
-        .login-container {
-            max-width: 400px;
-            margin: 4rem auto;
-            padding: 2rem;
-            background: white;
-            border-radius: 16px;
-            box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+        
+        .stApp {
+            background: linear-gradient(135deg, #003366 0%, #0066B3 100%);
         }
+        
+        .login-container {
+            max-width: 420px;
+            margin: 3rem auto;
+            padding: 2.5rem;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }
+        
         .login-header {
             text-align: center;
             margin-bottom: 2rem;
         }
+        
         .login-logo {
+            width: 70px;
+            height: 70px;
+            background: linear-gradient(135deg, #FF8C00 0%, #E67E00 100%);
+            border-radius: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
             font-size: 2rem;
-            font-weight: 700;
-            background: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
+            margin: 0 auto 1rem;
+            box-shadow: 0 8px 20px rgba(255, 140, 0, 0.3);
         }
+        
+        .login-title {
+            font-size: 1.6rem;
+            font-weight: 700;
+            color: #0066B3;
+            margin-bottom: 0.25rem;
+        }
+        
         .login-subtitle {
             color: #64748b;
             font-size: 0.9rem;
-            margin-top: 0.5rem;
         }
-        .stTextInput > div > div {
-            border-radius: 8px;
-        }
-        .demo-info {
+        
+        .demo-box {
             background: #f8fafc;
             border: 1px solid #e2e8f0;
-            border-radius: 8px;
-            padding: 1rem;
+            border-radius: 12px;
+            padding: 1.25rem;
             margin-top: 1.5rem;
-            font-size: 0.85rem;
-            color: #64748b;
         }
-        .demo-info strong {
-            color: #1e293b;
+        
+        .demo-box strong {
+            color: #0066B3;
+            font-size: 0.9rem;
+        }
+        
+        .demo-box code {
+            background: #e2e8f0;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 0.85rem;
         }
     </style>
     """, unsafe_allow_html=True)
@@ -147,8 +157,9 @@ def render_login_page():
     with col2:
         st.markdown("""
         <div class="login-header">
-            <div class="login-logo">🔧 SBS Deutschland</div>
-            <div class="login-subtitle">Service Knowledge OS</div>
+            <div class="login-logo">🔧</div>
+            <div class="login-title">HydraulikDoc AI</div>
+            <div class="login-subtitle">Technische Dokumentation durchsuchen</div>
         </div>
         """, unsafe_allow_html=True)
         
@@ -161,11 +172,10 @@ def render_login_page():
         with col_btn1:
             login_clicked = st.button("🔐 Anmelden", type="primary", use_container_width=True)
         with col_btn2:
-            demo_clicked = st.button("🎮 Demo", use_container_width=True, help="Mit Demo-Account anmelden")
+            demo_clicked = st.button("🎮 Demo", use_container_width=True)
         
         if demo_clicked:
-            username = "demo"
-            password = "demo123"
+            username, password = "demo", "demo123"
             login_clicked = True
         
         if login_clicked:
@@ -182,11 +192,9 @@ def render_login_page():
                 st.warning("⚠️ Bitte alle Felder ausfüllen")
         
         st.markdown("""
-        <div class="demo-info">
-            <strong>Demo-Zugangsdaten:</strong><br>
-            Benutzer: <code>demo</code> · Passwort: <code>demo123</code><br><br>
-            <strong>Admin-Zugang:</strong><br>
-            Benutzer: <code>admin</code> · Passwort: <code>admin123</code>
+        <div class="demo-box">
+            <strong>Demo-Zugang:</strong><br>
+            Benutzer: <code>demo</code> · Passwort: <code>demo123</code>
         </div>
         """, unsafe_allow_html=True)
         
@@ -194,106 +202,100 @@ def render_login_page():
         st.markdown("""
         <div style="text-align: center; color: #94a3b8; font-size: 0.8rem;">
             © 2025 SBS Deutschland GmbH<br>
-            <a href="https://sbsdeutschland.com" style="color: #3b82f6;">sbsdeutschland.com</a>
+            <a href="https://sbsdeutschland.com" style="color: #0066B3;">sbsdeutschland.com</a>
         </div>
         """, unsafe_allow_html=True)
 
 # ══════════════════════════════════════════════════════════════════════════════
-# CUSTOM CSS
+# CUSTOM CSS - HYDRAULIK BRANDING
 # ══════════════════════════════════════════════════════════════════════════════
 def inject_css():
     st.markdown("""
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
         
         * { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; }
         
         .stApp { background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%); }
         
-        /* Sidebar */
+        /* Sidebar - Hydraulik Blue */
         [data-testid="stSidebar"] {
-            background: linear-gradient(180deg, #0f172a 0%, #1e293b 100%);
-            border-right: 1px solid #334155;
+            background: linear-gradient(180deg, #003366 0%, #004C8C 100%);
+            border-right: 1px solid #0066B3;
         }
         [data-testid="stSidebar"] * { color: #e2e8f0 !important; }
-        [data-testid="stSidebar"] .stMarkdown a { color: #60a5fa !important; }
-        [data-testid="stSidebar"] hr { border-color: #334155; margin: 1.5rem 0; }
+        [data-testid="stSidebar"] .stMarkdown a { color: #FF8C00 !important; }
+        [data-testid="stSidebar"] hr { border-color: #0066B3; margin: 1.5rem 0; }
         [data-testid="stSidebar"] .stTextInput > div > div {
-            background-color: #1e293b; border: 1px solid #475569; border-radius: 8px;
+            background-color: #004C8C; border: 1px solid #0066B3; border-radius: 8px;
         }
         [data-testid="stSidebar"] .stButton > button {
-            background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
-            color: white !important; border: none; border-radius: 8px;
+            background: linear-gradient(135deg, #FF8C00 0%, #E67E00 100%);
+            color: #003366 !important; border: none; border-radius: 8px;
             padding: 0.6rem 1.2rem; font-weight: 600;
-            box-shadow: 0 4px 6px -1px rgba(59, 130, 246, 0.3);
+            box-shadow: 0 4px 12px rgba(255, 140, 0, 0.3);
         }
         [data-testid="stSidebar"] .stButton > button:hover {
-            background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+            background: linear-gradient(135deg, #E67E00 0%, #CC7000 100%);
             transform: translateY(-1px);
         }
         
         /* Logo */
         .logo-container {
             text-align: center; padding: 1.5rem 0; margin-bottom: 1rem;
-            border-bottom: 1px solid #334155;
+            border-bottom: 1px solid #0066B3;
+        }
+        .logo-icon {
+            width: 56px; height: 56px;
+            background: linear-gradient(135deg, #FF8C00 0%, #E67E00 100%);
+            border-radius: 14px; margin: 0 auto 12px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 1.8rem;
+            box-shadow: 0 6px 16px rgba(255, 140, 0, 0.3);
         }
         .logo-text {
-            font-size: 1.5rem; font-weight: 700;
-            background: linear-gradient(135deg, #60a5fa 0%, #a78bfa 100%);
-            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+            font-size: 1.4rem; font-weight: 700; color: #ffffff !important;
         }
         .logo-subtext {
-            font-size: 0.75rem; color: #94a3b8 !important;
+            font-size: 0.72rem; color: #94a3b8 !important;
             text-transform: uppercase; letter-spacing: 2px; margin-top: 0.25rem;
         }
         
         /* User Badge */
         .user-badge {
-            background: linear-gradient(135deg, #1e3a5f 0%, #1e293b 100%);
-            border: 1px solid #3b82f6;
-            padding: 0.75rem 1rem;
-            border-radius: 10px;
-            margin-bottom: 1rem;
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
+            background: linear-gradient(135deg, #004C8C 0%, #003366 100%);
+            border: 1px solid #0066B3;
+            padding: 0.75rem 1rem; border-radius: 10px; margin-bottom: 1rem;
+            display: flex; align-items: center; gap: 0.75rem;
         }
         .user-avatar {
-            width: 32px;
-            height: 32px;
-            background: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-weight: 600;
-            font-size: 0.9rem;
+            width: 36px; height: 36px;
+            background: linear-gradient(135deg, #FF8C00 0%, #E67E00 100%);
+            border-radius: 50%; display: flex; align-items: center; justify-content: center;
+            font-weight: 700; font-size: 1rem; color: #003366;
         }
-        .user-info {
-            flex: 1;
-        }
-        .user-name {
-            font-weight: 600;
-            font-size: 0.9rem;
-        }
-        .user-role {
-            font-size: 0.7rem;
-            color: #94a3b8 !important;
-            text-transform: uppercase;
-        }
+        .user-name { font-weight: 600; font-size: 0.95rem; }
+        .user-role { font-size: 0.7rem; color: #94a3b8 !important; text-transform: uppercase; }
         
         /* Header */
         .main-header {
-            background: linear-gradient(135deg, #0f172a 0%, #1e3a5f 50%, #1e293b 100%);
+            background: linear-gradient(135deg, #003366 0%, #0066B3 50%, #004C8C 100%);
             color: white; padding: 2.5rem 3rem; border-radius: 16px; margin-bottom: 2rem;
-            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
+            box-shadow: 0 20px 40px rgba(0, 51, 102, 0.2);
+            position: relative; overflow: hidden;
         }
-        .main-header h1 { margin: 0; font-size: 2rem; font-weight: 700; }
-        .main-header p { margin: 0.75rem 0 0 0; opacity: 0.9; }
+        .main-header::before {
+            content: ''; position: absolute; top: -50%; right: -20%;
+            width: 60%; height: 200%;
+            background: radial-gradient(circle, rgba(255,140,0,0.1) 0%, transparent 60%);
+        }
+        .main-header h1 { margin: 0; font-size: 2rem; font-weight: 700; position: relative; }
+        .main-header p { margin: 0.75rem 0 0 0; opacity: 0.9; position: relative; }
         .header-badge {
-            display: inline-block; background: rgba(59, 130, 246, 0.2); color: #93c5fd;
-            padding: 0.25rem 0.75rem; border-radius: 20px; font-size: 0.75rem;
-            font-weight: 600; margin-top: 1rem; border: 1px solid rgba(59, 130, 246, 0.3);
+            display: inline-block; background: rgba(255, 140, 0, 0.2); color: #FF8C00;
+            padding: 0.35rem 0.85rem; border-radius: 20px; font-size: 0.75rem;
+            font-weight: 600; margin-top: 1rem; border: 1px solid rgba(255, 140, 0, 0.3);
+            position: relative;
         }
         
         /* Section Title */
@@ -303,16 +305,16 @@ def inject_css():
         }
         .section-title::before {
             content: ''; width: 4px; height: 24px;
-            background: linear-gradient(180deg, #3b82f6 0%, #8b5cf6 100%); border-radius: 2px;
+            background: linear-gradient(180deg, #0066B3 0%, #FF8C00 100%); border-radius: 2px;
         }
         
         /* Source Box */
         .source-box {
             background: linear-gradient(135deg, #eff6ff 0%, #f0f9ff 100%);
-            border-left: 4px solid #3b82f6; padding: 1rem 1.25rem;
+            border-left: 4px solid #0066B3; padding: 1rem 1.25rem;
             margin-top: 1rem; border-radius: 0 12px 12px 0; font-size: 0.9rem;
         }
-        .source-box strong { color: #1e40af; }
+        .source-box strong { color: #003366; }
         
         /* Status */
         .status-ready {
@@ -322,19 +324,19 @@ def inject_css():
             margin-bottom: 0.5rem;
         }
         .status-waiting {
-            background: linear-gradient(135deg, #422006 0%, #713f12 100%);
-            border: 1px solid #f59e0b; color: #fcd34d !important;
+            background: linear-gradient(135deg, #7c2d12 0%, #9a3412 100%);
+            border: 1px solid #FF8C00; color: #fed7aa !important;
             padding: 0.75rem 1rem; border-radius: 10px; font-size: 0.85rem;
         }
         
         /* Document List */
         .doc-item {
-            background: rgba(59, 130, 246, 0.1); border: 1px solid #3b82f6;
+            background: rgba(0, 102, 179, 0.15); border: 1px solid #0066B3;
             padding: 0.5rem 0.75rem; border-radius: 8px; margin-bottom: 0.5rem;
             font-size: 0.8rem; display: flex; justify-content: space-between; align-items: center;
         }
         .doc-count {
-            background: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
+            background: linear-gradient(135deg, #0066B3 0%, #004C8C 100%);
             color: white; padding: 0.25rem 0.5rem; border-radius: 6px;
             font-size: 0.7rem; font-weight: 600;
         }
@@ -342,7 +344,7 @@ def inject_css():
         /* Info Box */
         .info-box {
             background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
-            border: 1px solid #93c5fd; color: #1e40af;
+            border: 1px solid #0066B3; color: #003366;
             padding: 1.5rem; border-radius: 12px; line-height: 1.6;
         }
         
@@ -357,7 +359,16 @@ def inject_css():
             text-align: center; padding: 1.5rem; color: #64748b;
             font-size: 0.85rem; margin-top: 2rem; border-top: 1px solid #e2e8f0;
         }
-        .footer a { color: #3b82f6; text-decoration: none; }
+        .footer a { color: #0066B3; text-decoration: none; }
+        
+        /* Hydraulik-specific styling */
+        .hydraulik-tip {
+            background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+            border: 1px solid #f59e0b;
+            border-radius: 10px; padding: 1rem; margin-top: 1rem;
+            font-size: 0.9rem; color: #92400e;
+        }
+        .hydraulik-tip strong { color: #78350f; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -365,39 +376,35 @@ def inject_css():
 # SESSION STATE
 # ══════════════════════════════════════════════════════════════════════════════
 def init_session_state():
-    if "authenticated" not in st.session_state:
-        st.session_state.authenticated = False
-    if "user" not in st.session_state:
-        st.session_state.user = None
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
-    if "index" not in st.session_state:
-        st.session_state.index = None
-    if "all_documents" not in st.session_state:
-        st.session_state.all_documents = []
-    if "uploaded_files" not in st.session_state:
-        st.session_state.uploaded_files = {}
-    if "qdrant_client" not in st.session_state:
-        st.session_state.qdrant_client = None
-    if "is_ready" not in st.session_state:
-        st.session_state.is_ready = False
+    defaults = {
+        "authenticated": False,
+        "user": None,
+        "messages": [],
+        "index": None,
+        "all_documents": [],
+        "uploaded_files": {},
+        "qdrant_client": None,
+        "is_ready": False
+    }
+    for key, value in defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = value
 
 # ══════════════════════════════════════════════════════════════════════════════
 # API KEYS
 # ══════════════════════════════════════════════════════════════════════════════
 def get_api_keys():
-    llama_key = None
-    openai_key = None
+    llama_key, openai_key = None, None
     try:
         if hasattr(st, 'secrets'):
-            llama_key = st.secrets.get("LLAMA_CLOUD_API_KEY", None)
-            openai_key = st.secrets.get("OPENAI_API_KEY", None)
+            llama_key = st.secrets.get("LLAMA_CLOUD_API_KEY")
+            openai_key = st.secrets.get("OPENAI_API_KEY")
     except:
         pass
     return llama_key, openai_key
 
 # ══════════════════════════════════════════════════════════════════════════════
-# PDF PARSING
+# PDF PARSING - HYDRAULIK OPTIMIZED
 # ══════════════════════════════════════════════════════════════════════════════
 def parse_pdf_with_llamaparse(pdf_path: str, filename: str, llama_api_key: str) -> Optional[List[Document]]:
     try:
@@ -408,9 +415,22 @@ def parse_pdf_with_llamaparse(pdf_path: str, filename: str, llama_api_key: str) 
             verbose=True,
             language="de",
             parsing_instruction="""
-            Dies ist ein technisches Wartungshandbuch aus dem Maschinenbau.
-            Extrahiere alle Tabellen präzise mit korrekten Spalten und Werten.
-            Achte besonders auf Drehmomentangaben, Maßangaben, Teilenummern.
+            Dies ist ein technisches Dokument aus der Hydraulik-/Fluidtechnik-Branche.
+            
+            WICHTIG - Extrahiere präzise:
+            1. Alle Tabellen mit Druckwerten (bar, MPa, psi)
+            2. Volumenstrom-Angaben (l/min, m³/h)
+            3. Drehmomentangaben (Nm)
+            4. Temperaturangaben (°C)
+            5. Teilenummern und Ersatzteilreferenzen
+            6. Wartungsintervalle
+            7. Ölspezifikationen und -mengen
+            8. Schaltplan-Beschreibungen
+            
+            Achte besonders auf:
+            - Maximaldruck / Betriebsdruck / Prüfdruck
+            - Nennweiten (DN) und Anschlussgrößen
+            - Hydraulikflüssigkeits-Spezifikationen
             """
         )
         documents = parser.load_data(pdf_path)
@@ -441,7 +461,7 @@ def create_or_update_index(documents: List[Document], openai_api_key: str) -> Op
             st.session_state.qdrant_client = QdrantClient(":memory:")
         
         client = st.session_state.qdrant_client
-        collection_name = "service_knowledge"
+        collection_name = "hydraulik_docs"
         
         collections = client.get_collections().collections
         if any(c.name == collection_name for c in collections):
@@ -468,22 +488,31 @@ def create_or_update_index(documents: List[Document], openai_api_key: str) -> Op
         return None
 
 # ══════════════════════════════════════════════════════════════════════════════
-# QUERY
+# QUERY - HYDRAULIK OPTIMIZED
 # ══════════════════════════════════════════════════════════════════════════════
 def query_knowledge_base(index: VectorStoreIndex, question: str) -> Tuple[str, List[str]]:
     try:
         query_engine = index.as_query_engine(similarity_top_k=5, response_mode="compact")
-        SYSTEM_PROMPT = """
-Du bist ein technischer Assistent für Wartungshandbücher im deutschen Maschinenbau.
+        
+        HYDRAULIK_SYSTEM_PROMPT = """
+Du bist ein technischer Experte für Hydraulik und Fluidtechnik.
+Du beantwortest Fragen basierend auf den bereitgestellten Dokumenten.
 
 STRIKTE REGELN:
-1. Antworte NUR basierend auf den bereitgestellten Dokumentauszügen.
+1. Antworte NUR basierend auf den Dokumentauszügen.
 2. Wenn die Information NICHT enthalten ist, sage: "Diese Information ist in den hochgeladenen Dokumenten nicht enthalten."
-3. Erfinde NIEMALS Informationen.
+3. Erfinde NIEMALS Druck-, Drehmoment- oder andere technische Werte.
 4. Gib IMMER die Quelle an (Dateiname und Seitenzahl).
-5. Antworte auf Deutsch in professionellem, technischem Stil.
+5. Bei Druckangaben: Nenne immer die Einheit (bar, MPa, psi).
+6. Bei Temperaturen: Nenne immer die Einheit (°C).
+7. Antworte auf Deutsch in professionellem, technischem Stil.
+
+FORMATIERUNG:
+- Technische Werte fett hervorheben
+- Bei mehreren Werten: Tabelle verwenden
+- Einheiten immer angeben
 """
-        full_query = f"{SYSTEM_PROMPT}\n\nFrage: {question}"
+        full_query = f"{HYDRAULIK_SYSTEM_PROMPT}\n\nFrage: {question}"
         response = query_engine.query(full_query)
         
         sources = []
@@ -528,12 +557,12 @@ def rebuild_index(openai_key: str):
         st.warning("Keine Dokumente vorhanden.")
         return
     
-    with st.spinner("🧠 Index wird neu aufgebaut..."):
+    with st.spinner("🧠 Index wird aufgebaut..."):
         index = create_or_update_index(st.session_state.all_documents, openai_key)
         if index:
             st.session_state.index = index
             st.session_state.is_ready = True
-            st.success("✅ Index aktualisiert!")
+            st.success("✅ Dokumente bereit!")
 
 def remove_document(filename: str, openai_key: str):
     st.session_state.all_documents = [
@@ -556,30 +585,30 @@ def render_sidebar():
     with st.sidebar:
         st.markdown("""
         <div class="logo-container">
-            <div class="logo-text">SBS Deutschland</div>
-            <div class="logo-subtext">Service Knowledge OS</div>
+            <div class="logo-icon">🔧</div>
+            <div class="logo-text">HydraulikDoc AI</div>
+            <div class="logo-subtext">by SBS Deutschland</div>
         </div>
         """, unsafe_allow_html=True)
         
         # User Info
         user = st.session_state.user
         initial = user['name'][0].upper()
-        role_display = {"admin": "Administrator", "user": "Benutzer", "demo": "Demo"}.get(user['role'], user['role'])
+        role_map = {"admin": "Administrator", "user": "Benutzer", "demo": "Demo"}
         
         st.markdown(f"""
         <div class="user-badge">
             <div class="user-avatar">{initial}</div>
-            <div class="user-info">
+            <div>
                 <div class="user-name">{user['name']}</div>
-                <div class="user-role">{role_display}</div>
+                <div class="user-role">{role_map.get(user['role'], user['role'])}</div>
             </div>
         </div>
         """, unsafe_allow_html=True)
         
         if st.button("🚪 Abmelden", use_container_width=True):
-            st.session_state.authenticated = False
-            st.session_state.user = None
-            st.session_state.messages = []
+            for key in list(st.session_state.keys()):
+                del st.session_state[key]
             st.rerun()
         
         st.markdown("---")
@@ -592,36 +621,32 @@ def render_sidebar():
             st.markdown('<div class="status-ready">✓ LlamaCloud verbunden</div>', unsafe_allow_html=True)
             llama_key = secret_llama_key
         else:
-            st.markdown("**LlamaCloud API Key**")
-            llama_key = st.text_input("LlamaCloud", type="password", placeholder="llx-...", label_visibility="collapsed")
+            llama_key = st.text_input("LlamaCloud Key", type="password", placeholder="llx-...")
         
         if secret_openai_key:
             st.markdown('<div class="status-ready">✓ OpenAI verbunden</div>', unsafe_allow_html=True)
             openai_key = secret_openai_key
         else:
-            st.markdown("**OpenAI API Key**")
-            openai_key = st.text_input("OpenAI", type="password", placeholder="sk-...", label_visibility="collapsed")
+            openai_key = st.text_input("OpenAI Key", type="password", placeholder="sk-...")
         
         st.markdown("---")
         
         # Documents
-        st.markdown("#### 📚 Dokumente")
+        st.markdown("#### 📚 Hydraulik-Dokumente")
         
         if st.session_state.uploaded_files:
             for filename, pages in st.session_state.uploaded_files.items():
                 col1, col2 = st.columns([4, 1])
                 with col1:
-                    short_name = filename[:18] + "..." if len(filename) > 18 else filename
-                    st.markdown(f'<div class="doc-item"><span>📄 {short_name}</span><span class="doc-count">{pages} S.</span></div>', unsafe_allow_html=True)
+                    short = filename[:18] + "..." if len(filename) > 18 else filename
+                    st.markdown(f'<div class="doc-item"><span>📄 {short}</span><span class="doc-count">{pages} S.</span></div>', unsafe_allow_html=True)
                 with col2:
-                    if user['role'] in ['admin', 'user']:  # Only non-demo can delete
+                    if user['role'] in ['admin', 'user']:
                         if st.button("🗑️", key=f"del_{filename}"):
                             remove_document(filename, openai_key)
                             st.rerun()
         
-        # Upload (not for demo users with limited permissions)
-        st.markdown("**Hinzufügen:**")
-        uploaded_file = st.file_uploader("PDF", type=["pdf"], label_visibility="collapsed", key="pdf_uploader")
+        uploaded_file = st.file_uploader("PDF hochladen", type=["pdf"], label_visibility="collapsed")
         
         if uploaded_file is not None:
             if uploaded_file.name in st.session_state.uploaded_files:
@@ -629,10 +654,9 @@ def render_sidebar():
             elif not llama_key or not openai_key:
                 st.warning("⚠️ API Keys fehlen")
             else:
-                if st.button("➕ Hinzufügen", type="primary", use_container_width=True):
+                if st.button("➕ Dokument hinzufügen", type="primary", use_container_width=True):
                     with st.spinner(f"📥 Verarbeite..."):
                         if process_single_pdf(uploaded_file, llama_key, openai_key):
-                            st.success("✅ Hinzugefügt!")
                             rebuild_index(openai_key)
                             st.rerun()
         
@@ -641,9 +665,9 @@ def render_sidebar():
         # Status
         st.markdown("#### 📊 Status")
         if st.session_state.is_ready:
-            total_pages = sum(st.session_state.uploaded_files.values())
-            doc_count = len(st.session_state.uploaded_files)
-            st.markdown(f'<div class="status-ready">✓ {doc_count} Dok. / {total_pages} Seiten</div>', unsafe_allow_html=True)
+            total = sum(st.session_state.uploaded_files.values())
+            count = len(st.session_state.uploaded_files)
+            st.markdown(f'<div class="status-ready">✓ Bereit: {count} Dok. / {total} Seiten</div>', unsafe_allow_html=True)
         else:
             st.markdown('<div class="status-waiting">○ Warte auf Dokument</div>', unsafe_allow_html=True)
         
@@ -663,7 +687,7 @@ def render_sidebar():
                     st.rerun()
         
         st.markdown("---")
-        st.markdown('<div style="text-align:center;"><small><a href="https://sbsdeutschland.com" style="color:#60a5fa;">sbsdeutschland.com</a></small></div>', unsafe_allow_html=True)
+        st.markdown('<div style="text-align:center;"><small><a href="https://sbsdeutschland.com" style="color:#FF8C00;">sbsdeutschland.com</a></small></div>', unsafe_allow_html=True)
     
     return llama_key, openai_key
 
@@ -673,9 +697,9 @@ def render_sidebar():
 def render_header():
     st.markdown("""
     <div class="main-header">
-        <h1>🔧 Service Knowledge OS</h1>
-        <p>Intelligente Suche in technischen Handbüchern | RAG-System für den Maschinenbau</p>
-        <span class="header-badge">✨ Enterprise Edition v4.0</span>
+        <h1>🔧 HydraulikDoc AI</h1>
+        <p>KI-gestützte Suche in Ihrer Hydraulik-Dokumentation</p>
+        <span class="header-badge">✨ Druckwerte · Schaltpläne · Ersatzteile</span>
     </div>
     """, unsafe_allow_html=True)
 
@@ -688,40 +712,61 @@ def render_chat_interface():
     if not st.session_state.is_ready:
         st.markdown("""
         <div class="info-box">
-            <strong>👋 Willkommen beim Service Knowledge OS!</strong><br><br>
-            Laden Sie technische Handbücher (PDF) in der Sidebar hoch, um Fragen zu stellen.
+            <strong>👋 Willkommen bei HydraulikDoc AI!</strong><br><br>
+            Laden Sie Ihre Hydraulik-Dokumentation in der Sidebar hoch:
+            <ul style="margin: 0.5rem 0 0 1rem;">
+                <li>Handbücher & Datenblätter</li>
+                <li>Wartungsanleitungen</li>
+                <li>Schaltpläne & Zeichnungen</li>
+                <li>Ersatzteilkataloge</li>
+            </ul>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        st.markdown("""
+        <div class="hydraulik-tip">
+            <strong>💡 Tipp:</strong> Die KI erkennt automatisch Druckwerte, Volumenstrom-Angaben 
+            und Drehmomente in Tabellen. Fragen Sie z.B. "Welcher Systemdruck für Zylinder XY?"
         </div>
         """, unsafe_allow_html=True)
         return
     
     # Document overview
-    doc_names = list(st.session_state.uploaded_files.keys())
-    if doc_names:
-        with st.expander(f"📚 {len(doc_names)} Dokument(e) durchsuchbar", expanded=False):
-            for name in doc_names:
-                pages = st.session_state.uploaded_files[name]
+    if st.session_state.uploaded_files:
+        with st.expander(f"📚 {len(st.session_state.uploaded_files)} Dokument(e) durchsuchbar", expanded=False):
+            for name, pages in st.session_state.uploaded_files.items():
                 st.markdown(f"- **{name}** ({pages} Seiten)")
+    
+    # Example queries
+    with st.expander("💡 Beispiel-Fragen für Hydraulik-Dokumentation", expanded=False):
+        st.markdown("""
+        - "Welcher maximale Systemdruck für die HY-500 Pumpe?"
+        - "Wie oft muss das Hydrauliköl gewechselt werden?"
+        - "Welches Drehmoment für die Verschraubung am Zylinder?"
+        - "Welche Ersatzteile brauche ich für die Wartung?"
+        - "Was sind die empfohlenen Ölspezifikationen?"
+        """)
     
     # Chat
     for message in st.session_state.messages:
-        with st.chat_message(message["role"], avatar="👤" if message["role"] == "user" else "🤖"):
+        with st.chat_message(message["role"], avatar="👤" if message["role"] == "user" else "🔧"):
             st.markdown(message["content"])
             if "sources" in message and message["sources"]:
                 sources_text = " · ".join(message["sources"])
-                st.markdown(f'<div class="source-box"><strong>📚 Quellen:</strong> {sources_text}</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="source-box"><strong>📄 Quellen:</strong> {sources_text}</div>', unsafe_allow_html=True)
     
-    if prompt := st.chat_input("Ihre technische Frage..."):
+    if prompt := st.chat_input("Ihre Frage zur Hydraulik-Dokumentation..."):
         with st.chat_message("user", avatar="👤"):
             st.markdown(prompt)
         st.session_state.messages.append({"role": "user", "content": prompt})
         
-        with st.chat_message("assistant", avatar="🤖"):
-            with st.spinner("🔍 Durchsuche Dokumente..."):
+        with st.chat_message("assistant", avatar="🔧"):
+            with st.spinner("🔍 Durchsuche Hydraulik-Dokumente..."):
                 response, sources = query_knowledge_base(st.session_state.index, prompt)
             st.markdown(response)
             if sources:
                 sources_text = " · ".join(sources)
-                st.markdown(f'<div class="source-box"><strong>📚 Quellen:</strong> {sources_text}</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="source-box"><strong>📄 Quellen:</strong> {sources_text}</div>', unsafe_allow_html=True)
         
         st.session_state.messages.append({"role": "assistant", "content": response, "sources": sources})
 
@@ -731,12 +776,10 @@ def render_chat_interface():
 def main():
     init_session_state()
     
-    # Check authentication
     if not st.session_state.authenticated:
         render_login_page()
         return
     
-    # Authenticated - show main app
     if not IMPORTS_AVAILABLE:
         st.error(f"⚠️ Fehlende Abhängigkeiten: {IMPORT_ERROR}")
         return
@@ -748,9 +791,8 @@ def main():
     
     st.markdown("""
     <div class="footer">
-        © 2025 <a href="https://sbsdeutschland.com">SBS Deutschland GmbH</a> · 
-        <a href="https://github.com/Luyzz22/sbs-service-knowledge-os">GitHub</a> ·
-        Enterprise v4.0
+        © 2025 <a href="https://sbsdeutschland.com">SBS Deutschland GmbH</a> · Weinheim · 
+        <a href="https://hydraulikdoc.de">hydraulikdoc.de</a>
     </div>
     """, unsafe_allow_html=True)
 
