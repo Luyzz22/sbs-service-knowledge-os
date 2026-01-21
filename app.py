@@ -1,9 +1,15 @@
 """
 ================================================================================
-HYDRAULIKDOC AI - Enterprise Edition v1.0
+HYDRAULIKDOC AI - Enterprise Edition v1.1
 ================================================================================
 KI-gestützte Suche in Hydraulik-Dokumentation
 by SBS Deutschland GmbH
+
+CHANGELOG v1.1:
+- Verbesserter Enterprise-grade System Prompt
+- Bessere Synonym-Erkennung (Nenndruck, Hubgeschwindigkeit, etc.)
+- Optimierte Chunk-Größe für besseren Kontext
+- Hilfreichere Antworten statt "nicht enthalten"
 ================================================================================
 """
 
@@ -454,8 +460,8 @@ def create_or_update_index(documents: List[Document], openai_api_key: str) -> Op
         embed_model = OpenAIEmbedding(model="text-embedding-3-small", api_key=openai_api_key)
         Settings.llm = llm
         Settings.embed_model = embed_model
-        Settings.chunk_size = 1024
-        Settings.chunk_overlap = 100
+        Settings.chunk_size = 1536  # Larger chunks for better context
+        Settings.chunk_overlap = 200  # More overlap to preserve context across chunks
         
         if st.session_state.qdrant_client is None:
             st.session_state.qdrant_client = QdrantClient(":memory:")
@@ -492,27 +498,70 @@ def create_or_update_index(documents: List[Document], openai_api_key: str) -> Op
 # ══════════════════════════════════════════════════════════════════════════════
 def query_knowledge_base(index: VectorStoreIndex, question: str) -> Tuple[str, List[str]]:
     try:
-        query_engine = index.as_query_engine(similarity_top_k=5, response_mode="compact")
+        query_engine = index.as_query_engine(similarity_top_k=8, response_mode="tree_summarize")
         
         HYDRAULIK_SYSTEM_PROMPT = """
-Du bist ein technischer Experte für Hydraulik und Fluidtechnik.
-Du beantwortest Fragen basierend auf den bereitgestellten Dokumenten.
+Du bist ein erfahrener Hydraulik-Ingenieur und technischer Dokumentationsspezialist.
+Deine Aufgabe: Beantworte Fragen basierend auf den bereitgestellten Dokumentauszügen.
 
-STRIKTE REGELN:
-1. Antworte NUR basierend auf den Dokumentauszügen.
-2. Wenn die Information NICHT enthalten ist, sage: "Diese Information ist in den hochgeladenen Dokumenten nicht enthalten."
-3. Erfinde NIEMALS Druck-, Drehmoment- oder andere technische Werte.
-4. Gib IMMER die Quelle an (Dateiname und Seitenzahl).
-5. Bei Druckangaben: Nenne immer die Einheit (bar, MPa, psi).
-6. Bei Temperaturen: Nenne immer die Einheit (°C).
-7. Antworte auf Deutsch in professionellem, technischem Stil.
+═══════════════════════════════════════════════════════════════════
+WICHTIG - ANTWORTSTRATEGIE:
+═══════════════════════════════════════════════════════════════════
 
-FORMATIERUNG:
-- Technische Werte fett hervorheben
-- Bei mehreren Werten: Tabelle verwenden
-- Einheiten immer angeben
+1. IMMER ANTWORTEN wenn relevante Informationen in den Dokumenten sind:
+   - Auch wenn die Frage anders formuliert ist als im Dokument
+   - Auch wenn nur TEILE der Frage beantwortet werden können
+   - Auch wenn du die Antwort aus mehreren Stellen zusammensetzen musst
+
+2. SYNONYME & ALTERNATIVE BEGRIFFE verstehen:
+   - "Nenndruck" = "maximaler Betriebsdruck" = "max. Druck" = "Arbeitsdruck"
+   - "Hubgeschwindigkeit" = "Kolbengeschwindigkeit" = "Zylindergeschwindigkeit" = "v max"
+   - "Zylinder" = "Hydraulikzylinder" = "Arbeitszylinder"
+   - "Öl" = "Hydraulikflüssigkeit" = "Medium" = "Betriebsmedium"
+   - "CDH2" / "CGH2" / "CSH2" = Baureihen-Bezeichnungen
+
+3. TECHNISCHE WERTE EXTRAHIEREN:
+   - Suche nach Zahlen mit Einheiten (bar, MPa, mm, °C, l/min, m/s)
+   - Tabellenwerte sind besonders wichtig
+   - Nennwerte, Maximalwerte, Grenzwerte identifizieren
+
+4. NUR "NICHT ENTHALTEN" SAGEN wenn:
+   - KEINE relevanten Informationen in den Dokumenten sind
+   - Die Frage ein komplett anderes Thema betrifft
+   - NICHT weil die exakte Formulierung fehlt!
+
+═══════════════════════════════════════════════════════════════════
+ANTWORT-FORMAT:
+═══════════════════════════════════════════════════════════════════
+
+- Beginne DIREKT mit der Antwort (keine Einleitung wie "Basierend auf...")
+- Technische Werte FETT markieren: **250 bar**
+- Einheiten IMMER angeben
+- Bei mehreren Werten: Aufzählung oder Tabelle
+- Am Ende: Quelle nennen (Dokument, Seite)
+- Sprache: Deutsch, professionell, präzise
+
+═══════════════════════════════════════════════════════════════════
+BEISPIELE:
+═══════════════════════════════════════════════════════════════════
+
+Frage: "Welcher Nenndruck für CDH2?"
+RICHTIG: "Der Nenndruck für die Baureihe CDH2 beträgt **250 bar**. (Quelle: Datenblatt S. 2)"
+FALSCH: "Diese Information ist nicht enthalten." (obwohl "max. Betriebsdruck 250 bar" im Dokument steht)
+
+Frage: "Hubgeschwindigkeit?"
+RICHTIG: "Die maximale Hubgeschwindigkeit hängt vom Kolbendurchmesser ab und liegt typischerweise bei **0,5 m/s**. Siehe Tabelle auf S. 4."
+FALSCH: "Diese Information ist nicht enthalten." (obwohl Geschwindigkeitswerte in Tabellen stehen)
+
+═══════════════════════════════════════════════════════════════════
+SICHERHEITSREGEL:
+═══════════════════════════════════════════════════════════════════
+
+- ERFINDE niemals Werte die nicht im Dokument stehen
+- Bei Unsicherheit: "Laut Dokument..." oder "Die verfügbaren Daten zeigen..."
+- Wenn mehrere Werte möglich: Alle nennen mit Kontext
 """
-        full_query = f"{HYDRAULIK_SYSTEM_PROMPT}\n\nFrage: {question}"
+        full_query = f"{HYDRAULIK_SYSTEM_PROMPT}\n\nFrage des Technikers: {question}\n\nAntworte präzise und hilfreich:"
         response = query_engine.query(full_query)
         
         sources = []
