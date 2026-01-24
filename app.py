@@ -1,15 +1,15 @@
 """
 ================================================================================
-HYDRAULIKDOC AI - Enterprise Edition v1.1
+HYDRAULIKDOC AI - Enterprise Edition v2.0
 ================================================================================
 KI-gestützte Suche in Hydraulik-Dokumentation
 by SBS Deutschland GmbH
 
-CHANGELOG v1.1:
-- Verbesserter Enterprise-grade System Prompt
-- Bessere Synonym-Erkennung (Nenndruck, Hubgeschwindigkeit, etc.)
-- Optimierte Chunk-Größe für besseren Kontext
-- Hilfreichere Antworten statt "nicht enthalten"
+CHANGELOG v2.0 (Project Hephaestus):
+- 🎥 Multimodal: Video + Audio + PDF Analyse mit Gemini 1.5 Pro
+- 🔊 Audio-Anomalie Erkennung für Maschinendignose
+- 📊 Tab-basierte UI: Dokument-Suche & Video-Diagnose
+- ⚡ Enterprise-grade System Prompts (v1.1)
 ================================================================================
 """
 
@@ -41,6 +41,15 @@ try:
 except ImportError as e:
     IMPORTS_AVAILABLE = False
     IMPORT_ERROR = str(e)
+
+# ══════════════════════════════════════════════════════════════════════════════
+# GEMINI VIDEO ANALYZER (Project Hephaestus)
+# ══════════════════════════════════════════════════════════════════════════════
+try:
+    from streamlit_integration import render_video_analyzer_tab
+    GEMINI_AVAILABLE = True
+except ImportError:
+    GEMINI_AVAILABLE = False
 
 # ══════════════════════════════════════════════════════════════════════════════
 # PAGE CONFIG
@@ -836,7 +845,24 @@ def main():
     inject_css()
     render_header()
     llama_key, openai_key = render_sidebar()
-    render_chat_interface()
+    
+    # ══════════════════════════════════════════════════════════════════════════════
+    # TABS: PDF Suche & Video-Diagnose
+    # ══════════════════════════════════════════════════════════════════════════════
+    if GEMINI_AVAILABLE:
+        tab1, tab2 = st.tabs([
+            "📄 Dokument-Suche",
+            "🎥 Video-Diagnose (BETA)"
+        ])
+        
+        with tab1:
+            render_chat_interface()
+        
+        with tab2:
+            render_video_analyzer_tab()
+    else:
+        # Fallback: Nur PDF-Suche wenn Gemini nicht verfügbar
+        render_chat_interface()
     
     st.markdown("""
     <div class="footer">
