@@ -51,7 +51,7 @@ class EnterpriseLogger:
     def __init__(self, name: str):
         self.logger = logging.getLogger(name)
         self.logger.setLevel(logging.INFO)
-                '%(asctime)s - %(name)s - %(levelname)s - [%(funcName)s:%(lineno)d] - %(message)s'
+    '%(asctime)s - %(name)s - %(levelname)s - [%(funcName)s:%(lineno)d] - %(message)s'
             )
             handler.setFormatter(formatter)
             self.logger.addHandler(handler)
