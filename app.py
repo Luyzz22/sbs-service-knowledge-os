@@ -582,6 +582,131 @@ def create_or_update_index(documents: List[Document], openai_api_key: str) -> Op
         return None
 
 # ══════════════════════════════════════════════════════════════════════════════
+# ENTERPRISE DOMAIN ONTOLOGY (HYDRAULIK + HAUSHALTSGERÄTE)
+# ══════════════════════════════════════════════════════════════════════════════
+
+class DomainOntology:
+    """
+    Ultra-komplexe Domänen-Ontologie für Industriehydraulik UND komplexe Haushaltsgeräte.
+    """
+
+    HYDRAULIC_SYNONYMS = {
+        "druck": ["druck", "betriebsdruck", "prüfdruck", "berstdruck", "pressure", "p_max", "pmax"],
+        "volumenstrom": ["volumenstrom", "förderstrom", "q", "l/min", "lmin", "flow rate"],
+        "dichtung": ["dichtung", "dichtungssatz", "seal", "sealing kit", "dichtsystem"],
+        "typenschlüssel": ["typenschlüssel", "type code", "bestellangaben", "order code"],
+    }
+
+    APPLIANCE_SYNONYMS = {
+        "temperaturanzeige": [
+            "temperaturanzeige",
+            "anzeigeeinheit",
+            "display",
+            "kerntemperaturanzeige",
+            "temperatur-display",
+            "temperaturwert auf display"
+        ],
+        "sensor": [
+            "temperatursonde",
+            "bakesensor",
+            "backsensor",
+            "sensorbuchse",
+            "temperaturfühler",
+            "kerntemperaturfühler",
+            "temperatursondenbuchse",
+            "steckbuchse für sensor"
+        ],
+        "programm": [
+            "programm",
+            "auto bake",
+            "pro bake",
+            "backprogramm",
+            "garprogramm",
+            "automatikprogramm"
+        ],
+        "fehlercode": [
+            "fehlercode",
+            "störungscode",
+            "error code",
+            "e-",
+            "f-"
+        ],
+    }
+
+    CROSS_DOMAIN_PATTERNS = [
+        {
+            "if_all": ["temperaturanzeige", "sensor"],
+            "add": ["temperatursonde", "bakesensor", "temperatursondenbuchse",
+                    "anzeigeeinheit", "display", "sens"]
+        },
+        {
+            "if_any": ["fehlercode", "error code", "e-", "f-"],
+            "add": ["display", "anzeigeeinheit", "störungscode", "codeanzeige"]
+        },
+    ]
+
+    @classmethod
+    def normalize(cls, text: str) -> str:
+        import re
+        t = text.lower()
+        t = re.sub(r"[^\w\s\-.:/]", " ", t)
+        t = re.sub(r"\s+", " ", t).strip()
+        return t
+
+    @classmethod
+    def expand_query(cls, question: str) -> str:
+        base = cls.normalize(question)
+        tokens = base.split()
+        expansion_terms = set(tokens)
+
+        for key, syns in cls.HYDRAULIC_SYNONYMS.items():
+            if key in tokens:
+                expansion_terms.update(syns)
+
+        for key, syns in cls.APPLIANCE_SYNONYMS.items():
+            if key in tokens:
+                expansion_terms.update(syns)
+
+        for rule in cls.CROSS_DOMAIN_PATTERNS:
+            if "if_all" in rule and all(term in expansion_terms for term in rule["if_all"]):
+                expansion_terms.update(rule.get("add", []))
+            if "if_any" in rule and any(term in expansion_terms for term in rule["if_any"]):
+                expansion_terms.update(rule.get("add", []))
+
+        return " ".join(sorted(expansion_terms))
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ERWEITERTER SYSTEM PROMPT (HYDRAULIK + APPLIANCES)
+# ══════════════════════════════════════════════════════════════════════════════
+
+HYDRAULIKSYSTEMPROMPT = """
+Du bist ein technischer Experte und Dokumentationsspezialist für Industriehydraulik
+UND komplexe Haushaltsgeräte (z.B. Backöfen, Waschmaschinen, Geschirrspüler).
+
+Beantworte Fragen NUR basierend auf dem Kontext der bereitgestellten Dokumente.
+
+REGELN FÜR DISPLAY- UND SENSOR-ANFRAGEN
+1. Suche nach EXAKTEN Codes und Display-Anzeigen (z.B. "SEnS", "E-2", "F-xx") und
+   nach Begriffen wie "Temperatursonde", "BAKESENSOR", "Temperatursondenbuchse".
+2. Rekonstruiere abgeschnittene Display-Strings (z.B. "SENS ... 50 ... PEC") so präzise wie möglich.
+3. Berücksichtige Begriffe wie:
+   - "Temperatursonde", "Bakesensor", "Temperaturfühler", "Kerntemperaturfühler"
+   - "Anzeigeeinheit", "Display", "Temperaturanzeige", "Auto bake", "Pro bake".
+4. Mappe Formulierungen wie "Temperaturanzeige mit Sensor" intern auf diese Begriffe.
+5. Zitiere immer: "Quelle: <Dateiname> S. <Seite>".
+
+REGELN FÜR DRUCK / HYDRAULIK
+1. Unterscheide strikt zwischen Betriebsdruck, Prüfdruck und Berstdruck.
+2. Achte auf Tabellen mit "Bestellangaben", "Typenschlüssel", "Dichtung", "Volumenstrom".
+3. Trenne Codes (z.B. M, T, A, S) nie von ihrer Bedeutung.
+
+WENN KEINE 1:1-STELLE EXISTIERT
+1. Nutze semantisch nahe Stellen (Sensor, Display, Programme) und erkläre das explizit.
+2. Verwende "nicht enthalten" nur, wenn weder direkt noch indirekt etwas Relevantes existiert.
+"""
+
+# ══════════════════════════════════════════════════════════════════════════════
 # CORE ENGINE: NATIVE HYBRID RETRIEVAL (BM25 + FUSION)
 # ══════════════════════════════════════════════════════════════════════════════
 def query_knowledge_base(index: VectorStoreIndex, question: str) -> Tuple[str, List[str]]:
@@ -944,123 +1069,4 @@ if __name__ == "__main__":
 
 # ================= ENTERPRISE DOMAIN CONFIG =================
 
-class DomainOntology:
-    """
-    Ultra-komplexe Domänen-Ontologie für Industriehydraulik UND komplexe Haushaltsgeräte.
-    """
 
-    HYDRAULIC_SYNONYMS = {
-        "druck": ["druck", "betriebsdruck", "prüfdruck", "berstdruck", "pressure", "p_max", "pmax"],
-        "volumenstrom": ["volumenstrom", "förderstrom", "q", "l/min", "lmin", "flow rate"],
-        "dichtung": ["dichtung", "dichtungssatz", "seal", "sealing kit", "dichtsystem"],
-        "typenschlüssel": ["typenschlüssel", "type code", "bestellangaben", "order code"],
-    }
-
-    APPLIANCE_SYNONYMS = {
-        "temperaturanzeige": [
-            "temperaturanzeige",
-            "anzeigeeinheit",
-            "display",
-            "kerntemperaturanzeige",
-            "temperatur-display",
-            "temperaturwert auf display"
-        ],
-        "sensor": [
-            "temperatursonde",
-            "bakesensor",
-            "backsensor",
-            "sensorbuchse",
-            "temperaturfühler",
-            "kerntemperaturfühler",
-            "temperatursondenbuchse",
-            "steckbuchse für sensor"
-        ],
-        "programm": [
-            "programm",
-            "auto bake",
-            "pro bake",
-            "backprogramm",
-            "garprogramm",
-            "automatikprogramm"
-        ],
-        "fehlercode": [
-            "fehlercode",
-            "störungscode",
-            "error code",
-            "e-",
-            "f-"
-        ],
-    }
-
-    CROSS_DOMAIN_PATTERNS = [
-        {
-            "if_all": ["temperaturanzeige", "sensor"],
-            "add": ["temperatursonde", "bakesensor", "temperatursondenbuchse",
-                    "anzeigeeinheit", "display", "sens"]
-        },
-        {
-            "if_any": ["fehlercode", "error code", "e-", "f-"],
-            "add": ["display", "anzeigeeinheit", "störungscode", "codeanzeige"]
-        },
-    ]
-
-    @classmethod
-    def normalize(cls, text: str) -> str:
-        import re
-        t = text.lower()
-        t = re.sub(r"[^\w\s\-.:/]", " ", t)
-        t = re.sub(r"\s+", " ", t).strip()
-        return t
-
-    @classmethod
-    def expand_query(cls, question: str) -> str:
-        base = cls.normalize(question)
-        tokens = base.split()
-        expansion_terms = set(tokens)
-
-        for key, syns in cls.HYDRAULIC_SYNONYMS.items():
-            if key in tokens:
-                expansion_terms.update(syns)
-
-        for key, syns in cls.APPLIANCE_SYNONYMS.items():
-            if key in tokens:
-                expansion_terms.update(syns)
-
-        for rule in cls.CROSS_DOMAIN_PATTERNS:
-            if "if_all" in rule and all(term in expansion_terms for term in rule["if_all"]):
-                expansion_terms.update(rule.get("add", []))
-            if "if_any" in rule and any(term in expansion_terms for term in rule["if_any"]):
-                expansion_terms.update(rule.get("add", []))
-
-        return " ".join(sorted(expansion_terms))
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# ERWEITERTER SYSTEM PROMPT (HYDRAULIK + APPLIANCES)
-# ══════════════════════════════════════════════════════════════════════════════
-
-HYDRAULIKSYSTEMPROMPT = """
-Du bist ein technischer Experte und Dokumentationsspezialist für Industriehydraulik
-UND komplexe Haushaltsgeräte (z.B. Backöfen, Waschmaschinen, Geschirrspüler).
-
-Beantworte Fragen NUR basierend auf dem Kontext der bereitgestellten Dokumente.
-
-REGELN FÜR DISPLAY- UND SENSOR-ANFRAGEN
-1. Suche nach EXAKTEN Codes und Display-Anzeigen (z.B. "SEnS", "E-2", "F-xx") und
-   nach Begriffen wie "Temperatursonde", "BAKESENSOR", "Temperatursondenbuchse".
-2. Rekonstruiere abgeschnittene Display-Strings (z.B. "SENS ... 50 ... PEC") so präzise wie möglich.
-3. Berücksichtige Begriffe wie:
-   - "Temperatursonde", "Bakesensor", "Temperaturfühler", "Kerntemperaturfühler"
-   - "Anzeigeeinheit", "Display", "Temperaturanzeige", "Auto bake", "Pro bake".
-4. Mappe Formulierungen wie "Temperaturanzeige mit Sensor" intern auf diese Begriffe.
-5. Zitiere immer: "Quelle: <Dateiname> S. <Seite>".
-
-REGELN FÜR DRUCK / HYDRAULIK
-1. Unterscheide strikt zwischen Betriebsdruck, Prüfdruck und Berstdruck.
-2. Achte auf Tabellen mit "Bestellangaben", "Typenschlüssel", "Dichtung", "Volumenstrom".
-3. Trenne Codes (z.B. M, T, A, S) nie von ihrer Bedeutung.
-
-WENN KEINE 1:1-STELLE EXISTIERT
-1. Nutze semantisch nahe Stellen (Sensor, Display, Programme) und erkläre das explizit.
-2. Verwende "nicht enthalten" nur, wenn weder direkt noch indirekt etwas Relevantes existiert.
-"""
