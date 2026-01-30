@@ -1,15 +1,15 @@
 """
 ================================================================================
-HYDRAULIKDOC AI - ENTERPRISE KNOWLEDGE OS v3.1 (Platinum Release)
+HYDRAULIKDOC AI - ENTERPRISE KNOWLEDGE OS v3.3 (Native Hybrid Edition)
 ================================================================================
 Entwickelt für: SBS Deutschland GmbH
-Architektur: LlamaIndex + LlamaParse (Multimodal) + Qdrant + OpenAI GPT-4o
+Architektur: LlamaIndex (BM25 + Vector Fusion) + LlamaParse + OpenAI GPT-4o
 Author: Luis Schenk (Head of Digital Product)
 
 SYSTEM STATUS:
-- Core Engine:  Active (v3.1)
-- Retrieval:    Deep Context (k=15)
-- Parsing:      Semantic Table Recognition enabled
+- Core Engine:  Active (v3.3)
+- Retrieval:    NATIVE HYBRID (BM25 Keyword Search + Vector Search) via QueryFusion
+- Parsing:      Semantic Table Recognition enabled (Chunk Size 2048)
 - Security:     Role-Based Access Control (RBAC) enabled
 - Multimodal:   Project Hephaestus (Video/Audio) ready
 
@@ -51,6 +51,9 @@ try:
     from llama_index.vector_stores.qdrant import QdrantVectorStore
     from llama_index.llms.openai import OpenAI
     from llama_index.embeddings.openai import OpenAIEmbedding
+    from llama_index.core.retrievers import VectorIndexRetriever, QueryFusionRetriever
+    from llama_index.retrievers.bm25 import BM25Retriever
+    from llama_index.core.query_engine import RetrieverQueryEngine
     from qdrant_client import QdrantClient
     from qdrant_client.models import Distance, VectorParams
     IMPORTS_AVAILABLE = True
@@ -75,13 +78,13 @@ except ImportError:
 class SystemConfig:
     """Central configuration for Enterprise Parameters."""
     APP_NAME = "HydraulikDoc AI"
-    VERSION = "3.1.0-ENT"
+    VERSION = "3.3.0-ENT"
     COMPANY = "SBS Deutschland GmbH"
     
-    # Retrieval Settings
-    RETRIEVAL_TOP_K = 40  # Increased from 8 to 15 to capture Type Codes on early pages
-    CHUNK_SIZE = 1024     # Optimized for technical tables (prevents breaking rows)
-    CHUNK_OVERLAP = 200   # Context preservation
+    # Retrieval Settings (Optimized for Hybrid Search)
+    RETRIEVAL_TOP_K = 15  # Increased depth for precise recall
+    CHUNK_SIZE = 2048     # DOUBLED to capture full pages (fixing Page 39 issue)
+    CHUNK_OVERLAP = 100   # Reduced overlap for larger chunks
     
     # Model Settings
     LLM_MODEL = "gpt-4o"
@@ -442,17 +445,13 @@ def get_api_keys() -> Tuple[Optional[str], Optional[str]]:
 # ══════════════════════════════════════════════════════════════════════════════
 def parse_pdf_with_llamaparse(pdf_path: str, filename: str, llama_api_key: str) -> Optional[List[Document]]:
     """
-    ENTERPRISE PARSING PIPELINE v3.2
+    ENTERPRISE PARSING PIPELINE v3.3
     Uses Multimodal Vision Models to reconstruct complex technical layouts.
-    
-    SPECIALIZATION:
-    - Optimized for Bosch Rexroth / Parker / Eaton Data Sheets.
-    - Semantic recognition of "Type Code" (Typenschlüssel) tables.
     """
     try:
         logger.info(f"Starting LlamaParse for file: {filename}")
         
-        # ENTERPRISE INSTRUCTION SET - FORCING TABLE RECOGNITION
+        # ENTERPRISE INSTRUCTION SET
         parsing_instruction = """
         Dies ist ein hochtechnisches Datenblatt aus der Hydraulik-/Fluidtechnik-Branche (z.B. Bosch Rexroth, Parker).
         
@@ -518,11 +517,7 @@ def parse_pdf_with_llamaparse(pdf_path: str, filename: str, llama_api_key: str) 
 def create_or_update_index(documents: List[Document], openai_api_key: str) -> Optional[VectorStoreIndex]:
     """
     Builds the Semantic Vector Index using Qdrant.
-    
-    ENTERPRISE CONFIGURATION:
-    - Embedding Model: text-embedding-3-small (Cost/Performance Optimized)
-    - Chunking: 1024 tokens (Optimized for tables)
-    - Storage: In-Memory (for Pilot) / Persistent (available via Qdrant Cloud)
+    NOTE: For native Hybrid Search with QueryFusion, we keep the Qdrant store simpler.
     """
     try:
         logger.info("Initializing Vector Index update...")
@@ -552,7 +547,7 @@ def create_or_update_index(documents: List[Document], openai_api_key: str) -> Op
         client = st.session_state.qdrant_client
         collection_name = "hydraulik_enterprise_v3"
         
-        # Clean Slate Strategy: Recreate collection to ensure clean schema
+        # Clean Slate Strategy
         collections = client.get_collections().collections
         if any(c.name == collection_name for c in collections):
             client.delete_collection(collection_name)
@@ -563,7 +558,10 @@ def create_or_update_index(documents: List[Document], openai_api_key: str) -> Op
         )
         
         # Create Store & Context
-        vector_store = QdrantVectorStore(client=client, collection_name=collection_name)
+        vector_store = QdrantVectorStore(
+            client=client, 
+            collection_name=collection_name
+        )
         node_parser = MarkdownNodeParser() # Optimized for LlamaParse Markdown output
         storage_context = StorageContext.from_defaults(vector_store=vector_store)
         
@@ -584,75 +582,53 @@ def create_or_update_index(documents: List[Document], openai_api_key: str) -> Op
         return None
 
 # ══════════════════════════════════════════════════════════════════════════════
-# CORE ENGINE: DEEP RETRIEVAL (RAG)
+# CORE ENGINE: NATIVE HYBRID RETRIEVAL (BM25 + FUSION)
 # ══════════════════════════════════════════════════════════════════════════════
 def query_knowledge_base(index: VectorStoreIndex, question: str) -> Tuple[str, List[str]]:
     """
-    Executes the query using Advanced RAG Strategy.
-    
-    ENTERPRISE RETRIEVAL STRATEGY:
-    1. Deep Recall: top_k=15 to capture widely distributed context (Page 2 vs Page 50).
-    2. Strict System Prompt: Enforces Role and Output Format.
-    3. Source Citation: Mandatory evidence layer.
+    NATIVE HYBRID RETRIEVAL STRATEGY (Memory-Safe)
+    Zwingt BM25 (Keyword) und Vector Search zur Kooperation durch QueryFusion.
     """
     try:
         logger.info(f"Processing query: {question}")
+        expanded = DomainOntology.expand_query(question)
+        logger.info(f"Expanded query: {expanded}")
         
-        # Configure Query Engine
-        query_engine = index.as_query_engine(
-            similarity_top_k=SystemConfig.RETRIEVAL_TOP_K, 
-            response_mode="tree_summarize" # Best for synthesizing from multiple chunks
+        # 1. Vektor-Retriever (Semantik)
+        vector_retriever = index.as_retriever(
+            similarity_top_k=10
+        )
+
+        # 2. BM25-Retriever (Exakte Keywords wie "SEnS", "MP5")
+        # Dies erzwingt die Suche nach den exakten Worten im Text
+        bm25_retriever = BM25Retriever.from_defaults(
+            docstore=index.docstore,
+            similarity_top_k=10
+        )
+
+        # 3. Fusion (Kombination beider Ergebnisse)
+        fusion_retriever = QueryFusionRetriever(
+            retrievers=[vector_retriever, bm25_retriever],
+            similarity_top_k=SystemConfig.RETRIEVAL_TOP_K, # Total Chunks an LLM
+            num_queries=1,
+            mode="reciprocal_rank", # RRF Algorithmus für faire Gewichtung
+            use_async=True
+        )
+
+        # Engine erstellen
+        query_engine = RetrieverQueryEngine.from_args(
+            retriever=fusion_retriever,
+            llm=OpenAI(model=SystemConfig.LLM_MODEL, temperature=SystemConfig.TEMPERATURE),
+            response_mode="tree_summarize"
         )
         
-        # STRICT SYSTEM PROMPT v2.0
-        HYDRAULIK_SYSTEM_PROMPT = """
-        Du bist ein erfahrener Senior Hydraulik-Ingenieur und technischer Dokumentationsspezialist.
-        Du arbeitest für SBS Deutschland und unterstützt Servicetechniker im Feld.
+        # Query mit Enterprise-Prompt & Expansion
+        full_query = f"{HYDRAULIKSYSTEMPROMPT}\n\nUSER FRAGE (expanded): {expanded}\n\nANTWORT:"
         
-        DEINE AUFGABE:
-        Beantworte Fragen ausschließlich basierend auf den bereitgestellten Dokumentauszügen (Context).
-        
-        DEINE PRIORITÄT: Finde exakte Definitionen und Codes im "Typenschlüssel" oder den "Bestellangaben".    
-
-        REGELN FÜR DIE ANTWORTGENERIERUNG:
-        
-        1. RETRIEVAL & KONTEXT (PRIORITÄT 1):
-           - Durchsuche ALLE bereitgestellten Text-Chunks.
-           - WICHTIG: Informationen über "Typenschlüssel", "Bestellangaben", "Type Code" oder "Modellschlüssel" stehen fast immer am ANFANG des Dokuments (Seite 2-8).
-           - WARNUNG: Ignoriere "falsche Freunde" in Ersatzteillisten am Ende des Dokuments. Wenn dort "Dichtung M..." steht, ist das oft nur eine Teilenummer, keine Definition.
-           - Die Definition (z.B. M = Standard) im vorderen Teil hat IMMER Vorrang vor Erwähnungen im hinteren Teil.
-
-        2. UMGANG MIT TABELLEN & CODES:
-           - Wenn nach einem Code gefragt wird (z.B. "Was bedeutet Dichtung T?"), suche explizit nach Tabellenstrukturen.
-           - Logik: Ein Code (z.B. "M") steht in einer linken Spalte, die Erklärung (z.B. "Standard-Dichtsystem") direkt daneben.
-           - Kontext-Check: Prüfe, ob die Tabelle Überschriften wie "Dichtungsausführung", "Bestellangaben" oder "Optionen" hat.
-           - Wenn du den Code im Typenschlüssel findest, ist das die absolute Wahrheit.
-        
-        3. TECHNISCHE PRÄZISION:
-           - Unterscheide exakt zwischen "Prüfdruck" (Test pressure), "Betriebsdruck" (Working pressure/Nominal pressure) und "Berstdruck".
-           - Achte penibel auf Einheiten! 250 bar != 250 psi. Rechne nicht um, es sei denn, es wird explizit verlangt.
-           - Bei Maßangaben: Unterscheide zwischen Kolben-Ø (AL) und Stangen-Ø (MM).
-        
-        4. ANTWORT-FORMAT:
-           - Beginne DIREKT mit der Antwort. Keine Einleitungen wie "Basierend auf den Unterlagen...".
-           - Technische Werte IMMER fett markieren: **250 bar**, **500 mm**.
-           - Zitiere am Ende jeder faktischen Behauptung die Quelle in Klammern: (Datenblatt CDH2, S. 6).
-           - Bei Listen: Nutze Bullet Points für bessere Lesbarkeit auf mobilen Geräten.
-        
-        5. HALLUZINATIONS-SCHUTZ & FEHLERMANAGEMENT:
-           - Wenn die Information NICHT im Kontext ist, sage klar: "Diese Information ist in den vorliegenden Dokumenten nicht enthalten."
-           - Erfinde niemals Werte.
-           - Wenn Widersprüche auftreten (z.B. Seite 2 sagt 250 bar, Seite 50 sagt 300 bar), nenne beide Werte und erkläre den Kontext (z.B. "Nenndruck vs. Prüfdruck").
-           - Falls der Nutzer nach einem Bauteil fragt, das im Dokument nicht existiert, weise darauf hin.
-        """
-        
-        # Combine Prompt and Question
-        full_query = f"{HYDRAULIK_SYSTEM_PROMPT}\n\nUSER FRAGE: {question}\n\nANTWORT:"
-        
-        # Execute Generation
+        # Ausführen
         response = query_engine.query(full_query)
         
-        # Extract Sources strictly
+        # Quellen extrahieren
         sources = []
         if response.source_nodes:
             seen = set()
@@ -660,19 +636,16 @@ def query_knowledge_base(index: VectorStoreIndex, question: str) -> Tuple[str, L
                 filename = node.metadata.get("source_file", "Unbekannt")
                 page_num = node.metadata.get("page_number", "?")
                 
-                # Format: "Filename (S. X)"
                 source_str = f"{filename} (S. {page_num})"
-                
                 if source_str not in seen:
                     sources.append(source_str)
                     seen.add(source_str)
         
-        logger.info(f"Query successful. Found {len(sources)} sources.")
         return str(response), sources
 
     except Exception as e:
         logger.error(f"Query failed: {str(e)}")
-        return f"⚠️ Ein Fehler ist bei der Antwortgenerierung aufgetreten: {str(e)}", []
+        return f"⚠️ Fehler: {str(e)}", []
 
 # ══════════════════════════════════════════════════════════════════════════════
 # FILE PROCESSING LOGIC
@@ -680,7 +653,6 @@ def query_knowledge_base(index: VectorStoreIndex, question: str) -> Tuple[str, L
 def process_single_pdf(uploaded_file, llama_key: str, openai_key: str) -> bool:
     """
     Handles the upload-to-index pipeline securely.
-    Uses temporary files to prevent memory overflow with large PDFs.
     """
     tmp_path = None
     try:
@@ -714,7 +686,6 @@ def process_single_pdf(uploaded_file, llama_key: str, openai_key: str) -> bool:
     except Exception as e:
         logger.error(f"File processing error: {e}")
         st.error(f"Fehler beim Verarbeiten der Datei: {e}")
-        # Ensure cleanup even on error
         if tmp_path and os.path.exists(tmp_path):
             os.unlink(tmp_path)
         return False
@@ -725,7 +696,7 @@ def rebuild_index(openai_key: str):
         st.warning("Keine Dokumente im Speicher.")
         return
     
-    with st.spinner("🧠 Vektorisierung & Indexierung läuft..."):
+    with st.spinner("🧠 Vektorisierung & BM25-Indexierung läuft..."):
         index = create_or_update_index(st.session_state.all_documents, openai_key)
         if index:
             st.session_state.index = index
@@ -799,7 +770,7 @@ def render_sidebar(llama_key, openai_key):
             
         st.markdown(f'<div style="display:flex; gap:10px; margin-bottom:1rem;">{api_status_html}</div>', unsafe_allow_html=True)
         
-        # Manual Key Input (if env vars missing)
+        # Manual Key Input
         if not llama_key:
             llama_key = st.text_input("LlamaCloud API Key", type="password")
         if not openai_key:
@@ -810,12 +781,10 @@ def render_sidebar(llama_key, openai_key):
         # Document Management
         st.markdown("#### 📚 Knowledge Base")
         
-        # List Documents
         if st.session_state.uploaded_files:
             for filename, pages in st.session_state.uploaded_files.items():
                 col1, col2 = st.columns([4, 1])
                 with col1:
-                    # Truncate long names
                     display_name = (filename[:18] + '..') if len(filename) > 18 else filename
                     st.markdown(f"📄 **{display_name}** ({pages} S.)")
                 with col2:
@@ -825,7 +794,6 @@ def render_sidebar(llama_key, openai_key):
         else:
             st.info("Wissensdatenbank leer.")
 
-        # Upload Area
         uploaded_file = st.file_uploader("Neues Dokument", type=["pdf"], label_visibility="collapsed")
         
         if uploaded_file:
@@ -841,7 +809,6 @@ def render_sidebar(llama_key, openai_key):
 
         st.markdown("---")
         
-        # Reset Action (Admin only)
         if user and user.get('role') == 'admin':
             if st.button("⚠️ System Reset", use_container_width=True):
                 st.session_state.all_documents = []
@@ -885,7 +852,6 @@ def render_header():
 def render_chat_interface():
     st.markdown("### 💬 Technical Query Assistant")
     
-    # Empty State
     if not st.session_state.is_ready:
         st.markdown("""
         <div class="hydraulik-tip">
@@ -903,12 +869,9 @@ def render_chat_interface():
         """, unsafe_allow_html=True)
         return
 
-    # Chat History Rendering
     for message in st.session_state.messages:
         with st.chat_message(message["role"], avatar="👤" if message["role"] == "user" else "🔧"):
             st.markdown(message["content"])
-            
-            # Render Sources if available
             if "sources" in message and message["sources"]:
                 sources_html = " <br> ".join([f"• {src}" for src in message["sources"]])
                 st.markdown(f"""
@@ -918,28 +881,19 @@ def render_chat_interface():
                 </div>
                 """, unsafe_allow_html=True)
 
-    # Input Area
     if prompt := st.chat_input("Stellen Sie Ihre technische Frage (z.B. 'Welcher Dichtungssatz für CDH2?')..."):
-        
-        # User Message
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user", avatar="👤"):
             st.markdown(prompt)
         
-        # Bot Processing
         with st.chat_message("assistant", avatar="🔧"):
             message_placeholder = st.empty()
-            
-            # 1. Retrieval Step
             with st.spinner("🔍 Analysiere Dokumente & Typenschlüssel..."):
                 start_time = time.time()
                 response, sources = query_knowledge_base(st.session_state.index, prompt)
                 duration = time.time() - start_time
             
-            # 2. Render Response
             message_placeholder.markdown(response)
-            
-            # 3. Render Sources
             if sources:
                 sources_html = " <br> ".join([f"• {src}" for src in sources])
                 st.markdown(f"""
@@ -948,11 +902,8 @@ def render_chat_interface():
                     {sources_html}
                 </div>
                 """, unsafe_allow_html=True)
-                
-            # Log Performance (Invisible to user, good for debugging)
             logger.info(f"Query processed in {duration:.2f}s")
         
-        # Update History
         st.session_state.messages.append({"role": "assistant", "content": response, "sources": sources})
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -960,29 +911,22 @@ def render_chat_interface():
 # ══════════════════════════════════════════════════════════════════════════════
 def main():
     """Main Application Orchestrator"""
-    
-    # 1. Init System
     init_session_state()
     inject_css()
     
-    # 2. Authentication Gate
     if not st.session_state.authenticated:
         render_login_page()
         return
     
-    # 3. Dependency Check
     if not IMPORTS_AVAILABLE:
         st.error(f"⚠️ KRITISCHER FEHLER: Abhängigkeiten fehlen. {IMPORT_ERROR}")
         st.stop()
     
-    # 4. Render Main UI
     render_header()
     
-    # 5. Sidebar & Configuration
     llama_key, openai_key = get_api_keys()
     final_l_key, final_o_key = render_sidebar(llama_key, openai_key)
     
-    # 6. Content Tabs
     tab_titles = ["📄 Dokument-Suche (Enterprise)", "🎥 Video-Diagnose (Beta)"]
     tab1, tab2 = st.tabs(tab_titles)
     
@@ -994,7 +938,129 @@ def main():
             render_video_analyzer_tab()
         else:
             st.warning("Video-Modul nicht geladen. Bitte `streamlit_integration.py` prüfen.")
-            st.info("Das Video-Modul benötigt die Google Gemini API und korrekte Abhängigkeiten.")
 
 if __name__ == "__main__":
     main()
+
+# ================= ENTERPRISE DOMAIN CONFIG =================
+
+class DomainOntology:
+    """
+    Ultra-komplexe Domänen-Ontologie für Industriehydraulik UND komplexe Haushaltsgeräte.
+    """
+
+    HYDRAULIC_SYNONYMS = {
+        "druck": ["druck", "betriebsdruck", "prüfdruck", "berstdruck", "pressure", "p_max", "pmax"],
+        "volumenstrom": ["volumenstrom", "förderstrom", "q", "l/min", "lmin", "flow rate"],
+        "dichtung": ["dichtung", "dichtungssatz", "seal", "sealing kit", "dichtsystem"],
+        "typenschlüssel": ["typenschlüssel", "type code", "bestellangaben", "order code"],
+    }
+
+    APPLIANCE_SYNONYMS = {
+        "temperaturanzeige": [
+            "temperaturanzeige",
+            "anzeigeeinheit",
+            "display",
+            "kerntemperaturanzeige",
+            "temperatur-display",
+            "temperaturwert auf display"
+        ],
+        "sensor": [
+            "temperatursonde",
+            "bakesensor",
+            "backsensor",
+            "sensorbuchse",
+            "temperaturfühler",
+            "kerntemperaturfühler",
+            "temperatursondenbuchse",
+            "steckbuchse für sensor"
+        ],
+        "programm": [
+            "programm",
+            "auto bake",
+            "pro bake",
+            "backprogramm",
+            "garprogramm",
+            "automatikprogramm"
+        ],
+        "fehlercode": [
+            "fehlercode",
+            "störungscode",
+            "error code",
+            "e-",
+            "f-"
+        ],
+    }
+
+    CROSS_DOMAIN_PATTERNS = [
+        {
+            "if_all": ["temperaturanzeige", "sensor"],
+            "add": ["temperatursonde", "bakesensor", "temperatursondenbuchse",
+                    "anzeigeeinheit", "display", "sens"]
+        },
+        {
+            "if_any": ["fehlercode", "error code", "e-", "f-"],
+            "add": ["display", "anzeigeeinheit", "störungscode", "codeanzeige"]
+        },
+    ]
+
+    @classmethod
+    def normalize(cls, text: str) -> str:
+        import re
+        t = text.lower()
+        t = re.sub(r"[^\w\s\-.:/]", " ", t)
+        t = re.sub(r"\s+", " ", t).strip()
+        return t
+
+    @classmethod
+    def expand_query(cls, question: str) -> str:
+        base = cls.normalize(question)
+        tokens = base.split()
+        expansion_terms = set(tokens)
+
+        for key, syns in cls.HYDRAULIC_SYNONYMS.items():
+            if key in tokens:
+                expansion_terms.update(syns)
+
+        for key, syns in cls.APPLIANCE_SYNONYMS.items():
+            if key in tokens:
+                expansion_terms.update(syns)
+
+        for rule in cls.CROSS_DOMAIN_PATTERNS:
+            if "if_all" in rule and all(term in expansion_terms for term in rule["if_all"]):
+                expansion_terms.update(rule.get("add", []))
+            if "if_any" in rule and any(term in expansion_terms for term in rule["if_any"]):
+                expansion_terms.update(rule.get("add", []))
+
+        return " ".join(sorted(expansion_terms))
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ERWEITERTER SYSTEM PROMPT (HYDRAULIK + APPLIANCES)
+# ══════════════════════════════════════════════════════════════════════════════
+
+HYDRAULIKSYSTEMPROMPT = """
+Du bist ein technischer Experte und Dokumentationsspezialist für Industriehydraulik
+UND komplexe Haushaltsgeräte (z.B. Backöfen, Waschmaschinen, Geschirrspüler).
+
+Beantworte Fragen NUR basierend auf dem Kontext der bereitgestellten Dokumente.
+
+REGELN FÜR DISPLAY- UND SENSOR-ANFRAGEN
+1. Suche nach EXAKTEN Codes und Display-Anzeigen (z.B. "SEnS", "E-2", "F-xx") und
+   nach Begriffen wie "Temperatursonde", "BAKESENSOR", "Temperatursondenbuchse".
+2. Rekonstruiere abgeschnittene Display-Strings (z.B. "SENS ... 50 ... PEC") so präzise wie möglich.
+3. Berücksichtige Begriffe wie:
+   - "Temperatursonde", "Bakesensor", "Temperaturfühler", "Kerntemperaturfühler"
+   - "Anzeigeeinheit", "Display", "Temperaturanzeige", "Auto bake", "Pro bake".
+4. Mappe Formulierungen wie "Temperaturanzeige mit Sensor" intern auf diese Begriffe.
+5. Zitiere immer: "Quelle: <Dateiname> S. <Seite>".
+
+REGELN FÜR DRUCK / HYDRAULIK
+1. Unterscheide strikt zwischen Betriebsdruck, Prüfdruck und Berstdruck.
+2. Achte auf Tabellen mit "Bestellangaben", "Typenschlüssel", "Dichtung", "Volumenstrom".
+3. Trenne Codes (z.B. M, T, A, S) nie von ihrer Bedeutung.
+
+WENN KEINE 1:1-STELLE EXISTIERT
+1. Nutze semantisch nahe Stellen (Sensor, Display, Programme) und erkläre das explizit.
+2. Verwende "nicht enthalten" nur, wenn weder direkt noch indirekt etwas Relevantes existiert.
+"""
