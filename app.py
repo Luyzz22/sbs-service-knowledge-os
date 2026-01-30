@@ -51,10 +51,6 @@ class EnterpriseLogger:
     def __init__(self, name: str):
         self.logger = logging.getLogger(name)
         self.logger.setLevel(logging.INFO)
-        
-        if not self.logger.handlers:
-            handler = logging.StreamHandler()
-            formatter = logging.Formatter(
                 '%(asctime)s - %(name)s - %(levelname)s - [%(funcName)s:%(lineno)d] - %(message)s'
             )
             handler.setFormatter(formatter)
@@ -227,8 +223,14 @@ class NeuralSemanticRouter:
         "sensor": SemanticPattern(
             keywords=["sensor", "sonde", "fühler", "temperatursonde"],
             synonyms=["bakesensor", "backsensor", "temperaturfühler", "kerntemperaturfühler",
-                     "temperatursondenbuchse", "sensorbuchse", "steckbuchse"],
+                     "temperatursondenbuchse", "sensorbuchse", "steckbuchse", "sonde anschließen", "obere rechte ecke"],
             context_terms=["stecker", "buchse", "kabel", "messwert", "pt100", "ntc", "messgerät"],
+        ),
+        "sens": SemanticPattern(
+            keywords=["sens", "sens anzeige", "sondenbetrieb"],
+            synonyms=["sens display", "sens symbol", "sondenbetriebssymbol"],
+            context_terms=["anschließen", "buchse", "normal", "fehler"],
+            weight=1.8
             weight=1.7
         ),
         "programm": SemanticPattern(
@@ -690,6 +692,13 @@ def parse_pdf_with_llamaparse(pdf_path: str, filename: str, llama_api_key: str) 
         4. Fußnoten unter Tabellen sind kritisch (Grenzwerte!)
         
         KRITISCHE ANWEISUNG FÜR DISPLAY-CODES (HAUSHALTSGERÄTE):
+        Bei "SEnS" UNTERSCHEIDE:
+        - NORMAL: Erscheint beim Anschließen der Sonde (regulärer Betrieb)
+        - FEHLER: Erscheint bei NICHT angeschlossener Sonde (Fehlerzustand)
+        
+        Bei "SEnS" auf Display UNTERSCHEIDE KONTEXT:
+        - NORMAL: "SEnS erscheint beim Anschließen der Sonde" (regulärer Betrieb)
+        - FEHLER: "SEnS bei NICHT angeschlossener Sonde" (Störung)
         1. Extrahiere ALLE Display-Anzeigen (z.B. "SEnS", "SENS", "E-2", "F-15")
         2. Temperaturangaben und Programmbezeichnungen vollständig erfassen
         3. Begriffe wie "BAKESENSOR", "Temperatursonde", "Sensorbuchse" wortwörtlich übernehmen
