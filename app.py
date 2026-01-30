@@ -755,13 +755,39 @@ def query_knowledge_base(index: VectorStoreIndex, question: str) -> Tuple[str, L
             response_mode="tree_summarize"
         )
         
-        # Query mit Enterprise-Prompt (original Frage für LLM-Kontext)
-        full_query = f"{HYDRAULIKSYSTEMPROMPT}\n\nUSER FRAGE: {question}\n\nANTWORT:"
+        # Retrieval manuell mit expanded query durchführen
+        retrieved_nodes = fusion_retriever.retrieve(expanded)
         
-        # Ausführen (Retrieval nutzt expanded automatisch via QueryBundle)
-        from llama_index.core.schema import QueryBundle
-        query_bundle = QueryBundle(query_str=expanded)
-        response = query_engine.query(query_bundle)
+        # Context aus Nodes aufbauen
+        context_str = "\n\n".join([
+            f"[Quelle: {node.metadata.get('source_file', 'Unbekannt')} S. {node.metadata.get('page_number', '?')}]\n{node.get_content()}"
+            for node in retrieved_nodes
+        ])
+        
+        # Vollständiger Prompt mit Enterprise-Instruktionen + expanded context
+        full_query = f"""
+{HYDRAULIKSYSTEMPROMPT}
+
+KONTEXT AUS DOKUMENTEN:
+{context_str}
+
+USER FRAGE: {question}
+
+ANTWORT:"""
+        
+        # LLM direkt aufrufen
+        llm = OpenAI(model=SystemConfig.LLM_MODEL, temperature=SystemConfig.TEMPERATURE)
+        response_text = llm.complete(full_query).text
+        
+        # Response-Objekt simulieren für Source-Extraktion
+        class SimpleResponse:
+            def __init__(self, text, nodes):
+                self.response = text
+                self.source_nodes = nodes
+            def __str__(self):
+                return self.response
+        
+        response = SimpleResponse(response_text, retrieved_nodes)
         
         # Quellen extrahieren
         sources = []
