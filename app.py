@@ -231,7 +231,6 @@ class NeuralSemanticRouter:
             synonyms=["sens display", "sens symbol", "sondenbetriebssymbol"],
             context_terms=["anschließen", "buchse", "normal", "fehler"],
             weight=1.8
-            weight=1.7
         ),
         "programm": SemanticPattern(
             keywords=["programm", "funktion", "modus", "automatik"],
