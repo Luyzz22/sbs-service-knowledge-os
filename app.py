@@ -725,20 +725,25 @@ def query_knowledge_base(index: VectorStoreIndex, question: str) -> Tuple[str, L
         )
 
         # 2. BM25-Retriever (Exakte Keywords wie "SEnS", "MP5")
-        # Dies erzwingt die Suche nach den exakten Worten im Text
-        bm25_retriever = BM25Retriever.from_defaults(
-            docstore=index.docstore,
-            similarity_top_k=10
-        )
+        # Nur verwenden wenn Index nicht leer ist
+        if hasattr(index, 'docstore') and len(index.docstore.docs) > 0:
+            bm25_retriever = BM25Retriever.from_defaults(
+                docstore=index.docstore,
+                similarity_top_k=10
+            )
 
-        # 3. Fusion (Kombination beider Ergebnisse)
-        fusion_retriever = QueryFusionRetriever(
-            retrievers=[vector_retriever, bm25_retriever],
-            similarity_top_k=SystemConfig.RETRIEVAL_TOP_K, # Total Chunks an LLM
-            num_queries=1,
-            mode="reciprocal_rank", # RRF Algorithmus für faire Gewichtung
-            use_async=True
-        )
+            # 3. Fusion (Kombination beider Ergebnisse)
+            fusion_retriever = QueryFusionRetriever(
+                retrievers=[vector_retriever, bm25_retriever],
+                similarity_top_k=SystemConfig.RETRIEVAL_TOP_K, # Total Chunks an LLM
+                num_queries=1,
+                mode="reciprocal_rank", # RRF Algorithmus für faire Gewichtung
+                use_async=True
+            )
+        else:
+            # Fallback: nur Vector-Retriever wenn Index leer
+            logger.warning("BM25 skipped - index empty or docstore unavailable")
+            fusion_retriever = vector_retriever
 
         # Engine erstellen
         query_engine = RetrieverQueryEngine.from_args(
