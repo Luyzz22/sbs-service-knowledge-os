@@ -46,8 +46,8 @@ class LogLevel(Enum):
     CRITICAL = "CRITICAL"
 
 class EnterpriseLogger:
-    """Production-grade structured logger with metadata support."""
-    
+    """Structured logging for production environments."""
+
     def __init__(self, name: str):
         self.logger = logging.getLogger(name)
         self.logger.setLevel(logging.INFO)
@@ -57,22 +57,25 @@ class EnterpriseLogger:
         )
         handler.setFormatter(formatter)
         self.logger.addHandler(handler)
-    
+
+    def log(self, level: str, message: str, **kwargs):
         """Log with structured metadata."""
-        metadata = json.dumps(kwargs) if kwargs else ""
+        import json as _json
+        metadata = _json.dumps(kwargs) if kwargs else ""
         full_message = f"{message} {metadata}".strip()
-        
+
         log_method = {
-            LogLevel.DEBUG: self.logger.debug,
             LogLevel.INFO: self.logger.info,
             LogLevel.WARNING: self.logger.warning,
             LogLevel.ERROR: self.logger.error,
             LogLevel.CRITICAL: self.logger.critical,
         }.get(level, self.logger.info)
-        
+
         log_method(full_message)
 
+
 logger = EnterpriseLogger("HydraulikDoc_Enterprise_v4")
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # DEPENDENCY MANAGEMENT WITH GRACEFUL DEGRADATION
