@@ -752,11 +752,13 @@ def query_knowledge_base(index: VectorStoreIndex, question: str) -> Tuple[str, L
             response_mode="tree_summarize"
         )
         
-        # Query mit Enterprise-Prompt & Expansion
-        full_query = f"{HYDRAULIKSYSTEMPROMPT}\n\nUSER FRAGE (expanded): {expanded}\n\nANTWORT:"
+        # Query mit Enterprise-Prompt (original Frage für LLM-Kontext)
+        full_query = f"{HYDRAULIKSYSTEMPROMPT}\n\nUSER FRAGE: {question}\n\nANTWORT:"
         
-        # Ausführen
-        response = query_engine.query(full_query)
+        # Ausführen (Retrieval nutzt expanded automatisch via QueryBundle)
+        from llama_index.core.schema import QueryBundle
+        query_bundle = QueryBundle(query_str=expanded)
+        response = query_engine.query(query_bundle)
         
         # Quellen extrahieren
         sources = []
