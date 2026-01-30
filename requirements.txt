@@ -35,3 +35,4 @@ python-dotenv
 google-cloud-aiplatform>=1.38.0
 google-auth>=2.23.0
 google-cloud-storage>=2.10.0
+llama-index-retrievers-bm25
