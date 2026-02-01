@@ -1468,32 +1468,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
-
-"""
-================================================================================
-END OF HYDRAULIKDOC AI - ENTERPRISE KNOWLEDGE OS v4.1
-================================================================================
-
-ARCHITECTURE SUMMARY:
-✓ 1800+ Lines Production-Grade Code
-✓ Neural Semantic Router (Domain-Aware Query Intelligence)
-✓ 3-Stage Hybrid Retrieval (BM25 + Dense + Fusion)
-✓ Enterprise RBAC + Audit Logging
-✓ Full Error Handling + Performance Metrics
-✓ Apple/NVIDIA/SAP Standards
-
-DOMAINS SUPPORTED:
-✓ Industriehydraulik (Bosch Rexroth, Parker, Festo, Eaton)
-✓ Haushaltsgeräte (Gorenje, Bosch, Siemens, Miele)
-
-FIXES IN v4.1:
-✓ LogLevel enum handling corrected
-✓ BM25Retriever uses stored nodes instead of docstore
-✓ Improved error handling throughout
-✓ Better type hints and documentation
-✓ Video analyzer fallback for missing Gemini
-
-COPYRIGHT © 2026 SBS DEUTSCHLAND GMBH. ALL RIGHTS RESERVED.
-================================================================================
-"""
