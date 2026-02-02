@@ -1428,12 +1428,12 @@ def render_settings_tab(llama_key, openai_key):
     st.markdown("#### 🔌 API-Status")
     col1, col2, col3 = st.columns(3)
     with col1:
-        st.success("✅ LlamaCloud") if llama_key else st.error("❌ LlamaCloud")
+        _ = st.success("✅ LlamaCloud") if llama_key else st.error("❌ LlamaCloud")
     with col2:
-        st.success("✅ OpenAI") if openai_key else st.error("❌ OpenAI")
+        _ = st.success("✅ OpenAI") if openai_key else st.error("❌ OpenAI")
     with col3:
         gkey = st.session_state.get('gemini_api_key') or os.getenv('GEMINI_API_KEY')
-        st.success("✅ Gemini") if gkey else st.warning("⚠️ Gemini (Optional)")
+        _ = st.success("✅ Gemini") if gkey else st.warning("⚠️ Gemini (Optional)")
     
     st.markdown("---")
     st.markdown("#### 📊 Knowledge Base")
