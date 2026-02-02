@@ -40,6 +40,12 @@ from enum import Enum
 import hashlib
 import re
 from abc import ABC, abstractmethod
+try:
+    from streamlit_integration import render_video_analyzer_tab
+    VIDEO_AVAILABLE = True
+except:
+    VIDEO_AVAILABLE = False
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # ENTERPRISE LOGGING INFRASTRUCTURE
@@ -1412,54 +1418,131 @@ def render_video_analyzer_placeholder() -> None:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# MAIN APPLICATION ORCHESTRATOR
+# SETTINGS TAB - ENTERPRISE EDITION
 # ══════════════════════════════════════════════════════════════════════════════
 
-def main() -> None:
-    """Main application entry point."""
+def render_settings_tab(llama_key, openai_key):
+    """Render enterprise settings tab."""
+    st.markdown("### ⚙️ System-Einstellungen")
+    
+    st.markdown("#### 🔌 API-Status")
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.success("✅ LlamaCloud") if llama_key else st.error("❌ LlamaCloud")
+    with col2:
+        st.success("✅ OpenAI") if openai_key else st.error("❌ OpenAI")
+    with col3:
+        gkey = st.session_state.get('gemini_api_key') or os.getenv('GEMINI_API_KEY')
+        st.success("✅ Gemini") if gkey else st.warning("⚠️ Gemini (Optional)")
+    
+    st.markdown("---")
+    st.markdown("#### 📊 Knowledge Base")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Dokumente", len(st.session_state.uploaded_files))
+    c2.metric("Seiten", sum(st.session_state.uploaded_files.values()) if st.session_state.uploaded_files else 0)
+    c3.metric("Nodes", len(st.session_state.nodes_for_bm25) if st.session_state.nodes_for_bm25 else 0)
+    c4.metric("Status", "✅" if st.session_state.is_ready else "⏳")
+    
+    st.markdown("---")
+    st.markdown("#### 📜 Log")
+    if st.session_state.processing_log:
+        log_lines = st.session_state.processing_log[-15:]
+        st.code(chr(10).join(log_lines), language="log")
+    else:
+        st.info("Keine Aktivitäten.")
+    
+    user = st.session_state.user
+    if user and user.role == 'admin':
+        st.markdown("---")
+        st.markdown("#### 🔐 Admin")
+        c1, c2 = st.columns(2)
+        if c1.button("🗑️ Chat löschen", use_container_width=True):
+            st.session_state.messages = []
+            st.rerun()
+        if c2.button("⚠️ Reset", use_container_width=True):
+            st.session_state.all_documents = []
+            st.session_state.uploaded_files = {}
+            st.session_state.index = None
+            st.session_state.is_ready = False
+            st.session_state.messages = []
+            st.session_state.nodes_for_bm25 = []
+            st.rerun()
+
+
+def render_documents_tab(llama_key, openai_key):
+    """Render document management tab."""
+    st.markdown("### 📚 Dokumenten-Management")
+    
+    uploaded_file = st.file_uploader("PDF hochladen", type=["pdf"])
+    if uploaded_file:
+        if uploaded_file.name in st.session_state.uploaded_files:
+            st.warning("⚠️ Existiert bereits!")
+        elif not llama_key or not openai_key:
+            st.error("🔑 API Keys fehlen!")
+        elif st.button("🚀 Verarbeiten", type="primary"):
+            if process_single_pdf(uploaded_file, llama_key, openai_key):
+                rebuild_index(openai_key)
+                st.rerun()
+    
+    st.markdown("---")
+    if st.session_state.uploaded_files:
+        for fname, pages in st.session_state.uploaded_files.items():
+            c1, c2 = st.columns([5, 1])
+            c1.markdown(f"📄 **{fname}** ({pages} S.)")
+            if c2.button("🗑️", key=f"rm_{fname}"):
+                remove_document(fname, openai_key)
+                st.rerun()
+    else:
+        st.info("📂 Keine Dokumente geladen.")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# MAIN APPLICATION ORCHESTRATOR - ENTERPRISE 4-TAB
+# ══════════════════════════════════════════════════════════════════════════════
+
+def main():
+    """Main entry point - Enterprise 4-Tab Edition."""
     init_session_state()
     inject_enterprise_css()
     
-    # Authentication gate
     if not st.session_state.authenticated:
         render_login_page()
         return
     
-    # Dependency check
     if not IMPORTS_AVAILABLE:
-        st.error(f"""
-        ⚠️ KRITISCHER FEHLER: Abhängigkeiten fehlen.
-        
-        **Fehlermeldung:** {IMPORT_ERROR}
-        
-        **Lösung:** Bitte installieren Sie die erforderlichen Pakete:
-        ```bash
-        pip install llama-index llama-parse qdrant-client openai
-        pip install llama-index-vector-stores-qdrant
-        pip install llama-index-llms-openai llama-index-embeddings-openai
-        pip install llama-index-retrievers-bm25  # Optional für Hybrid-Suche
-        ```
-        """)
+        st.error(f"Abhängigkeiten fehlen: {IMPORT_ERROR}")
         st.stop()
     
     render_header()
     
-    # API keys
     llama_key, openai_key = get_api_keys()
-    final_l_key, final_o_key = render_sidebar(llama_key, openai_key)
+    final_llama, final_openai = render_sidebar(llama_key, openai_key)
     
-    # Tabs
-    tab_titles = ["📄 Dokument-Suche (Enterprise)", "🎬 Video-Diagnose (Beta)"]
-    tab1, tab2 = st.tabs(tab_titles)
+    if VIDEO_AVAILABLE:
+        tab_docs, tab_query, tab_video, tab_settings = st.tabs([
+            "📚 Dokumente", "🔍 Abfrage", "🎬 Video-Diagnose", "⚙️ Einstellungen"
+        ])
+    else:
+        tab_docs, tab_query, tab_settings = st.tabs([
+            "📚 Dokumente", "🔍 Abfrage", "⚙️ Einstellungen"
+        ])
+        tab_video = None
     
-    with tab1:
+    with tab_docs:
+        render_documents_tab(final_llama, final_openai)
+    
+    with tab_query:
         render_chat_interface()
     
-    with tab2:
-        if GEMINI_AVAILABLE:
-            render_video_analyzer_tab()
-        else:
-            render_video_analyzer_placeholder()
+    if tab_video is not None:
+        with tab_video:
+            if VIDEO_AVAILABLE:
+                render_video_analyzer_tab()
+            else:
+                render_video_analyzer_placeholder()
+    
+    with tab_settings:
+        render_settings_tab(final_llama, final_openai)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
