@@ -10,7 +10,7 @@ Technology Stack:
 - Enterprise-grade für B2B Industrial
 
 Author: SBS Deutschland GmbH
-Version: 1.0
+Version: 1.1 (Streamlit Cloud Compatible)
 ================================================================================
 """
 
@@ -31,7 +31,7 @@ class GeminiVideoAnalyzer:
     Nutzt Gemini 1.5 Pro's massive 2M Token Context Window
     """
     
-    def __init__(self, api_key: str = None, project_id: str = None, location: str = "europe-west3"):
+    def __init__(self, api_key: str = None, project_id: str = None, location: str = "europe-west3", credentials_json: str = None):
         """
         Initialize Gemini Video Analyzer
         
@@ -39,32 +39,117 @@ class GeminiVideoAnalyzer:
             api_key: Google Cloud API Key (optional if using service account)
             project_id: Google Cloud Project ID
             location: Region (Default: europe-west3 = Frankfurt für DSGVO)
+            credentials_json: JSON string of service account credentials (for Streamlit Cloud)
         """
         self.api_key = api_key
         self.project_id = project_id
         self.location = location
         self.model_name = "gemini-1.5-pro-002"
+        self.credentials_json = credentials_json
         
         # Initialize Vertex AI
+        self._initialize_vertexai()
+    
+    def _initialize_vertexai(self):
+        """Initialize Vertex AI with proper credentials handling for Streamlit Cloud"""
         try:
             import vertexai
             from vertexai.generative_models import GenerativeModel, Part
             
-            if project_id:
-                vertexai.init(project=project_id, location=location)
-            else:
-                vertexai.init(location=location)
+            credentials = None
+            
+            # ═══════════════════════════════════════════════════════════════
+            # CREDENTIALS HANDLING - Support multiple authentication methods
+            # ═══════════════════════════════════════════════════════════════
+            
+            # Method 1: Explicit credentials JSON (for Streamlit Cloud)
+            if self.credentials_json:
+                from google.oauth2 import service_account
                 
+                # Parse JSON string if needed
+                if isinstance(self.credentials_json, str):
+                    creds_dict = json.loads(self.credentials_json)
+                else:
+                    creds_dict = self.credentials_json
+                
+                credentials = service_account.Credentials.from_service_account_info(
+                    creds_dict,
+                    scopes=["https://www.googleapis.com/auth/cloud-platform"]
+                )
+                print("✅ Credentials loaded from JSON")
+            
+            # Method 2: Try Streamlit Secrets
+            elif self._try_load_streamlit_secrets():
+                credentials = self._try_load_streamlit_secrets()
+                print("✅ Credentials loaded from Streamlit Secrets")
+            
+            # Method 3: Environment variable GOOGLE_APPLICATION_CREDENTIALS
+            elif os.getenv("GOOGLE_APPLICATION_CREDENTIALS"):
+                # vertexai will handle this automatically
+                print("✅ Using GOOGLE_APPLICATION_CREDENTIALS")
+            
+            # Method 4: Default credentials (GCE, Cloud Run, etc.)
+            else:
+                print("ℹ️ Using default credentials (may fail on Streamlit Cloud)")
+            
+            # Initialize Vertex AI
+            init_kwargs = {"location": self.location}
+            
+            if self.project_id:
+                init_kwargs["project"] = self.project_id
+            
+            if credentials:
+                init_kwargs["credentials"] = credentials
+            
+            vertexai.init(**init_kwargs)
+            
             self.GenerativeModel = GenerativeModel
             self.Part = Part
             self.initialized = True
+            print(f"✅ Vertex AI initialized (Project: {self.project_id}, Location: {self.location})")
             
-        except ImportError:
-            print("⚠️ Vertex AI SDK nicht installiert. Installiere: pip install google-cloud-aiplatform")
+        except ImportError as e:
+            print(f"⚠️ Vertex AI SDK nicht installiert: {e}")
+            print("   Installiere: pip install google-cloud-aiplatform")
             self.initialized = False
         except Exception as e:
             print(f"⚠️ Vertex AI Initialisierung fehlgeschlagen: {e}")
             self.initialized = False
+    
+    def _try_load_streamlit_secrets(self):
+        """Try to load credentials from Streamlit secrets"""
+        try:
+            import streamlit as st
+            
+            if "google_cloud" in st.secrets:
+                gc = st.secrets["google_cloud"]
+                
+                # Update project_id and location if not set
+                if not self.project_id and "project_id" in gc:
+                    self.project_id = gc["project_id"]
+                if "location" in gc:
+                    self.location = gc["location"]
+                
+                # Load credentials
+                if "credentials_json" in gc:
+                    from google.oauth2 import service_account
+                    
+                    creds_str = gc["credentials_json"]
+                    if isinstance(creds_str, str):
+                        creds_dict = json.loads(creds_str)
+                    else:
+                        creds_dict = dict(creds_str)
+                    
+                    return service_account.Credentials.from_service_account_info(
+                        creds_dict,
+                        scopes=["https://www.googleapis.com/auth/cloud-platform"]
+                    )
+            
+            return None
+            
+        except Exception as e:
+            print(f"ℹ️ Streamlit secrets not available: {e}")
+            return None
     
     def _encode_file_to_base64(self, file_path: str) -> Optional[str]:
         """Encode file to base64 string"""
@@ -103,7 +188,7 @@ class GeminiVideoAnalyzer:
         if not self.initialized:
             return {
                 "success": False,
-                "error": "Vertex AI nicht initialisiert"
+                "error": "Vertex AI nicht initialisiert. Bitte Credentials prüfen."
             }
         
         try:
@@ -111,13 +196,24 @@ class GeminiVideoAnalyzer:
             video_mime = self._get_mime_type(video_path)
             pdf_mime = self._get_mime_type(pdf_path)
             
-            video_part = self.Part.from_uri(
-                uri=self._upload_to_gcs(video_path) if video_path.startswith('gs://') else f"data:{video_mime};base64,{self._encode_file_to_base64(video_path)}",
+            # Read video file
+            video_data = self._encode_file_to_base64(video_path)
+            if not video_data:
+                return {"success": False, "error": f"Video konnte nicht geladen werden: {video_path}"}
+            
+            # Read PDF file
+            pdf_data = self._encode_file_to_base64(pdf_path)
+            if not pdf_data:
+                return {"success": False, "error": f"PDF konnte nicht geladen werden: {pdf_path}"}
+            
+            # Create Parts from inline data
+            video_part = self.Part.from_data(
+                data=base64.b64decode(video_data),
                 mime_type=video_mime
             )
             
-            pdf_part = self.Part.from_uri(
-                uri=self._upload_to_gcs(pdf_path) if pdf_path.startswith('gs://') else f"data:{pdf_mime};base64,{self._encode_file_to_base64(pdf_path)}",
+            pdf_part = self.Part.from_data(
+                data=base64.b64decode(pdf_data),
                 mime_type=pdf_mime
             )
             
@@ -281,7 +377,8 @@ def analyze_machine_video(
     manual_path: str,
     question: str = None,
     api_key: str = None,
-    project_id: str = None
+    project_id: str = None,
+    credentials_json: str = None
 ) -> Dict:
     """
     Convenience function für schnelle Analyse
@@ -292,12 +389,45 @@ def analyze_machine_video(
         question: Optionale Frage
         api_key: Google Cloud API Key
         project_id: Google Cloud Project ID
+        credentials_json: JSON string of service account credentials
         
     Returns:
         Analyse-Ergebnis als Dict
     """
-    analyzer = GeminiVideoAnalyzer(api_key=api_key, project_id=project_id)
+    analyzer = GeminiVideoAnalyzer(
+        api_key=api_key, 
+        project_id=project_id,
+        credentials_json=credentials_json
+    )
     return analyzer.analyze_video_with_manual(video_path, manual_path, question)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# STREAMLIT INTEGRATION HELPER
+# ══════════════════════════════════════════════════════════════════════════════
+
+def create_analyzer_from_streamlit_secrets():
+    """
+    Create analyzer using Streamlit secrets
+    Call this from your Streamlit app
+    
+    Usage in app.py:
+        from gemini_video_analyzer import create_analyzer_from_streamlit_secrets
+        analyzer = create_analyzer_from_streamlit_secrets()
+    """
+    try:
+        import streamlit as st
+        
+        gc = st.secrets.get("google_cloud", {})
+        
+        return GeminiVideoAnalyzer(
+            project_id=gc.get("project_id"),
+            location=gc.get("location", "europe-west3"),
+            credentials_json=gc.get("credentials_json")
+        )
+    except Exception as e:
+        print(f"❌ Failed to create analyzer from secrets: {e}")
+        return None
 
 
 # ══════════════════════════════════════════════════════════════════════════════
