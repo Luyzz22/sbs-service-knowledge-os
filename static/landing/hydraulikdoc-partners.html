@@ -1,8 +1,1172 @@
-<nav class="nav">
-  <a href="/static/landing/hydraulikdoc.html" class="nav-link">Start</a>
-  <a href="/static/landing/hydraulikdoc.html#problem" class="nav-link">Das Problem</a>
-  <a href="/static/landing/hydraulikdoc.html#solution" class="nav-link">Lösung</a>
-  <a href="/static/landing/hydraulikdoc-enterprise.html" class="nav-link">Enterprise</a>
-  <a href="/static/landing/hydraulikdoc-docs.html" class="nav-link">Produkt</a>
-  <a href="/static/landing/hydraulikdoc-partners.html" class="nav-link">Partner</a>
-</nav>
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HydraulikDoc AI · Partner & Ökosystem | SBS Deutschland</title>
+  <meta name="description" content="HydraulikDoc AI – Partnerprogramm für OEMs, Servicepartner und Systemhäuser. Gemeinsame Lösungen für Hydraulik-Service, Instandhaltung und technische Dokumentation.">
+  <meta name="keywords" content="Hydraulik, Dokumentation, KI, Partner, OEM, Systemhaus, Integrationspartner, Reseller, Co-Marketing">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔧</text></svg>">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+  <!-- Open Graph -->
+  <meta property="og:title" content="HydraulikDoc AI – Partner & Ökosystem">
+  <meta property="og:description" content="Partnerprogramm für OEMs, Servicepartner und Systemhäuser rund um HydraulikDoc AI.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://sbsdeutschland.com/static/landing/hydraulikdoc-partners.html">
+
+  <style>
+    /* HYDRAULIKDOC DESIGN SYSTEM – identisch zu Enterprise/Docs */
+
+    :root {
+      --hd-primary: #0066B3;
+      --hd-primary-dark: #004C8C;
+      --hd-primary-darker: #003366;
+      --hd-accent: #FF8C00;
+      --hd-accent-dark: #E67E00;
+      --hd-success: #22C55E;
+      --hd-warning: #F59E0B;
+      --hd-danger: #DC2626;
+      --hd-text: #1E293B;
+      --hd-text-muted: #64748B;
+      --hd-bg: #F8FAFC;
+      --hd-bg-dark: #0F172A;
+      --hd-border: #E2E8F0;
+      --hd-white: #FFFFFF;
+      --hd-gradient-hero: linear-gradient(135deg, #003366 0%, #0066B3 50%, #004C8C 100%);
+      --hd-gradient-cta: linear-gradient(135deg, #FF8C00 0%, #E67E00 100%);
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      color: var(--hd-text);
+      background: var(--hd-bg);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* HEADER */
+    .header {
+      background: var(--hd-gradient-hero);
+      position: sticky;
+      top: 0;
+      z-index: 1000;
+      box-shadow: 0 2px 20px rgba(0,0,0,0.15);
+    }
+
+    .header-inner {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 0 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 72px;
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      text-decoration: none;
+    }
+
+    .logo-icon {
+      width: 44px;
+      height: 44px;
+      background: var(--hd-gradient-cta);
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.5rem;
+      box-shadow: 0 4px 12px rgba(255, 140, 0, 0.3);
+    }
+
+    .logo-text {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .logo-text strong {
+      color: #fff;
+      font-size: 1.2rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+
+    .logo-text span {
+      color: rgba(255,255,255,0.7);
+      font-size: 0.72rem;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+
+    .nav {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .nav-link {
+      color: rgba(255,255,255,0.9);
+      text-decoration: none;
+      padding: 10px 16px;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      font-weight: 500;
+      transition: all 0.2s;
+    }
+
+    .nav-link:hover {
+      background: rgba(255,255,255,0.1);
+      color: #fff;
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .btn-login {
+      color: rgba(255,255,255,0.9);
+      text-decoration: none;
+      padding: 10px 18px;
+      font-size: 0.9rem;
+      font-weight: 500;
+      border-radius: 8px;
+      transition: all 0.2s;
+    }
+
+    .btn-login:hover {
+      background: rgba(255,255,255,0.1);
+      color: #fff;
+    }
+
+    .btn-cta {
+      background: var(--hd-gradient-cta);
+      color: var(--hd-primary-darker);
+      text-decoration: none;
+      padding: 12px 24px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      border-radius: 8px;
+      transition: all 0.25s;
+      box-shadow: 0 4px 12px rgba(255, 140, 0, 0.3);
+    }
+
+    .btn-cta:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 20px rgba(255, 140, 0, 0.4);
+    }
+
+    /* HERO */
+    .hero {
+      background: var(--hd-gradient-hero);
+      padding: 80px 24px 100px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .hero::before {
+      content: '';
+      position: absolute;
+      top: -50%;
+      right: -20%;
+      width: 80%;
+      height: 200%;
+      background: radial-gradient(ellipse at center, rgba(255, 140, 0, 0.08) 0%, transparent 60%);
+      pointer-events: none;
+    }
+
+    .hero::after {
+      content: '';
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 120px;
+      background: linear-gradient(to top, var(--hd-bg) 0%, transparent 100%);
+    }
+
+    .hero-content {
+      max-width: 1200px;
+      margin: 0 auto;
+      position: relative;
+      z-index: 1;
+      display: grid;
+      grid-template-columns: 1.2fr 0.8fr;
+      gap: 60px;
+      align-items: center;
+    }
+
+    .hero-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 18px;
+      background: rgba(255,255,255,0.08);
+      backdrop-filter: blur(10px);
+      border-radius: 999px;
+      font-size: 0.8rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      border: 1px solid rgba(255,255,255,0.15);
+      color: #fff;
+      margin-bottom: 24px;
+    }
+
+    .pulse {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--hd-accent);
+      box-shadow: 0 0 12px var(--hd-accent);
+      animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.6; transform: scale(1.3); }
+    }
+
+    .hero h1 {
+      font-size: clamp(2.3rem, 4.8vw, 3.4rem);
+      font-weight: 800;
+      color: #fff;
+      line-height: 1.1;
+      margin-bottom: 24px;
+      letter-spacing: -0.03em;
+    }
+
+    .hero-subtitle {
+      font-size: 1.15rem;
+      color: rgba(255,255,255,0.85);
+      margin-bottom: 32px;
+      line-height: 1.7;
+      max-width: 560px;
+    }
+
+    .hero-cta-group {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 16px;
+      margin-bottom: 32px;
+    }
+
+    .hero-cta {
+      padding: 16px 32px;
+      border-radius: 10px;
+      font-weight: 600;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      transition: all 0.25s ease;
+      font-size: 1rem;
+    }
+
+    .hero-cta.primary {
+      background: var(--hd-white);
+      color: var(--hd-primary-dark);
+      box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+    }
+
+    .hero-cta.primary:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 8px 30px rgba(0,0,0,0.2);
+    }
+
+    .hero-cta.secondary {
+      background: rgba(255,255,255,0.1);
+      color: #fff;
+      border: 1px solid rgba(255,255,255,0.3);
+      backdrop-filter: blur(10px);
+    }
+
+    .hero-cta.secondary:hover {
+      background: rgba(255,255,255,0.15);
+      border-color: rgba(255,255,255,0.5);
+    }
+
+    .hero-visual {
+      position: relative;
+    }
+
+    .hero-mockup {
+      background: rgba(15, 23, 42, 0.95);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 16px;
+      padding: 16px;
+      box-shadow: 0 40px 80px rgba(0,0,0,0.4);
+    }
+
+    .mockup-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 16px;
+      border-bottom: 1px solid rgba(255,255,255,0.1);
+    }
+
+    .mockup-dots {
+      display: flex;
+      gap: 6px;
+    }
+
+    .mockup-dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+    }
+
+    .mockup-dot.red { background: #EF4444; }
+    .mockup-dot.yellow { background: #F59E0B; }
+    .mockup-dot.green { background: #22C55E; }
+
+    .mockup-title {
+      color: rgba(255,255,255,0.5);
+      font-size: 0.8rem;
+      flex: 1;
+      text-align: center;
+    }
+
+    .mockup-body {
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .mockup-question {
+      background: rgba(0, 102, 179, 0.2);
+      border: 1px solid rgba(0, 102, 179, 0.3);
+      padding: 14px 18px;
+      border-radius: 10px;
+      color: rgba(255,255,255,0.9);
+      font-size: 0.95rem;
+    }
+
+    .mockup-answer {
+      background: rgba(255, 140, 0, 0.1);
+      border-left: 4px solid var(--hd-accent);
+      padding: 16px 20px;
+      border-radius: 0 10px 10px 0;
+    }
+
+    .mockup-answer-label {
+      font-size: 0.75rem;
+      color: var(--hd-accent);
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 8px;
+    }
+
+    .mockup-answer-text {
+      color: rgba(255,255,255,0.9);
+      font-size: 0.95rem;
+      line-height: 1.6;
+    }
+
+    .mockup-source {
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid rgba(255,255,255,0.1);
+      font-size: 0.8rem;
+      color: rgba(255,255,255,0.5);
+    }
+
+    /* GENERISCHE SECTIONS */
+    .section-header {
+      text-align: center;
+      max-width: 780px;
+      margin: 0 auto 60px;
+    }
+
+    .section-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(0, 102, 179, 0.08);
+      color: var(--hd-primary);
+      padding: 8px 18px;
+      border-radius: 999px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 20px;
+    }
+
+    .section-header h2 {
+      font-size: clamp(1.9rem, 4vw, 2.6rem);
+      font-weight: 700;
+      color: var(--hd-text);
+      margin-bottom: 16px;
+      letter-spacing: -0.02em;
+    }
+
+    .section-header p {
+      color: var(--hd-text-muted);
+      font-size: 1.1rem;
+      line-height: 1.7;
+    }
+
+    .partner-section {
+      padding: 100px 24px;
+      background: var(--hd-white);
+    }
+
+    .program-section {
+      padding: 100px 24px;
+      background: var(--hd-bg);
+    }
+
+    .co-section {
+      padding: 100px 24px;
+      background: var(--hd-white);
+    }
+
+    /* GRID CARDS */
+    .partner-grid {
+      max-width: 1200px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 28px;
+    }
+
+    .partner-card {
+      background: var(--hd-bg);
+      border-radius: 16px;
+      border: 1px solid var(--hd-border);
+      padding: 32px;
+      transition: all 0.3s ease;
+    }
+
+    .partner-card:hover {
+      transform: translateY(-4px);
+      box-shadow: 0 12px 40px rgba(0,0,0,0.08);
+      border-color: var(--hd-primary);
+    }
+
+    .partner-icon {
+      width: 56px;
+      height: 56px;
+      border-radius: 14px;
+      background: linear-gradient(135deg, var(--hd-primary) 0%, var(--hd-primary-dark) 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.6rem;
+      color: #fff;
+      margin-bottom: 20px;
+      box-shadow: 0 8px 20px rgba(0, 102, 179, 0.2);
+    }
+
+    .partner-card h3 {
+      font-size: 1.2rem;
+      font-weight: 600;
+      color: var(--hd-text);
+      margin-bottom: 12px;
+    }
+
+    .partner-card p {
+      font-size: 0.95rem;
+      color: var(--hd-text-muted);
+      line-height: 1.6;
+    }
+
+    .partner-meta {
+      margin-top: 16px;
+      font-size: 0.9rem;
+      color: var(--hd-text-muted);
+    }
+
+    /* PROGRAMM-STUFEN */
+    .program-grid {
+      max-width: 1100px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 28px;
+    }
+
+    .program-card {
+      background: var(--hd-white);
+      border-radius: 16px;
+      border: 1px solid var(--hd-border);
+      padding: 32px;
+      position: relative;
+      overflow: hidden;
+      transition: all 0.3s ease;
+    }
+
+    .program-card::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(circle at top right, rgba(0,102,179,0.08), transparent 55%);
+      opacity: 0;
+      transition: opacity 0.3s ease;
+    }
+
+    .program-card:hover::before {
+      opacity: 1;
+    }
+
+    .program-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 12px;
+      border-radius: 999px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      background: rgba(0, 102, 179, 0.06);
+      color: var(--hd-primary);
+      margin-bottom: 16px;
+      position: relative;
+    }
+
+    .program-card h3 {
+      font-size: 1.25rem;
+      font-weight: 600;
+      margin-bottom: 10px;
+      color: var(--hd-text);
+      position: relative;
+    }
+
+    .program-card p {
+      font-size: 0.95rem;
+      color: var(--hd-text-muted);
+      margin-bottom: 16px;
+      position: relative;
+      line-height: 1.6;
+    }
+
+    .program-list {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+      position: relative;
+    }
+
+    .program-list li {
+      font-size: 0.9rem;
+      color: var(--hd-text);
+      padding: 8px 0;
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+    }
+
+    .program-list li::before {
+      content: '•';
+      color: var(--hd-primary);
+      font-weight: 700;
+      margin-top: -1px;
+    }
+
+    /* CO-MARKETING / CO-DELIVERY */
+    .co-grid {
+      max-width: 1100px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: 1.3fr 1fr;
+      gap: 40px;
+      align-items: center;
+    }
+
+    .co-card {
+      background: var(--hd-bg);
+      border-radius: 18px;
+      border: 1px solid var(--hd-border);
+      padding: 36px;
+    }
+
+    .co-card h3 {
+      font-size: 1.3rem;
+      font-weight: 600;
+      margin-bottom: 12px;
+      color: var(--hd-text);
+    }
+
+    .co-card p {
+      font-size: 0.95rem;
+      color: var(--hd-text-muted);
+      margin-bottom: 18px;
+      line-height: 1.7;
+    }
+
+    .co-pill-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    .co-pill {
+      padding: 6px 14px;
+      border-radius: 999px;
+      font-size: 0.8rem;
+      font-weight: 500;
+      background: rgba(0, 102, 179, 0.08);
+      color: var(--hd-primary-dark);
+    }
+
+    .co-highlight {
+      background: rgba(255, 140, 0, 0.08);
+      color: var(--hd-accent-dark);
+    }
+
+    .co-side {
+      background: #0F172A;
+      color: rgba(255,255,255,0.85);
+      border-radius: 18px;
+      border: 1px solid rgba(148,163,184,0.4);
+      padding: 28px;
+    }
+
+    .co-side h3 {
+      font-size: 1.1rem;
+      font-weight: 600;
+      margin-bottom: 12px;
+      color: #fff;
+    }
+
+    .co-side p {
+      font-size: 0.9rem;
+      margin-bottom: 12px;
+      color: rgba(226,232,240,0.9);
+    }
+
+    .co-side ul {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+    }
+
+    .co-side li {
+      font-size: 0.9rem;
+      padding: 6px 0;
+      display: flex;
+      gap: 8px;
+      align-items: flex-start;
+    }
+
+    .co-side li::before {
+      content: '✓';
+      color: #22C55E;
+      font-weight: 700;
+      margin-top: -1px;
+    }
+
+    /* CTA SECTION */
+    .cta-section {
+      padding: 100px 24px;
+      background: var(--hd-gradient-hero);
+      text-align: center;
+    }
+
+    .cta-content {
+      max-width: 700px;
+      margin: 0 auto;
+    }
+
+    .cta-section h2 {
+      font-size: clamp(1.9rem, 4vw, 2.6rem);
+      font-weight: 700;
+      color: #fff;
+      margin-bottom: 20px;
+    }
+
+    .cta-section p {
+      color: rgba(255,255,255,0.85);
+      font-size: 1.15rem;
+      margin-bottom: 36px;
+      line-height: 1.7;
+    }
+
+    .cta-buttons {
+      display: flex;
+      justify-content: center;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    .hero-cta.primary,
+    .hero-cta.secondary {
+      padding: 16px 32px;
+      border-radius: 10px;
+      font-weight: 600;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      transition: all 0.25s ease;
+      font-size: 1rem;
+    }
+
+    .hero-cta.primary {
+      background: var(--hd-white);
+      color: var(--hd-primary-dark);
+      box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+    }
+
+    .hero-cta.secondary {
+      background: rgba(255,255,255,0.08);
+      border: 1px solid rgba(255,255,255,0.4);
+      color: #fff;
+    }
+
+    .hero-cta.primary:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 8px 30px rgba(0,0,0,0.2);
+    }
+
+    .hero-cta.secondary:hover {
+      background: rgba(255,255,255,0.14);
+      border-color: rgba(255,255,255,0.7);
+    }
+
+    /* FOOTER */
+    .footer {
+      background: #0A0F1A;
+      color: rgba(255,255,255,0.7);
+      padding: 80px 24px 40px;
+    }
+
+    .footer-inner {
+      max-width: 1200px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: 2fr repeat(3, 1fr);
+      gap: 60px;
+      margin-bottom: 60px;
+    }
+
+    .footer-brand p {
+      margin-top: 20px;
+      font-size: 0.95rem;
+      line-height: 1.7;
+      max-width: 300px;
+    }
+
+    .footer-col h4 {
+      color: #fff;
+      font-size: 1rem;
+      font-weight: 600;
+      margin-bottom: 24px;
+    }
+
+    .footer-col a {
+      display: block;
+      color: rgba(255,255,255,0.6);
+      text-decoration: none;
+      padding: 8px 0;
+      font-size: 0.9rem;
+      transition: all 0.2s;
+    }
+
+    .footer-col a:hover {
+      color: var(--hd-accent);
+      padding-left: 6px;
+    }
+
+    .footer-bottom {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding-top: 40px;
+      border-top: 1px solid rgba(255,255,255,0.1);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 20px;
+    }
+
+    .footer-bottom p {
+      font-size: 0.85rem;
+    }
+
+    .footer-links {
+      display: flex;
+      gap: 32px;
+    }
+
+    .footer-links a {
+      color: rgba(255,255,255,0.6);
+      text-decoration: none;
+      font-size: 0.85rem;
+      transition: color 0.2s;
+    }
+
+    .footer-links a:hover {
+      color: #fff;
+    }
+
+    /* RESPONSIVE */
+    @media (max-width: 1024px) {
+      .hero-content {
+        grid-template-columns: 1fr;
+        gap: 40px;
+      }
+
+      .hero-visual {
+        order: -1;
+      }
+
+      .nav {
+        display: none;
+      }
+
+      .partner-grid,
+      .program-grid {
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .co-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .footer-inner {
+        grid-template-columns: 1fr 1fr;
+      }
+    }
+
+    @media (max-width: 768px) {
+      .hero {
+        padding: 60px 24px 80px;
+      }
+
+      .partner-grid,
+      .program-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .footer-inner {
+        grid-template-columns: 1fr;
+        gap: 40px;
+      }
+
+      .footer-bottom {
+        flex-direction: column;
+        text-align: center;
+      }
+    }
+  </style>
+</head>
+<body>
+  <!-- HEADER -->
+  <header class="header">
+    <div class="header-inner">
+      <a href="/static/landing/hydraulikdoc.html" class="logo">
+        <div class="logo-icon">🔧</div>
+        <div class="logo-text">
+          <strong>HydraulikDoc AI</strong>
+          <span>by SBS Deutschland</span>
+        </div>
+      </a>
+
+      <nav class="nav">
+        <a href="/static/landing/hydraulikdoc.html#problem" class="nav-link">Das Problem</a>
+        <a href="/static/landing/hydraulikdoc.html#solution" class="nav-link">Lösung</a>
+        <a href="/static/landing/hydraulikdoc-docs.html" class="nav-link">Produkt</a>
+        <a href="/static/landing/hydraulikdoc-enterprise.html" class="nav-link">Enterprise</a>
+        <a href="/static/landing/hydraulikdoc-partners.html" class="nav-link">Partner</a>
+      </nav>
+
+      <div class="header-actions">
+        <a href="https://knowledge-sbsdeutschland.streamlit.app" class="btn-login">Login</a>
+        <a href="https://knowledge-sbsdeutschland.streamlit.app" class="btn-cta">Kostenlos testen →</a>
+      </div>
+    </div>
+  </header>
+
+  <!-- HERO: PARTNER -->
+  <section class="hero" id="hero">
+    <div class="hero-content">
+      <div class="hero-text">
+        <div class="hero-badge">
+          <span class="pulse"></span>
+          PARTNER &amp; ÖKOSYSTEM
+        </div>
+        <h1>Gemeinsam mehr aus Hydraulik‑Daten machen</h1>
+        <p class="hero-subtitle">
+          HydraulikDoc AI ergänzt Ihre Lösungen für Service, Instandhaltung und Dokumentation.
+          Im Partnerprogramm bündeln wir Branchen‑Know-how, Software und Services.
+        </p>
+        <div class="hero-cta-group">
+          <a href="mailto:info@sbsdeutschland.com?subject=HydraulikDoc%20Partneranfrage" class="hero-cta primary">
+            Partnergespräch anfragen →
+          </a>
+          <a href="mailto:info@sbsdeutschland.com?subject=HydraulikDoc%20Partnerprogramm%20Infos" class="hero-cta secondary">
+            Partnerprogramm-Unterlagen erhalten
+          </a>
+        </div>
+        <p class="hero-subtitle" style="max-width: 520px;">
+          Ob OEM, Systemhaus oder Servicepartner – wir suchen langfristige Kooperationen,
+          bei denen HydraulikDoc AI einen klaren Mehrwert in Ihren Angeboten schafft.
+        </p>
+      </div>
+
+      <div class="hero-visual">
+        <div class="hero-mockup">
+          <div class="mockup-header">
+            <div class="mockup-dots">
+              <div class="mockup-dot red"></div>
+              <div class="mockup-dot yellow"></div>
+              <div class="mockup-dot green"></div>
+            </div>
+            <span class="mockup-title">Gemeinsamer Kunden-Workspace</span>
+          </div>
+          <div class="mockup-body">
+            <div class="mockup-question">
+              Wie sieht der gemeinsame Nutzen für einen Werkseinsatz mit Ihrem Service-Team aus?
+            </div>
+            <div class="mockup-answer">
+              <div class="mockup-answer-label">Antwort</div>
+              <div class="mockup-answer-text">
+                Sie bringen Anlagen‑ und Prozesswissen, wir bringen KI‑Unterstützung für Dokumentation
+                und Suche. Zusammen reduzieren wir Suchzeiten, erhöhen First‑Time‑Fix‑Raten und
+                dokumentieren Wissen strukturiert.
+              </div>
+              <div class="mockup-source">
+                Beispiel: Gemeinsames Pilotprojekt mit Service‑Organisation und OEM‑Partner
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- PARTNER-TYPEN -->
+  <section class="partner-section" id="partner-types">
+    <div class="section-header">
+      <span class="section-badge">Partnerprofile</span>
+      <h2>Mit wem wir zusammenarbeiten</h2>
+      <p>HydraulikDoc AI ergänzt bestehende Lösungen – in der Werkstatt, beim Kunden vor Ort oder im Leitstand.</p>
+    </div>
+
+    <div class="partner-grid">
+      <div class="partner-card">
+        <div class="partner-icon">🏭</div>
+        <h3>OEM &amp; Maschinenbauer</h3>
+        <p>
+          Sie liefern Hydraulik‑Anlagen, Aggregate oder komplette Maschinen und wollen
+          Service und Dokumentation für Ihre Kunden auf das nächste Level bringen.
+        </p>
+        <p class="partner-meta">
+          Einsatz: White‑Label‑Variante, Integration in Serviceportale, gemeinsame Pilotkunden.
+        </p>
+      </div>
+
+      <div class="partner-card">
+        <div class="partner-icon">🛠️</div>
+        <h3>Service- &amp; Instandhaltungspartner</h3>
+        <p>
+          Sie verantworten den Betrieb und die Instandhaltung von Anlagen im Feld oder im Werk
+          und suchen Werkzeuge, die Ihre Techniker direkt unterstützen.
+        </p>
+        <p class="partner-meta">
+          Einsatz: Gemeinsame Service‑Angebote, Zugang für Außendienst‑Teams, Training &amp; Enablement.
+        </p>
+      </div>
+
+      <div class="partner-card">
+        <div class="partner-icon">🧩</div>
+        <h3>Systemhäuser &amp; Integratoren</h3>
+        <p>
+          Sie bauen für Ihre Kunden individuelle Lösungen rund um ERP, EAM, DMS oder Portale
+          und möchten KI‑gestützte Dokumentationssuche integrieren.
+        </p>
+        <p class="partner-meta">
+          Einsatz: API‑basierte Integration, Co‑Innovation, wiederverwendbare Templates.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- PARTNERPROGRAMM -->
+  <section class="program-section" id="program">
+    <div class="section-header">
+      <span class="section-badge">Partnerprogramm</span>
+      <h2>Strukturiertes Programm statt losen Kontakten</h2>
+      <p>Klare Rollen, gemeinsame Ziele und abgestimmte Verantwortlichkeiten – von der ersten Idee bis zum laufenden Betrieb.</p>
+    </div>
+
+    <div class="program-grid">
+      <div class="program-card">
+        <div class="program-tag">Registered</div>
+        <h3>Registered Partner</h3>
+        <p>
+          Einstieg für Organisationen, die sich mit HydraulikDoc AI vertraut machen und erste
+          gemeinsame Kunden identifizieren möchten.
+        </p>
+        <ul class="program-list">
+          <li>Zugang zu Produkt‑Updates und Roadmap‑Briefings</li>
+          <li>Standard‑Demo‑Umgebung für interne Tests</li>
+          <li>Technische Ansprechpartner für Rückfragen</li>
+          <li>Erste gemeinsame Bewertung von Kunden‑Use‑Cases</li>
+        </ul>
+      </div>
+
+      <div class="program-card">
+        <div class="program-tag">Advanced</div>
+        <h3>Advanced Solution Partner</h3>
+        <p>
+          Für Partner, die HydraulikDoc AI aktiv einsetzen, integrieren oder vermarkten und
+          gemeinsam mit uns Lösungen ausrollen.
+        </p>
+        <ul class="program-list">
+          <li>Gemeinsame Pilotprojekte mit definierten KPIs</li>
+          <li>Technische Enablement‑Sessions &amp; Schulungen</li>
+          <li>Co‑Branding auf ausgewählten Materialien</li>
+          <li>Zugriff auf Integrations‑APIs &amp; Templates</li>
+        </ul>
+      </div>
+
+      <div class="program-card">
+        <div class="program-tag">Strategic</div>
+        <h3>Strategic Partner</h3>
+        <p>
+          Langfristige Partnerschaften mit gemeinsamer Go‑to‑Market‑Strategie, Produkt‑Integration
+          und abgestimmtem Innovationsplan.
+        </p>
+        <ul class="program-list">
+          <li>Gemeinsame Produkt‑Roadmap‑Workshops</li>
+          <li>Dedizierte Ansprechpartner auf Management‑Ebene</li>
+          <li>Koordinierte Messe‑ und Konferenzauftritte</li>
+          <li>Gemeinsame Referenzkunden und Success Stories</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- CO-MARKETING & CO-DELIVERY -->
+  <section class="co-section" id="go-to-market">
+    <div class="section-header">
+      <span class="section-badge">Go-to-Market</span>
+      <h2>Gemeinsam in den Markt gehen</h2>
+      <p>Wir ergänzen Ihre bestehenden Angebote – und treten gegenüber Kunden als eingespieltes Team auf.</p>
+    </div>
+
+    <div class="co-grid">
+      <div class="co-card">
+        <h3>Co‑Marketing &amp; Co‑Selling</h3>
+        <p>
+          HydraulikDoc AI wird Teil Ihrer Story – und umgekehrt. Wir unterstützen bei
+          Vertriebsdemos, Angebotsunterlagen und im Pre‑Sales.
+        </p>
+        <div class="co-pill-row">
+          <span class="co-pill">Gemeinsame Webinare</span>
+          <span class="co-pill">Angebots‑Templates</span>
+          <span class="co-pill">Referenz‑Slides</span>
+          <span class="co-pill co-highlight">Pilotangebote für Bestandskunden</span>
+        </div>
+        <br>
+        <h3>Technische Co‑Delivery</h3>
+        <p>
+          In Projekten übernehmen wir den KI‑ und Dokumentations‑Part, während Sie z.&nbsp;B.
+          ERP‑, EAM‑ oder Portalintegration verantworten.
+        </p>
+        <div class="co-pill-row">
+          <span class="co-pill">Gemeinsame Projektplanung</span>
+          <span class="co-pill">Schnittstellen‑Design</span>
+          <span class="co-pill">Schulung der Teams</span>
+        </div>
+      </div>
+
+      <div class="co-side">
+        <h3>Was Partner von uns erwarten können</h3>
+        <p>Unsere Zusagen im Partnerprogramm:</p>
+        <ul>
+          <li>Transparente Roadmap und klare Ansprechpartner</li>
+          <li>Realistische Einschätzung, wann KI‑Funktionen produktionsreif sind</li>
+          <li>Saubere Dokumentation zu Architektur, Security und Betrieb</li>
+          <li>Fokus auf konkrete, messbare Ergebnisse bei gemeinsamen Kunden</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- CTA PARTNER -->
+  <section class="cta-section">
+    <div class="cta-content">
+      <h2>Partneridee besprechen?</h2>
+      <p>
+        Sie sehen Potenzial für HydraulikDoc AI in Ihrem Portfolio oder bei Ihren Kunden?
+        Lassen Sie uns in einem kurzen Gespräch prüfen, wie eine Zusammenarbeit aussehen kann.
+      </p>
+      <div class="cta-buttons">
+        <a href="mailto:info@sbsdeutschland.com?subject=HydraulikDoc%20Partnergespr%C3%A4ch" class="hero-cta primary">
+          Partnergespräch anfragen →
+        </a>
+        <a href="mailto:info@sbsdeutschland.com?subject=HydraulikDoc%20Partnerprogramm%20Unterlagen" class="hero-cta secondary">
+          Partnerprogramm-Unterlagen erhalten
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <!-- FOOTER -->
+  <footer class="footer">
+    <div class="footer-inner">
+      <div class="footer-brand">
+        <a href="/static/landing/hydraulikdoc.html" class="logo">
+          <div class="logo-icon">🔧</div>
+          <div class="logo-text">
+            <strong>HydraulikDoc AI</strong>
+            <span>by SBS Deutschland</span>
+          </div>
+        </a>
+        <p>
+          Die KI-Lösung für technische Dokumentation in der Hydraulik-Branche.
+          Entwickelt in Weinheim, gehostet in Deutschland.
+        </p>
+      </div>
+
+      <div class="footer-col">
+        <h4>Produkt</h4>
+        <a href="/static/landing/hydraulikdoc.html#solution">Features</a>
+        <a href="/static/landing/hydraulikdoc.html#how-it-works">So funktioniert's</a>
+        <a href="/static/landing/hydraulikdoc.html#pricing">Preise</a>
+        <a href="/static/landing/hydraulikdoc.html#faq">FAQ</a>
+      </div>
+
+      <div class="footer-col">
+        <h4>Unternehmen</h4>
+        <a href="https://sbsdeutschland.com/sbshomepage/unternehmen.html">Über SBS Deutschland</a>
+        <a href="https://sbsdeutschland.com/sbshomepage/kontakt.html">Kontakt</a>
+        <a href="https://sbsdeutschland.com">Weitere Produkte</a>
+      </div>
+
+      <div class="footer-col">
+        <h4>Rechtliches</h4>
+        <a href="https://sbsdeutschland.com/static/impressum.html">Impressum</a>
+        <a href="https://sbsdeutschland.com/static/datenschutz.html">Datenschutz</a>
+        <a href="https://sbsdeutschland.com/static/agb.html">AGB</a>
+      </div>
+    </div>
+
+    <div class="footer-bottom">
+      <p>© 2025 SBS Deutschland GmbH · Weinheim · Alle Rechte vorbehalten</p>
+      <div class="footer-links">
+        <a href="mailto:info@sbsdeutschland.com">info@sbsdeutschland.com</a>
+        <a href="https://www.linkedin.com/company/sbs-deutschland">LinkedIn</a>
+      </div>
+    </div>
+  </footer>
+</body>
+</html>

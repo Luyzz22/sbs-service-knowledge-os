@@ -1,0 +1,1790 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HydraulikDoc AI · KI-Suche in Hydraulik-Dokumentation | SBS Deutschland</title>
+    <meta name="description" content="HydraulikDoc AI - Intelligente Suche in Hydraulik-Handbüchern. Druckwerte, Schaltpläne, Ersatzteile in Sekunden finden. Enterprise-ready.">
+    <meta name="keywords" content="Hydraulik, Dokumentation, KI, Service, Wartung, Handbuch, Suche, VDMA, Fluidtechnik">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔧</text></svg>">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    
+    <!-- Open Graph -->
+    <meta property="og:title" content="HydraulikDoc AI - KI-Suche in Hydraulik-Dokumentation">
+    <meta property="og:description" content="Druckwerte, Schaltpläne, Ersatzteile – in Sekunden gefunden. Die KI-Lösung für Hydraulik-Service.">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://hydraulikdoc.de">
+    
+    <style>
+        /* ═══════════════════════════════════════════════════════════════════
+           HYDRAULIKDOC AI - DESIGN SYSTEM
+           Enterprise SaaS Landing Page
+           ═══════════════════════════════════════════════════════════════════ */
+        
+        :root {
+            /* Brand Colors - Hydraulik */
+            --hd-primary: #0066B3;
+            --hd-primary-dark: #004C8C;
+            --hd-primary-darker: #003366;
+            --hd-accent: #FF8C00;
+            --hd-accent-dark: #E67E00;
+            
+            /* Functional */
+            --hd-success: #22C55E;
+            --hd-warning: #F59E0B;
+            --hd-danger: #DC2626;
+            
+            /* Neutrals */
+            --hd-text: #1E293B;
+            --hd-text-muted: #64748B;
+            --hd-bg: #F8FAFC;
+            --hd-bg-dark: #0F172A;
+            --hd-border: #E2E8F0;
+            --hd-white: #FFFFFF;
+            
+            /* Gradients */
+            --hd-gradient-hero: linear-gradient(135deg, #003366 0%, #0066B3 50%, #004C8C 100%);
+            --hd-gradient-cta: linear-gradient(135deg, #FF8C00 0%, #E67E00 100%);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            color: var(--hd-text);
+            background: var(--hd-bg);
+            line-height: 1.6;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* ═══════════════════════════════════════════════════════════════════
+           HEADER
+           ═══════════════════════════════════════════════════════════════════ */
+        .header {
+            background: var(--hd-gradient-hero);
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+            box-shadow: 0 2px 20px rgba(0,0,0,0.15);
+        }
+
+        .header-inner {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 0 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            height: 72px;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            text-decoration: none;
+        }
+
+        .logo-icon {
+            width: 44px;
+            height: 44px;
+            background: var(--hd-gradient-cta);
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5rem;
+            box-shadow: 0 4px 12px rgba(255, 140, 0, 0.3);
+        }
+
+        .logo-text {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .logo-text strong {
+            color: #fff;
+            font-size: 1.2rem;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+        }
+
+        .logo-text span {
+            color: rgba(255,255,255,0.7);
+            font-size: 0.72rem;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+        }
+
+        .nav {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .nav-link {
+            color: rgba(255,255,255,0.9);
+            text-decoration: none;
+            padding: 10px 16px;
+            border-radius: 8px;
+            font-size: 0.9rem;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+
+        .nav-link:hover {
+            background: rgba(255,255,255,0.1);
+            color: #fff;
+        }
+
+        .header-actions {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .btn-login {
+            color: rgba(255,255,255,0.9);
+            text-decoration: none;
+            padding: 10px 18px;
+            font-size: 0.9rem;
+            font-weight: 500;
+            border-radius: 8px;
+            transition: all 0.2s;
+        }
+
+        .btn-login:hover {
+            background: rgba(255,255,255,0.1);
+            color: #fff;
+        }
+
+        .btn-cta {
+            background: var(--hd-gradient-cta);
+            color: var(--hd-primary-darker);
+            text-decoration: none;
+            padding: 12px 24px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            border-radius: 8px;
+            transition: all 0.25s;
+            box-shadow: 0 4px 12px rgba(255, 140, 0, 0.3);
+        }
+
+        .btn-cta:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(255, 140, 0, 0.4);
+        }
+
+        /* ═══════════════════════════════════════════════════════════════════
+           HERO SECTION
+           ═══════════════════════════════════════════════════════════════════ */
+        .hero {
+            background: var(--hd-gradient-hero);
+            padding: 80px 24px 100px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .hero::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            right: -20%;
+            width: 80%;
+            height: 200%;
+            background: radial-gradient(ellipse at center, rgba(255, 140, 0, 0.08) 0%, transparent 60%);
+            pointer-events: none;
+        }
+
+        .hero::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 120px;
+            background: linear-gradient(to top, var(--hd-bg) 0%, transparent 100%);
+        }
+
+        .hero-content {
+            max-width: 1200px;
+            margin: 0 auto;
+            position: relative;
+            z-index: 1;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 60px;
+            align-items: center;
+        }
+
+        .hero-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 18px;
+            background: rgba(255,255,255,0.08);
+            backdrop-filter: blur(10px);
+            border-radius: 999px;
+            font-size: 0.8rem;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            border: 1px solid rgba(255,255,255,0.15);
+            color: #fff;
+            margin-bottom: 24px;
+        }
+
+        .pulse {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--hd-accent);
+            box-shadow: 0 0 12px var(--hd-accent);
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.6; transform: scale(1.3); }
+        }
+
+        .hero h1 {
+            font-size: clamp(2.5rem, 5vw, 3.5rem);
+            font-weight: 800;
+            color: #fff;
+            line-height: 1.1;
+            margin-bottom: 24px;
+            letter-spacing: -0.03em;
+        }
+
+        .hero h1 .highlight {
+            color: var(--hd-accent);
+        }
+
+        .hero-subtitle {
+            font-size: 1.15rem;
+            color: rgba(255,255,255,0.85);
+            margin-bottom: 32px;
+            line-height: 1.7;
+            max-width: 540px;
+        }
+
+        .hero-cta-group {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 16px;
+            margin-bottom: 40px;
+        }
+
+        .hero-cta {
+            padding: 16px 32px;
+            border-radius: 10px;
+            font-weight: 600;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            transition: all 0.25s ease;
+            font-size: 1rem;
+        }
+
+        .hero-cta.primary {
+            background: var(--hd-white);
+            color: var(--hd-primary-dark);
+            box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+        }
+
+        .hero-cta.primary:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 8px 30px rgba(0,0,0,0.2);
+        }
+
+        .hero-cta.secondary {
+            background: rgba(255,255,255,0.1);
+            color: #fff;
+            border: 1px solid rgba(255,255,255,0.3);
+            backdrop-filter: blur(10px);
+        }
+
+        .hero-cta.secondary:hover {
+            background: rgba(255,255,255,0.15);
+            border-color: rgba(255,255,255,0.5);
+        }
+
+        .hero-stats {
+            display: flex;
+            gap: 40px;
+        }
+
+        .hero-stat {
+            text-align: left;
+        }
+
+        .hero-stat-value {
+            font-size: 2rem;
+            font-weight: 800;
+            color: var(--hd-accent);
+        }
+
+        .hero-stat-label {
+            font-size: 0.85rem;
+            color: rgba(255,255,255,0.7);
+        }
+
+        /* Hero Visual */
+        .hero-visual {
+            position: relative;
+        }
+
+        .hero-mockup {
+            background: rgba(15, 23, 42, 0.9);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 16px;
+            padding: 12px;
+            box-shadow: 0 40px 80px rgba(0,0,0,0.4);
+        }
+
+        .mockup-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 16px;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .mockup-dots {
+            display: flex;
+            gap: 6px;
+        }
+
+        .mockup-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+        }
+
+        .mockup-dot.red { background: #EF4444; }
+        .mockup-dot.yellow { background: #F59E0B; }
+        .mockup-dot.green { background: #22C55E; }
+
+        .mockup-title {
+            color: rgba(255,255,255,0.5);
+            font-size: 0.8rem;
+            flex: 1;
+            text-align: center;
+        }
+
+        .mockup-body {
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .mockup-question {
+            background: rgba(0, 102, 179, 0.2);
+            border: 1px solid rgba(0, 102, 179, 0.3);
+            padding: 14px 18px;
+            border-radius: 10px;
+            color: rgba(255,255,255,0.9);
+            font-size: 0.95rem;
+        }
+
+        .mockup-answer {
+            background: rgba(255, 140, 0, 0.1);
+            border-left: 4px solid var(--hd-accent);
+            padding: 16px 20px;
+            border-radius: 0 10px 10px 0;
+        }
+
+        .mockup-answer-label {
+            font-size: 0.75rem;
+            color: var(--hd-accent);
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 8px;
+        }
+
+        .mockup-answer-text {
+            color: rgba(255,255,255,0.9);
+            font-size: 0.95rem;
+            line-height: 1.6;
+        }
+
+        .mockup-answer-text strong {
+            color: var(--hd-accent);
+            font-weight: 700;
+        }
+
+        .mockup-source {
+            margin-top: 12px;
+            padding-top: 12px;
+            border-top: 1px solid rgba(255,255,255,0.1);
+            font-size: 0.8rem;
+            color: rgba(255,255,255,0.5);
+        }
+
+        .mockup-source a {
+            color: var(--hd-accent);
+            text-decoration: none;
+        }
+
+        /* ═══════════════════════════════════════════════════════════════════
+           TRUST BAR
+           ═══════════════════════════════════════════════════════════════════ */
+        .trust-bar {
+            background: var(--hd-white);
+            border-bottom: 1px solid var(--hd-border);
+            padding: 32px 24px;
+        }
+
+        .trust-inner {
+            max-width: 1200px;
+            margin: 0 auto;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 60px;
+            flex-wrap: wrap;
+        }
+
+        .trust-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .trust-icon {
+            width: 48px;
+            height: 48px;
+            background: linear-gradient(135deg, var(--hd-primary) 0%, var(--hd-primary-dark) 100%);
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.3rem;
+        }
+
+        .trust-text strong {
+            display: block;
+            font-size: 1.4rem;
+            font-weight: 700;
+            color: var(--hd-primary);
+        }
+
+        .trust-text span {
+            font-size: 0.85rem;
+            color: var(--hd-text-muted);
+        }
+
+        /* ═══════════════════════════════════════════════════════════════════
+           PROBLEM SECTION
+           ═══════════════════════════════════════════════════════════════════ */
+        .problem {
+            padding: 100px 24px;
+            background: var(--hd-white);
+        }
+
+        .section-header {
+            text-align: center;
+            max-width: 700px;
+            margin: 0 auto 60px;
+        }
+
+        .section-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: rgba(0, 102, 179, 0.08);
+            color: var(--hd-primary);
+            padding: 8px 18px;
+            border-radius: 999px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            margin-bottom: 20px;
+        }
+
+        .section-header h2 {
+            font-size: clamp(1.8rem, 4vw, 2.5rem);
+            font-weight: 700;
+            color: var(--hd-text);
+            margin-bottom: 16px;
+            letter-spacing: -0.02em;
+        }
+
+        .section-header p {
+            color: var(--hd-text-muted);
+            font-size: 1.1rem;
+            line-height: 1.7;
+        }
+
+        .problem-grid {
+            max-width: 1000px;
+            margin: 0 auto;
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 32px;
+        }
+
+        .problem-card {
+            text-align: center;
+            padding: 40px 28px;
+            background: var(--hd-bg);
+            border-radius: 16px;
+            border: 1px solid var(--hd-border);
+            transition: all 0.3s ease;
+        }
+
+        .problem-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 12px 40px rgba(0,0,0,0.08);
+        }
+
+        .problem-number {
+            width: 64px;
+            height: 64px;
+            background: linear-gradient(135deg, #DC2626 0%, #B91C1C 100%);
+            border-radius: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.8rem;
+            font-weight: 800;
+            color: #fff;
+            margin: 0 auto 20px;
+        }
+
+        .problem-card h3 {
+            font-size: 1.3rem;
+            font-weight: 600;
+            color: var(--hd-text);
+            margin-bottom: 12px;
+        }
+
+        .problem-card p {
+            color: var(--hd-text-muted);
+            font-size: 0.95rem;
+            line-height: 1.6;
+        }
+
+        .problem-stat {
+            margin-top: 16px;
+            padding-top: 16px;
+            border-top: 1px solid var(--hd-border);
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: #DC2626;
+        }
+
+        /* ═══════════════════════════════════════════════════════════════════
+           SOLUTION SECTION
+           ═══════════════════════════════════════════════════════════════════ */
+        .solution {
+            padding: 100px 24px;
+            background: var(--hd-bg);
+        }
+
+        .solution-grid {
+            max-width: 1200px;
+            margin: 0 auto;
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 28px;
+        }
+
+        .solution-card {
+            background: var(--hd-white);
+            border: 1px solid var(--hd-border);
+            border-radius: 16px;
+            padding: 36px;
+            transition: all 0.3s ease;
+        }
+
+        .solution-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 12px 40px rgba(0, 102, 179, 0.1);
+            border-color: var(--hd-primary);
+        }
+
+        .solution-icon {
+            width: 64px;
+            height: 64px;
+            background: linear-gradient(135deg, var(--hd-primary) 0%, var(--hd-primary-dark) 100%);
+            border-radius: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.6rem;
+            margin-bottom: 24px;
+            box-shadow: 0 8px 20px rgba(0, 102, 179, 0.2);
+        }
+
+        .solution-card h3 {
+            font-size: 1.2rem;
+            font-weight: 600;
+            color: var(--hd-text);
+            margin-bottom: 12px;
+        }
+
+        .solution-card p {
+            color: var(--hd-text-muted);
+            font-size: 0.95rem;
+            line-height: 1.6;
+        }
+
+        /* ═══════════════════════════════════════════════════════════════════
+           HOW IT WORKS
+           ═══════════════════════════════════════════════════════════════════ */
+        .how-it-works {
+            padding: 100px 24px;
+            background: var(--hd-white);
+        }
+
+        .steps {
+            max-width: 900px;
+            margin: 0 auto;
+            display: flex;
+            flex-direction: column;
+            gap: 0;
+        }
+
+        .step {
+            display: flex;
+            gap: 40px;
+            align-items: flex-start;
+            padding: 40px 0;
+            position: relative;
+        }
+
+        .step:not(:last-child)::after {
+            content: '';
+            position: absolute;
+            left: 39px;
+            top: 100px;
+            bottom: 0;
+            width: 2px;
+            background: linear-gradient(to bottom, var(--hd-primary) 0%, var(--hd-border) 100%);
+        }
+
+        .step-number {
+            width: 80px;
+            height: 80px;
+            background: linear-gradient(135deg, var(--hd-primary) 0%, var(--hd-primary-dark) 100%);
+            border-radius: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.8rem;
+            font-weight: 800;
+            color: #fff;
+            flex-shrink: 0;
+            box-shadow: 0 12px 30px rgba(0, 102, 179, 0.25);
+            position: relative;
+            z-index: 1;
+        }
+
+        .step-content h3 {
+            font-size: 1.4rem;
+            font-weight: 600;
+            color: var(--hd-text);
+            margin-bottom: 12px;
+        }
+
+        .step-content p {
+            color: var(--hd-text-muted);
+            font-size: 1.05rem;
+            line-height: 1.7;
+            margin-bottom: 16px;
+        }
+
+        .step-highlight {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: rgba(0, 102, 179, 0.08);
+            color: var(--hd-primary);
+            padding: 8px 16px;
+            border-radius: 8px;
+            font-size: 0.9rem;
+            font-weight: 600;
+        }
+
+        /* ═══════════════════════════════════════════════════════════════════
+           USE CASES
+           ═══════════════════════════════════════════════════════════════════ */
+        .use-cases {
+            padding: 100px 24px;
+            background: var(--hd-bg);
+        }
+
+        .use-cases-grid {
+            max-width: 1200px;
+            margin: 0 auto;
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 24px;
+        }
+
+        .use-case-card {
+            background: linear-gradient(135deg, var(--hd-primary) 0%, var(--hd-primary-dark) 100%);
+            border-radius: 16px;
+            padding: 32px;
+            color: #fff;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .use-case-card::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            right: -50%;
+            width: 100%;
+            height: 100%;
+            background: radial-gradient(circle, rgba(255,255,255,0.1) 0%, transparent 60%);
+        }
+
+        .use-case-card:hover {
+            transform: translateY(-6px);
+            box-shadow: 0 20px 40px rgba(0, 102, 179, 0.3);
+        }
+
+        .use-case-icon {
+            font-size: 2.5rem;
+            margin-bottom: 20px;
+        }
+
+        .use-case-card h3 {
+            font-size: 1.15rem;
+            font-weight: 600;
+            margin-bottom: 10px;
+            position: relative;
+        }
+
+        .use-case-card p {
+            font-size: 0.9rem;
+            opacity: 0.85;
+            line-height: 1.5;
+            position: relative;
+        }
+
+        /* ═══════════════════════════════════════════════════════════════════
+           ROI CALCULATOR
+           ═══════════════════════════════════════════════════════════════════ */
+        .roi-section {
+            padding: 100px 24px;
+            background: var(--hd-gradient-hero);
+        }
+
+        .roi-container {
+            max-width: 1000px;
+            margin: 0 auto;
+            background: rgba(255,255,255,0.05);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 24px;
+            padding: 60px;
+        }
+
+        .roi-header {
+            text-align: center;
+            margin-bottom: 50px;
+        }
+
+        .roi-header h2 {
+            font-size: 2rem;
+            font-weight: 700;
+            color: #fff;
+            margin-bottom: 12px;
+        }
+
+        .roi-header p {
+            color: rgba(255,255,255,0.7);
+            font-size: 1.1rem;
+        }
+
+        .roi-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 40px;
+            margin-bottom: 50px;
+        }
+
+        .roi-input {
+            text-align: center;
+        }
+
+        .roi-input label {
+            display: block;
+            color: rgba(255,255,255,0.7);
+            font-size: 0.9rem;
+            margin-bottom: 12px;
+        }
+
+        .roi-value {
+            font-size: 3rem;
+            font-weight: 800;
+            color: var(--hd-accent);
+        }
+
+        .roi-unit {
+            font-size: 1rem;
+            color: rgba(255,255,255,0.6);
+            margin-left: 8px;
+        }
+
+        .roi-result {
+            text-align: center;
+            padding: 40px;
+            background: rgba(255, 140, 0, 0.15);
+            border: 2px solid var(--hd-accent);
+            border-radius: 16px;
+        }
+
+        .roi-result-label {
+            font-size: 1rem;
+            color: rgba(255,255,255,0.8);
+            margin-bottom: 12px;
+        }
+
+        .roi-result-value {
+            font-size: 4rem;
+            font-weight: 800;
+            color: var(--hd-accent);
+        }
+
+        .roi-result-subtitle {
+            font-size: 1.1rem;
+            color: rgba(255,255,255,0.7);
+            margin-top: 8px;
+        }
+
+        /* ═══════════════════════════════════════════════════════════════════
+           PRICING
+           ═══════════════════════════════════════════════════════════════════ */
+        .pricing {
+            padding: 100px 24px;
+            background: var(--hd-white);
+        }
+
+        .pricing-grid {
+            max-width: 1200px;
+            margin: 0 auto;
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 32px;
+        }
+
+        .pricing-card {
+            background: var(--hd-bg);
+            border: 2px solid var(--hd-border);
+            border-radius: 24px;
+            padding: 40px;
+            position: relative;
+            transition: all 0.3s ease;
+        }
+
+        .pricing-card.featured {
+            background: var(--hd-white);
+            border-color: var(--hd-primary);
+            transform: scale(1.03);
+            box-shadow: 0 20px 50px rgba(0, 102, 179, 0.15);
+        }
+
+        .pricing-card:hover {
+            border-color: var(--hd-primary);
+        }
+
+        .pricing-badge {
+            position: absolute;
+            top: -14px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: var(--hd-gradient-cta);
+            color: var(--hd-primary-darker);
+            padding: 8px 24px;
+            border-radius: 999px;
+            font-size: 0.8rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .pricing-header {
+            text-align: center;
+            padding-bottom: 32px;
+            border-bottom: 1px solid var(--hd-border);
+            margin-bottom: 32px;
+        }
+
+        .pricing-name {
+            font-size: 1.3rem;
+            font-weight: 600;
+            color: var(--hd-text);
+            margin-bottom: 8px;
+        }
+
+        .pricing-price {
+            font-size: 3rem;
+            font-weight: 800;
+            color: var(--hd-primary);
+        }
+
+        .pricing-price span {
+            font-size: 1rem;
+            font-weight: 400;
+            color: var(--hd-text-muted);
+        }
+
+        .pricing-description {
+            font-size: 0.9rem;
+            color: var(--hd-text-muted);
+            margin-top: 8px;
+        }
+
+        .pricing-features {
+            list-style: none;
+            margin-bottom: 36px;
+        }
+
+        .pricing-features li {
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            padding: 12px 0;
+            color: var(--hd-text);
+            font-size: 0.95rem;
+        }
+
+        .pricing-features li::before {
+            content: '✓';
+            color: var(--hd-success);
+            font-weight: 700;
+            font-size: 1.1rem;
+        }
+
+        .pricing-cta {
+            display: block;
+            text-align: center;
+            padding: 16px 28px;
+            border-radius: 12px;
+            font-weight: 600;
+            text-decoration: none;
+            transition: all 0.25s ease;
+            font-size: 1rem;
+        }
+
+        .pricing-cta.primary {
+            background: linear-gradient(135deg, var(--hd-primary) 0%, var(--hd-primary-dark) 100%);
+            color: #fff;
+            box-shadow: 0 8px 20px rgba(0, 102, 179, 0.25);
+        }
+
+        .pricing-cta.primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 12px 30px rgba(0, 102, 179, 0.35);
+        }
+
+        .pricing-cta.secondary {
+            background: var(--hd-white);
+            color: var(--hd-primary);
+            border: 2px solid var(--hd-primary);
+        }
+
+        .pricing-cta.secondary:hover {
+            background: var(--hd-primary);
+            color: #fff;
+        }
+
+        /* ═══════════════════════════════════════════════════════════════════
+           TESTIMONIAL (Placeholder)
+           ═══════════════════════════════════════════════════════════════════ */
+        .testimonial {
+            padding: 80px 24px;
+            background: var(--hd-bg);
+        }
+
+        .testimonial-card {
+            max-width: 800px;
+            margin: 0 auto;
+            text-align: center;
+            padding: 50px;
+            background: var(--hd-white);
+            border-radius: 24px;
+            border: 1px solid var(--hd-border);
+        }
+
+        .testimonial-quote {
+            font-size: 1.4rem;
+            font-style: italic;
+            color: var(--hd-text);
+            line-height: 1.7;
+            margin-bottom: 32px;
+        }
+
+        .testimonial-author {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 16px;
+        }
+
+        .testimonial-avatar {
+            width: 60px;
+            height: 60px;
+            background: var(--hd-gradient-hero);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5rem;
+            color: #fff;
+        }
+
+        .testimonial-info strong {
+            display: block;
+            color: var(--hd-text);
+            font-size: 1.1rem;
+        }
+
+        .testimonial-info span {
+            color: var(--hd-text-muted);
+            font-size: 0.9rem;
+        }
+
+        /* ═══════════════════════════════════════════════════════════════════
+           FAQ
+           ═══════════════════════════════════════════════════════════════════ */
+        .faq {
+            padding: 100px 24px;
+            background: var(--hd-white);
+        }
+
+        .faq-grid {
+            max-width: 900px;
+            margin: 0 auto;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .faq-item {
+            background: var(--hd-bg);
+            border: 1px solid var(--hd-border);
+            border-radius: 12px;
+            padding: 24px 28px;
+        }
+
+        .faq-question {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: var(--hd-text);
+            margin-bottom: 12px;
+        }
+
+        .faq-answer {
+            color: var(--hd-text-muted);
+            font-size: 0.95rem;
+            line-height: 1.7;
+        }
+
+        /* ═══════════════════════════════════════════════════════════════════
+           CTA SECTION
+           ═══════════════════════════════════════════════════════════════════ */
+        .cta-section {
+            padding: 100px 24px;
+            background: var(--hd-gradient-hero);
+            text-align: center;
+        }
+
+        .cta-content {
+            max-width: 700px;
+            margin: 0 auto;
+        }
+
+        .cta-section h2 {
+            font-size: clamp(1.8rem, 4vw, 2.5rem);
+            font-weight: 700;
+            color: #fff;
+            margin-bottom: 20px;
+        }
+
+        .cta-section p {
+            color: rgba(255,255,255,0.85);
+            font-size: 1.15rem;
+            margin-bottom: 36px;
+            line-height: 1.7;
+        }
+
+        .cta-buttons {
+            display: flex;
+            justify-content: center;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+
+        /* ═══════════════════════════════════════════════════════════════════
+           FOOTER
+           ═══════════════════════════════════════════════════════════════════ */
+        .footer {
+            background: #0A0F1A;
+            color: rgba(255,255,255,0.7);
+            padding: 80px 24px 40px;
+        }
+
+        .footer-inner {
+            max-width: 1200px;
+            margin: 0 auto;
+            display: grid;
+            grid-template-columns: 2fr repeat(3, 1fr);
+            gap: 60px;
+            margin-bottom: 60px;
+        }
+
+        .footer-brand p {
+            margin-top: 20px;
+            font-size: 0.95rem;
+            line-height: 1.7;
+            max-width: 300px;
+        }
+
+        .footer-col h4 {
+            color: #fff;
+            font-size: 1rem;
+            font-weight: 600;
+            margin-bottom: 24px;
+        }
+
+        .footer-col a {
+            display: block;
+            color: rgba(255,255,255,0.6);
+            text-decoration: none;
+            padding: 8px 0;
+            font-size: 0.9rem;
+            transition: all 0.2s;
+        }
+
+        .footer-col a:hover {
+            color: var(--hd-accent);
+            padding-left: 6px;
+        }
+
+        .footer-bottom {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding-top: 40px;
+            border-top: 1px solid rgba(255,255,255,0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 20px;
+        }
+
+        .footer-bottom p {
+            font-size: 0.85rem;
+        }
+
+        .footer-links {
+            display: flex;
+            gap: 32px;
+        }
+
+        .footer-links a {
+            color: rgba(255,255,255,0.6);
+            text-decoration: none;
+            font-size: 0.85rem;
+            transition: color 0.2s;
+        }
+
+        .footer-links a:hover {
+            color: #fff;
+        }
+
+        /* ═══════════════════════════════════════════════════════════════════
+           RESPONSIVE
+           ═══════════════════════════════════════════════════════════════════ */
+        @media (max-width: 1024px) {
+            .hero-content {
+                grid-template-columns: 1fr;
+                gap: 40px;
+            }
+
+            .hero-visual {
+                order: -1;
+            }
+
+            .nav {
+                display: none;
+            }
+
+            .solution-grid,
+            .pricing-grid {
+                grid-template-columns: 1fr;
+                max-width: 500px;
+            }
+
+            .use-cases-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+
+            .roi-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .footer-inner {
+                grid-template-columns: 1fr 1fr;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .hero {
+                padding: 60px 24px 80px;
+            }
+
+            .problem-grid,
+            .use-cases-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .hero-stats {
+                flex-direction: column;
+                gap: 20px;
+            }
+
+            .step {
+                flex-direction: column;
+                align-items: center;
+                text-align: center;
+            }
+
+            .step:not(:last-child)::after {
+                display: none;
+            }
+
+            .pricing-card.featured {
+                transform: none;
+            }
+
+            .footer-inner {
+                grid-template-columns: 1fr;
+                gap: 40px;
+            }
+
+            .footer-bottom {
+                flex-direction: column;
+                text-align: center;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- HEADER -->
+    <header class="header">
+        <div class="header-inner">
+            <a href="/" class="logo">
+                <div class="logo-icon">🔧</div>
+                <div class="logo-text">
+                    <strong>HydraulikDoc AI</strong>
+                    <span>by SBS Deutschland</span>
+                </div>
+            </a>
+
+            <nav class="nav">
+                <a href="#problem" class="nav-link">Das Problem</a>
+                <a href="#solution" class="nav-link">Lösung</a>
+                <a href="#how-it-works" class="nav-link">So funktioniert's</a>
+                <a href="#pricing" class="nav-link">Preise</a>
+                <a href="#faq" class="nav-link">FAQ</a>
+            </nav>
+
+            <div class="header-actions">
+                <a href="https://knowledge-sbsdeutschland.streamlit.app" class="btn-login">Login</a>
+                <a href="https://knowledge-sbsdeutschland.streamlit.app" class="btn-cta">Kostenlos testen →</a>
+            </div>
+        </div>
+    </header>
+
+    <!-- HERO -->
+    <section class="hero">
+        <div class="hero-content">
+            <div class="hero-text">
+                <div class="hero-badge">
+                    <span class="pulse"></span>
+                    KI für Hydraulik-Service
+                </div>
+                <h1>Technische Dokumentation.<br><span class="highlight">Sofort gefunden.</span></h1>
+                <p class="hero-subtitle">
+                    Ihre Servicetechniker suchen täglich in PDF-Handbüchern. 
+                    HydraulikDoc AI findet Druckwerte, Schaltpläne und Ersatzteilnummern 
+                    in unter 10 Sekunden – mit exakter Quellenangabe.
+                </p>
+                <div class="hero-cta-group">
+                    <a href="https://knowledge-sbsdeutschland.streamlit.app" class="hero-cta primary">
+                        14 Tage kostenlos testen →
+                    </a>
+                    <a href="#how-it-works" class="hero-cta secondary">
+                        Demo ansehen
+                    </a>
+                </div>
+                <div class="hero-stats">
+                    <div class="hero-stat">
+                        <div class="hero-stat-value">&lt;10s</div>
+                        <div class="hero-stat-label">Antwortzeit</div>
+                    </div>
+                    <div class="hero-stat">
+                        <div class="hero-stat-value">100%</div>
+                        <div class="hero-stat-label">Quellenangabe</div>
+                    </div>
+                    <div class="hero-stat">
+                        <div class="hero-stat-value">🇩🇪</div>
+                        <div class="hero-stat-label">Deutsche Server</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="hero-visual">
+                <div class="hero-mockup">
+                    <div class="mockup-header">
+                        <div class="mockup-dots">
+                            <div class="mockup-dot red"></div>
+                            <div class="mockup-dot yellow"></div>
+                            <div class="mockup-dot green"></div>
+                        </div>
+                        <span class="mockup-title">HydraulikDoc AI</span>
+                    </div>
+                    <div class="mockup-body">
+                        <div class="mockup-question">
+                            🔍 Welcher Systemdruck für den HY-500 Zylinder?
+                        </div>
+                        <div class="mockup-answer">
+                            <div class="mockup-answer-label">🤖 Antwort</div>
+                            <div class="mockup-answer-text">
+                                Der maximale Systemdruck für den HY-500 Hydraulikzylinder beträgt <strong>185 bar</strong>. 
+                                Der empfohlene Betriebsdruck liegt bei <strong>160-170 bar</strong>.
+                            </div>
+                            <div class="mockup-source">
+                                📄 Quelle: <a href="#">HY-500_Datenblatt.pdf</a>, Seite 3, Tabelle 2.1
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- TRUST BAR -->
+    <div class="trust-bar">
+        <div class="trust-inner">
+            <div class="trust-item">
+                <div class="trust-icon">🔧</div>
+                <div class="trust-text">
+                    <strong>Hydraulik-Fokus</strong>
+                    <span>Spezialisiert auf Fluidtechnik</span>
+                </div>
+            </div>
+            <div class="trust-item">
+                <div class="trust-icon">📊</div>
+                <div class="trust-text">
+                    <strong>Tabellenerkennung</strong>
+                    <span>Druckwerte & Spezifikationen</span>
+                </div>
+            </div>
+            <div class="trust-item">
+                <div class="trust-icon">🔒</div>
+                <div class="trust-text">
+                    <strong>DSGVO-konform</strong>
+                    <span>Server in Deutschland</span>
+                </div>
+            </div>
+            <div class="trust-item">
+                <div class="trust-icon">⚡</div>
+                <div class="trust-text">
+                    <strong>Enterprise-ready</strong>
+                    <span>SSO, Rollen, API</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- PROBLEM -->
+    <section class="problem" id="problem">
+        <div class="section-header">
+            <span class="section-badge">⚠️ Das Problem</span>
+            <h2>Ihre Techniker verbringen zu viel Zeit mit Suchen</h2>
+            <p>Branchenstudien zeigen: Servicetechniker verwenden 20-30% ihrer Arbeitszeit für die Informationssuche in technischer Dokumentation.</p>
+        </div>
+
+        <div class="problem-grid">
+            <div class="problem-card">
+                <div class="problem-number">1</div>
+                <h3>Zeitverschwendung</h3>
+                <p>Durchschnittlich 30-60 Minuten pro Tag werden mit der Suche in PDFs verbracht.</p>
+                <div class="problem-stat">200h / Jahr</div>
+            </div>
+            <div class="problem-card">
+                <div class="problem-number">2</div>
+                <h3>Wissensverlust</h3>
+                <p>Wenn erfahrene Techniker in Rente gehen, geht jahrzehntelanges Know-how verloren.</p>
+                <div class="problem-stat">30 Jahre</div>
+            </div>
+            <div class="problem-card">
+                <div class="problem-number">3</div>
+                <h3>Fehlerrisiko</h3>
+                <p>Falsche oder veraltete Informationen führen zu Fehlern und Nacharbeit.</p>
+                <div class="problem-stat">15% Nacharbeit</div>
+            </div>
+        </div>
+    </section>
+
+    <!-- SOLUTION -->
+    <section class="solution" id="solution">
+        <div class="section-header">
+            <span class="section-badge">✅ Die Lösung</span>
+            <h2>KI-gestützte Suche in allen Ihren Handbüchern</h2>
+            <p>HydraulikDoc AI macht Ihre gesamte technische Dokumentation durchsuchbar – in natürlicher Sprache.</p>
+        </div>
+
+        <div class="solution-grid">
+            <div class="solution-card">
+                <div class="solution-icon">📄</div>
+                <h3>Multi-Dokument-Suche</h3>
+                <p>Laden Sie alle Handbücher hoch und durchsuchen Sie sie gleichzeitig. Vergleichen Sie Informationen über Dokumente hinweg.</p>
+            </div>
+            <div class="solution-card">
+                <div class="solution-icon">📊</div>
+                <h3>Tabellenerkennung</h3>
+                <p>KI erkennt Tabellen mit Druckwerten, Drehmomentangaben und Spezifikationen präzise – auch in komplexen Layouts.</p>
+            </div>
+            <div class="solution-card">
+                <div class="solution-icon">📍</div>
+                <h3>Exakte Quellenangabe</h3>
+                <p>Jede Antwort enthält Dokumentname und Seitenzahl. Verifizieren Sie jede Information im Original.</p>
+            </div>
+            <div class="solution-card">
+                <div class="solution-icon">🛡️</div>
+                <h3>Keine Halluzinationen</h3>
+                <p>Das System antwortet nur basierend auf Ihren Dokumenten. Keine erfundenen Informationen.</p>
+            </div>
+            <div class="solution-card">
+                <div class="solution-icon">🔐</div>
+                <h3>Enterprise Security</h3>
+                <p>Rollenbasierte Zugriffskontrolle, SSO-Integration und optionale On-Premise-Installation.</p>
+            </div>
+            <div class="solution-card">
+                <div class="solution-icon">🇩🇪</div>
+                <h3>100% Deutsch</h3>
+                <p>Deutsche Oberfläche, deutsche Server, deutsche KI-Antworten. Optimiert für den DACH-Markt.</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- HOW IT WORKS -->
+    <section class="how-it-works" id="how-it-works">
+        <div class="section-header">
+            <span class="section-badge">📋 Anleitung</span>
+            <h2>In 3 Schritten zur Antwort</h2>
+            <p>So einfach funktioniert HydraulikDoc AI.</p>
+        </div>
+
+        <div class="steps">
+            <div class="step">
+                <div class="step-number">1</div>
+                <div class="step-content">
+                    <h3>Dokumente hochladen</h3>
+                    <p>Laden Sie Ihre Hydraulik-Handbücher, Datenblätter und Wartungsanleitungen als PDF hoch. Mehrere Dokumente gleichzeitig möglich.</p>
+                    <span class="step-highlight">📄 Unbegrenzte PDFs im Professional-Plan</span>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-number">2</div>
+                <div class="step-content">
+                    <h3>KI analysiert & indexiert</h3>
+                    <p>Unsere KI extrahiert Texte, Tabellen und Schaltpläne. Alles wird in einer Vektordatenbank indexiert für blitzschnelle Suche.</p>
+                    <span class="step-highlight">⚡ Verarbeitung in unter 60 Sekunden</span>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-number">3</div>
+                <div class="step-content">
+                    <h3>Fragen stellen & Antworten erhalten</h3>
+                    <p>Stellen Sie Fragen in natürlicher Sprache. Das System findet die relevanten Stellen und gibt präzise Antworten mit Quellenangabe.</p>
+                    <span class="step-highlight">🎯 Antwort in unter 10 Sekunden</span>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- USE CASES -->
+    <section class="use-cases" id="use-cases">
+        <div class="section-header">
+            <span class="section-badge">💼 Anwendungsfälle</span>
+            <h2>Perfekt für diese Einsatzgebiete</h2>
+            <p>Überall dort, wo Hydraulik-Dokumentation schnell gefunden werden muss.</p>
+        </div>
+
+        <div class="use-cases-grid">
+            <div class="use-case-card">
+                <div class="use-case-icon">🔧</div>
+                <h3>Service & Wartung</h3>
+                <p>Außendiensttechniker finden Druckwerte und Ersatzteilnummern direkt beim Kunden.</p>
+            </div>
+            <div class="use-case-card">
+                <div class="use-case-icon">🏭</div>
+                <h3>Instandhaltung</h3>
+                <p>Werkstatt-Teams lösen Probleme schneller mit sofortigem Zugriff auf alle Handbücher.</p>
+            </div>
+            <div class="use-case-card">
+                <div class="use-case-icon">📚</div>
+                <h3>Schulung & Onboarding</h3>
+                <p>Neue Techniker werden schneller produktiv durch einfachen Zugang zum Fachwissen.</p>
+            </div>
+            <div class="use-case-card">
+                <div class="use-case-icon">📞</div>
+                <h3>Technischer Support</h3>
+                <p>Hotline-Mitarbeiter beantworten Kundenanfragen sofort mit verifizierten Informationen.</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- ROI CALCULATOR -->
+    <section class="roi-section">
+        <div class="roi-container">
+            <div class="roi-header">
+                <h2>💰 Ihr Einsparpotenzial</h2>
+                <p>Berechnen Sie, wie viel Zeit und Geld Sie mit HydraulikDoc AI sparen können.</p>
+            </div>
+
+            <div class="roi-grid">
+                <div class="roi-input">
+                    <label>Servicetechniker im Team</label>
+                    <div class="roi-value">10<span class="roi-unit">Personen</span></div>
+                </div>
+                <div class="roi-input">
+                    <label>Suchzeit pro Tag (Minuten)</label>
+                    <div class="roi-value">45<span class="roi-unit">min</span></div>
+                </div>
+                <div class="roi-input">
+                    <label>Interner Stundensatz</label>
+                    <div class="roi-value">80<span class="roi-unit">€/h</span></div>
+                </div>
+            </div>
+
+            <div class="roi-result">
+                <div class="roi-result-label">Jährliches Einsparpotenzial</div>
+                <div class="roi-result-value">€24.000</div>
+                <div class="roi-result-subtitle">Bei 80% Zeitersparnis durch KI-Suche</div>
+            </div>
+        </div>
+    </section>
+
+    <!-- PRICING -->
+    <section class="pricing" id="pricing">
+        <div class="section-header">
+            <span class="section-badge">💰 Preise</span>
+            <h2>Transparent & fair kalkuliert</h2>
+            <p>Wählen Sie das passende Paket für Ihr Service-Team.</p>
+        </div>
+
+        <div class="pricing-grid">
+            <div class="pricing-card">
+                <div class="pricing-header">
+                    <div class="pricing-name">Starter</div>
+                    <div class="pricing-price">€79 <span>/ Monat</span></div>
+                    <div class="pricing-description">Für kleine Teams</div>
+                </div>
+                <ul class="pricing-features">
+                    <li>Bis zu 20 PDF-Dokumente</li>
+                    <li>500 Anfragen / Monat</li>
+                    <li>2 Benutzer</li>
+                    <li>E-Mail Support</li>
+                    <li>Deutsche Server</li>
+                    <li>Tabellenerkennung</li>
+                </ul>
+                <a href="https://knowledge-sbsdeutschland.streamlit.app" class="pricing-cta secondary">14 Tage testen</a>
+            </div>
+
+            <div class="pricing-card featured">
+                <div class="pricing-badge">Empfohlen</div>
+                <div class="pricing-header">
+                    <div class="pricing-name">Professional</div>
+                    <div class="pricing-price">€249 <span>/ Monat</span></div>
+                    <div class="pricing-description">Für Service-Abteilungen</div>
+                </div>
+                <ul class="pricing-features">
+                    <li>Unbegrenzte Dokumente</li>
+                    <li>2.000 Anfragen / Monat</li>
+                    <li>10 Benutzer</li>
+                    <li>Prioritäts-Support</li>
+                    <li>SSO Integration</li>
+                    <li>API-Zugang</li>
+                    <li>Nutzungsstatistiken</li>
+                </ul>
+                <a href="https://knowledge-sbsdeutschland.streamlit.app" class="pricing-cta primary">Jetzt starten →</a>
+            </div>
+
+            <div class="pricing-card">
+                <div class="pricing-header">
+                    <div class="pricing-name">Enterprise</div>
+                    <div class="pricing-price">Individuell</div>
+                    <div class="pricing-description">Für Konzerne</div>
+                </div>
+                <ul class="pricing-features">
+                    <li>Unbegrenzt alles</li>
+                    <li>Unbegrenzte Benutzer</li>
+                    <li>Dedizierte Instanz</li>
+                    <li>On-Premise Option</li>
+                    <li>SLA & 24/7 Support</li>
+                    <li>Custom Integration</li>
+                    <li>Persönlicher Ansprechpartner</li>
+                </ul>
+                <a href="mailto:info@sbsdeutschland.com?subject=HydraulikDoc%20Enterprise%20Anfrage" class="pricing-cta secondary">Kontakt aufnehmen</a>
+            </div>
+        </div>
+    </section>
+
+    <!-- TESTIMONIAL (Placeholder) -->
+    <section class="testimonial">
+        <div class="testimonial-card">
+            <div class="testimonial-quote">
+                "Mit HydraulikDoc AI finden unsere Techniker Informationen in Sekunden statt Minuten. 
+                Die Zeitersparnis ist enorm – und die Quellenangaben geben uns die Sicherheit, 
+                dass die Informationen stimmen."
+            </div>
+            <div class="testimonial-author">
+                <div class="testimonial-avatar">👤</div>
+                <div class="testimonial-info">
+                    <strong>Ihr Name hier</strong>
+                    <span>Serviceleiter, Pilot-Kunde gesucht</span>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- FAQ -->
+    <section class="faq" id="faq">
+        <div class="section-header">
+            <span class="section-badge">❓ FAQ</span>
+            <h2>Häufig gestellte Fragen</h2>
+        </div>
+
+        <div class="faq-grid">
+            <div class="faq-item">
+                <div class="faq-question">Wie sicher sind meine Dokumente?</div>
+                <div class="faq-answer">
+                    Alle Daten werden auf Servern in Deutschland gespeichert und sind DSGVO-konform. 
+                    Die Dokumente werden verschlüsselt übertragen und gespeichert. Auf Wunsch bieten wir 
+                    auch eine On-Premise-Installation in Ihrem eigenen Rechenzentrum an.
+                </div>
+            </div>
+            <div class="faq-item">
+                <div class="faq-question">Welche Dokumentformate werden unterstützt?</div>
+                <div class="faq-answer">
+                    Aktuell unterstützen wir PDF-Dokumente – das Standardformat für technische Dokumentation. 
+                    Die KI erkennt auch gescannte Dokumente mittels OCR. Weitere Formate (Word, CAD) 
+                    sind in Planung.
+                </div>
+            </div>
+            <div class="faq-item">
+                <div class="faq-question">Kann die KI Schaltpläne verstehen?</div>
+                <div class="faq-answer">
+                    Die KI kann Text und Tabellen in Schaltplan-Dokumenten extrahieren und durchsuchen. 
+                    Die visuelle Interpretation von Schaltplan-Symbolen ist ein Feature, das wir 
+                    aktuell entwickeln.
+                </div>
+            </div>
+            <div class="faq-item">
+                <div class="faq-question">Wie lange dauert die Einrichtung?</div>
+                <div class="faq-answer">
+                    Die Grundeinrichtung dauert weniger als 5 Minuten. Sie registrieren sich, 
+                    laden Ihre ersten Dokumente hoch, und können sofort Fragen stellen. 
+                    Für Enterprise-Kunden bieten wir betreutes Onboarding an.
+                </div>
+            </div>
+            <div class="faq-item">
+                <div class="faq-question">Was passiert nach der Testphase?</div>
+                <div class="faq-answer">
+                    Nach 14 Tagen können Sie ein Abo abschließen oder die Nutzung beenden. 
+                    Es gibt keine automatische Verlängerung, keine versteckten Kosten. 
+                    Ihre Dokumente bleiben 30 Tage gespeichert, danach werden sie gelöscht.
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- CTA -->
+    <section class="cta-section">
+        <div class="cta-content">
+            <h2>Bereit für schnellere Antworten?</h2>
+            <p>
+                Starten Sie jetzt Ihre 14-tägige Testphase. Keine Kreditkarte erforderlich.
+                Laden Sie Ihr erstes Handbuch hoch und erleben Sie den Unterschied.
+            </p>
+            <div class="cta-buttons">
+                <a href="https://knowledge-sbsdeutschland.streamlit.app" class="hero-cta primary">
+                    Kostenlos testen →
+                </a>
+                <a href="mailto:info@sbsdeutschland.com?subject=HydraulikDoc%20Demo%20Anfrage" class="hero-cta secondary">
+                    Demo vereinbaren
+                </a>
+            </div>
+        </div>
+    </section>
+
+    <!-- FOOTER -->
+    <footer class="footer">
+        <div class="footer-inner">
+            <div class="footer-brand">
+                <a href="/" class="logo">
+                    <div class="logo-icon">🔧</div>
+                    <div class="logo-text">
+                        <strong>HydraulikDoc AI</strong>
+                        <span>by SBS Deutschland</span>
+                    </div>
+                </a>
+                <p>
+                    Die KI-Lösung für technische Dokumentation in der Hydraulik-Branche. 
+                    Entwickelt in Weinheim, gehostet in Deutschland.
+                </p>
+            </div>
+
+            <div class="footer-col">
+                <h4>Produkt</h4>
+                <a href="#solution">Features</a>
+                <a href="#pricing">Preise</a>
+                <a href="#how-it-works">So funktioniert's</a>
+                <a href="#faq">FAQ</a>
+            </div>
+
+            <div class="footer-col">
+                <h4>Unternehmen</h4>
+                <a href="https://sbsdeutschland.com/sbshomepage/unternehmen.html">Über SBS Deutschland</a>
+                <a href="https://sbsdeutschland.com/sbshomepage/kontakt.html">Kontakt</a>
+                <a href="https://sbsdeutschland.com">Weitere Produkte</a>
+            </div>
+
+            <div class="footer-col">
+                <h4>Rechtliches</h4>
+                <a href="https://sbsdeutschland.com/static/impressum.html">Impressum</a>
+                <a href="https://sbsdeutschland.com/static/datenschutz.html">Datenschutz</a>
+                <a href="https://sbsdeutschland.com/static/agb.html">AGB</a>
+            </div>
+        </div>
+
+        <div class="footer-bottom">
+            <p>© 2025 SBS Deutschland GmbH · Weinheim · Alle Rechte vorbehalten</p>
+            <div class="footer-links">
+                <a href="mailto:info@sbsdeutschland.com">info@sbsdeutschland.com</a>
+                <a href="https://www.linkedin.com/company/sbs-deutschland">LinkedIn</a>
+            </div>
+        </div>
+    </footer>
+</body>
+</html>

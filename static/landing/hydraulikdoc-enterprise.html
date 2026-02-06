@@ -1,223 +1,1196 @@
 <!DOCTYPE html>
 <html lang="de">
 <head>
-  <meta charset="utf-8" />
-  <title>HydraulikDoc Enterprise & IT-Security</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <!-- Fonts, CSS, Favicon analog hydraulikdoc.html ergänzen -->
-  <link rel="stylesheet" href="/static/landing/hydraulikdoc.css" />
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HydraulikDoc AI · Enterprise & IT-Security | SBS Deutschland</title>
+  <meta name="description" content="HydraulikDoc AI Enterprise – KI-Suche in Hydraulik-Dokumentation mit Single Sign-on, Rollen, Audit-Trails und DSGVO-konformer Datenhaltung.">
+  <meta name="keywords" content="Hydraulik, Dokumentation, KI, Service, Wartung, Enterprise, Security, DSGVO, Audit-Trail, SSO">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔧</text></svg>">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+  <!-- Open Graph -->
+  <meta property="og:title" content="HydraulikDoc AI Enterprise - Security & Compliance">
+  <meta property="og:description" content="Enterprise-ready KI-Suche in Hydraulik-Dokumentation mit SSO, Rollen, Audit-Trails und DSGVO-konformer Datenhaltung.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://sbsdeutschland.com/static/landing/hydraulikdoc-enterprise.html">
+
+  <style>
+    /* ═══════════════════════════════════════════════════════════════════
+       HYDRAULIKDOC AI - DESIGN SYSTEM
+       Enterprise SaaS Landing Page
+       ═══════════════════════════════════════════════════════════════════ */
+
+    :root {
+      /* Brand Colors - Hydraulik */
+      --hd-primary: #0066B3;
+      --hd-primary-dark: #004C8C;
+      --hd-primary-darker: #003366;
+      --hd-accent: #FF8C00;
+      --hd-accent-dark: #E67E00;
+
+      /* Functional */
+      --hd-success: #22C55E;
+      --hd-warning: #F59E0B;
+      --hd-danger: #DC2626;
+
+      /* Neutrals */
+      --hd-text: #1E293B;
+      --hd-text-muted: #64748B;
+      --hd-bg: #F8FAFC;
+      --hd-bg-dark: #0F172A;
+      --hd-border: #E2E8F0;
+      --hd-white: #FFFFFF;
+
+      /* Gradients */
+      --hd-gradient-hero: linear-gradient(135deg, #003366 0%, #0066B3 50%, #004C8C 100%);
+      --hd-gradient-cta: linear-gradient(135deg, #FF8C00 0%, #E67E00 100%);
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      color: var(--hd-text);
+      background: var(--hd-bg);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* HEADER */
+    .header {
+      background: var(--hd-gradient-hero);
+      position: sticky;
+      top: 0;
+      z-index: 1000;
+      box-shadow: 0 2px 20px rgba(0,0,0,0.15);
+    }
+
+    .header-inner {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 0 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 72px;
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      text-decoration: none;
+    }
+
+    .logo-icon {
+      width: 44px;
+      height: 44px;
+      background: var(--hd-gradient-cta);
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.5rem;
+      box-shadow: 0 4px 12px rgba(255, 140, 0, 0.3);
+    }
+
+    .logo-text {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .logo-text strong {
+      color: #fff;
+      font-size: 1.2rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+
+    .logo-text span {
+      color: rgba(255,255,255,0.7);
+      font-size: 0.72rem;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+
+    .nav {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .nav-link {
+      color: rgba(255,255,255,0.9);
+      text-decoration: none;
+      padding: 10px 16px;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      font-weight: 500;
+      transition: all 0.2s;
+    }
+
+    .nav-link:hover {
+      background: rgba(255,255,255,0.1);
+      color: #fff;
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .btn-login {
+      color: rgba(255,255,255,0.9);
+      text-decoration: none;
+      padding: 10px 18px;
+      font-size: 0.9rem;
+      font-weight: 500;
+      border-radius: 8px;
+      transition: all 0.2s;
+    }
+
+    .btn-login:hover {
+      background: rgba(255,255,255,0.1);
+      color: #fff;
+    }
+
+    .btn-cta {
+      background: var(--hd-gradient-cta);
+      color: var(--hd-primary-darker);
+      text-decoration: none;
+      padding: 12px 24px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      border-radius: 8px;
+      transition: all 0.25s;
+      box-shadow: 0 4px 12px rgba(255, 140, 0, 0.3);
+    }
+
+    .btn-cta:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 20px rgba(255, 140, 0, 0.4);
+    }
+
+    /* HERO */
+    .hero {
+      background: var(--hd-gradient-hero);
+      padding: 80px 24px 100px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .hero::before {
+      content: '';
+      position: absolute;
+      top: -50%;
+      right: -20%;
+      width: 80%;
+      height: 200%;
+      background: radial-gradient(ellipse at center, rgba(255, 140, 0, 0.08) 0%, transparent 60%);
+      pointer-events: none;
+    }
+
+    .hero::after {
+      content: '';
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 120px;
+      background: linear-gradient(to top, var(--hd-bg) 0%, transparent 100%);
+    }
+
+    .hero-content {
+      max-width: 1200px;
+      margin: 0 auto;
+      position: relative;
+      z-index: 1;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 60px;
+      align-items: center;
+    }
+
+    .hero-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 18px;
+      background: rgba(255,255,255,0.08);
+      backdrop-filter: blur(10px);
+      border-radius: 999px;
+      font-size: 0.8rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      border: 1px solid rgba(255,255,255,0.15);
+      color: #fff;
+      margin-bottom: 24px;
+    }
+
+    .pulse {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--hd-accent);
+      box-shadow: 0 0 12px var(--hd-accent);
+      animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.6; transform: scale(1.3); }
+    }
+
+    .hero h1 {
+      font-size: clamp(2.5rem, 5vw, 3.5rem);
+      font-weight: 800;
+      color: #fff;
+      line-height: 1.1;
+      margin-bottom: 24px;
+      letter-spacing: -0.03em;
+    }
+
+    .hero h1 .highlight {
+      color: var(--hd-accent);
+    }
+
+    .hero-subtitle {
+      font-size: 1.15rem;
+      color: rgba(255,255,255,0.85);
+      margin-bottom: 32px;
+      line-height: 1.7;
+      max-width: 540px;
+    }
+
+    .hero-cta-group {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 16px;
+      margin-bottom: 40px;
+    }
+
+    .hero-cta {
+      padding: 16px 32px;
+      border-radius: 10px;
+      font-weight: 600;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      transition: all 0.25s ease;
+      font-size: 1rem;
+    }
+
+    .hero-cta.primary {
+      background: var(--hd-white);
+      color: var(--hd-primary-dark);
+      box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+    }
+
+    .hero-cta.primary:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 8px 30px rgba(0,0,0,0.2);
+    }
+
+    .hero-cta.secondary {
+      background: rgba(255,255,255,0.1);
+      color: #fff;
+      border: 1px solid rgba(255,255,255,0.3);
+      backdrop-filter: blur(10px);
+    }
+
+    .hero-cta.secondary:hover {
+      background: rgba(255,255,255,0.15);
+      border-color: rgba(255,255,255,0.5);
+    }
+
+    .hero-stats {
+      display: flex;
+      gap: 40px;
+    }
+
+    .hero-stat {
+      text-align: left;
+    }
+
+    .hero-stat-value {
+      font-size: 2rem;
+      font-weight: 800;
+      color: var(--hd-accent);
+    }
+
+    .hero-stat-label {
+      font-size: 0.85rem;
+      color: rgba(255,255,255,0.7);
+    }
+
+    .hero-visual {
+      position: relative;
+    }
+
+    .hero-mockup {
+      background: rgba(15, 23, 42, 0.9);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 16px;
+      padding: 12px;
+      box-shadow: 0 40px 80px rgba(0,0,0,0.4);
+    }
+
+    .mockup-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 16px;
+      border-bottom: 1px solid rgba(255,255,255,0.1);
+    }
+
+    .mockup-dots {
+      display: flex;
+      gap: 6px;
+    }
+
+    .mockup-dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+    }
+
+    .mockup-dot.red { background: #EF4444; }
+    .mockup-dot.yellow { background: #F59E0B; }
+    .mockup-dot.green { background: #22C55E; }
+
+    .mockup-title {
+      color: rgba(255,255,255,0.5);
+      font-size: 0.8rem;
+      flex: 1;
+      text-align: center;
+    }
+
+    .mockup-body {
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .mockup-question {
+      background: rgba(0, 102, 179, 0.2);
+      border: 1px solid rgba(0, 102, 179, 0.3);
+      padding: 14px 18px;
+      border-radius: 10px;
+      color: rgba(255,255,255,0.9);
+      font-size: 0.95rem;
+    }
+
+    .mockup-answer {
+      background: rgba(255, 140, 0, 0.1);
+      border-left: 4px solid var(--hd-accent);
+      padding: 16px 20px;
+      border-radius: 0 10px 10px 0;
+    }
+
+    .mockup-answer-label {
+      font-size: 0.75rem;
+      color: var(--hd-accent);
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 8px;
+    }
+
+    .mockup-answer-text {
+      color: rgba(255,255,255,0.9);
+      font-size: 0.95rem;
+      line-height: 1.6;
+    }
+
+    .mockup-answer-text strong {
+      color: var(--hd-accent);
+      font-weight: 700;
+    }
+
+    .mockup-source {
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid rgba(255,255,255,0.1);
+      font-size: 0.8rem;
+      color: rgba(255,255,255,0.5);
+    }
+
+    .mockup-source a {
+      color: var(--hd-accent);
+      text-decoration: none;
+    }
+
+    /* TRUST BAR */
+    .trust-bar {
+      background: var(--hd-white);
+      border-bottom: 1px solid var(--hd-border);
+      padding: 32px 24px;
+    }
+
+    .trust-inner {
+      max-width: 1200px;
+      margin: 0 auto;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 60px;
+      flex-wrap: wrap;
+    }
+
+    .trust-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .trust-icon {
+      width: 48px;
+      height: 48px;
+      background: linear-gradient(135deg, var(--hd-primary) 0%, var(--hd-primary-dark) 100%);
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.3rem;
+    }
+
+    .trust-text strong {
+      display: block;
+      font-size: 1.4rem;
+      font-weight: 700;
+      color: var(--hd-primary);
+    }
+
+    .trust-text span {
+      font-size: 0.85rem;
+      color: var(--hd-text-muted);
+    }
+
+    /* SECTION GENERIC */
+    .problem,
+    .solution,
+    .how-it-works,
+    .use-cases,
+    .roi-section,
+    .pricing,
+    .testimonial,
+    .faq,
+    .cta-section {
+      padding: 100px 24px;
+    }
+
+    .problem,
+    .pricing,
+    .faq {
+      background: var(--hd-white);
+    }
+
+    .solution,
+    .use-cases,
+    .testimonial {
+      background: var(--hd-bg);
+    }
+
+    .roi-section,
+    .cta-section {
+      background: var(--hd-gradient-hero);
+    }
+
+    .section-header {
+      text-align: center;
+      max-width: 700px;
+      margin: 0 auto 60px;
+    }
+
+    .section-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(0, 102, 179, 0.08);
+      color: var(--hd-primary);
+      padding: 8px 18px;
+      border-radius: 999px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 20px;
+    }
+
+    .section-header h2 {
+      font-size: clamp(1.8rem, 4vw, 2.5rem);
+      font-weight: 700;
+      color: var(--hd-text);
+      margin-bottom: 16px;
+      letter-spacing: -0.02em;
+    }
+
+    .section-header p {
+      color: var(--hd-text-muted);
+      font-size: 1.1rem;
+      line-height: 1.7;
+    }
+
+    /* GRID BLOCKS */
+    .problem-grid {
+      max-width: 1000px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 32px;
+    }
+
+    .problem-card {
+      text-align: center;
+      padding: 40px 28px;
+      background: var(--hd-bg);
+      border-radius: 16px;
+      border: 1px solid var(--hd-border);
+      transition: all 0.3s ease;
+    }
+
+    .problem-card:hover {
+      transform: translateY(-4px);
+      box-shadow: 0 12px 40px rgba(0,0,0,0.08);
+    }
+
+    .problem-number {
+      width: 64px;
+      height: 64px;
+      background: linear-gradient(135deg, #DC2626 0%, #B91C1C 100%);
+      border-radius: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.8rem;
+      font-weight: 800;
+      color: #fff;
+      margin: 0 auto 20px;
+    }
+
+    .problem-card h3 {
+      font-size: 1.3rem;
+      font-weight: 600;
+      color: var(--hd-text);
+      margin-bottom: 12px;
+    }
+
+    .problem-card p {
+      color: var(--hd-text-muted);
+      font-size: 0.95rem;
+      line-height: 1.6;
+    }
+
+    .problem-stat {
+      margin-top: 16px;
+      padding-top: 16px;
+      border-top: 1px solid var(--hd-border);
+      font-size: 1.3rem;
+      font-weight: 700;
+      color: #DC2626;
+    }
+
+    .solution-grid {
+      max-width: 1200px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 28px;
+    }
+
+    .solution-card {
+      background: var(--hd-white);
+      border: 1px solid var(--hd-border);
+      border-radius: 16px;
+      padding: 36px;
+      transition: all 0.3s ease;
+    }
+
+    .solution-card:hover {
+      transform: translateY(-4px);
+      box-shadow: 0 12px 40px rgba(0, 102, 179, 0.1);
+      border-color: var(--hd-primary);
+    }
+
+    .solution-icon {
+      width: 64px;
+      height: 64px;
+      background: linear-gradient(135deg, var(--hd-primary) 0%, var(--hd-primary-dark) 100%);
+      border-radius: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.6rem;
+      margin-bottom: 24px;
+      box-shadow: 0 8px 20px rgba(0, 102, 179, 0.2);
+    }
+
+    .solution-card h3 {
+      font-size: 1.2rem;
+      font-weight: 600;
+      color: var(--hd-text);
+      margin-bottom: 12px;
+    }
+
+    .solution-card p {
+      color: var(--hd-text-muted);
+      font-size: 0.95rem;
+      line-height: 1.6;
+    }
+
+    .how-it-works {
+      background: var(--hd-white);
+    }
+
+    .steps {
+      max-width: 900px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+    }
+
+    .step {
+      display: flex;
+      gap: 40px;
+      align-items: flex-start;
+      padding: 40px 0;
+      position: relative;
+    }
+
+    .step:not(:last-child)::after {
+      content: '';
+      position: absolute;
+      left: 39px;
+      top: 100px;
+      bottom: 0;
+      width: 2px;
+      background: linear-gradient(to bottom, var(--hd-primary) 0%, var(--hd-border) 100%);
+    }
+
+    .step-number {
+      width: 80px;
+      height: 80px;
+      background: linear-gradient(135deg, var(--hd-primary) 0%, var(--hd-primary-dark) 100%);
+      border-radius: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.8rem;
+      font-weight: 800;
+      color: #fff;
+      flex-shrink: 0;
+      box-shadow: 0 12px 30px rgba(0, 102, 179, 0.25);
+      position: relative;
+      z-index: 1;
+    }
+
+    .step-content h3 {
+      font-size: 1.4rem;
+      font-weight: 600;
+      color: var(--hd-text);
+      margin-bottom: 12px;
+    }
+
+    .step-content p {
+      color: var(--hd-text-muted);
+      font-size: 1.05rem;
+      line-height: 1.7;
+      margin-bottom: 16px;
+    }
+
+    .step-highlight {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(0, 102, 179, 0.08);
+      color: var(--hd-primary);
+      padding: 8px 16px;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      font-weight: 600;
+    }
+
+    .cta-section {
+      text-align: center;
+    }
+
+    .cta-content {
+      max-width: 700px;
+      margin: 0 auto;
+    }
+
+    .cta-section h2 {
+      font-size: clamp(1.8rem, 4vw, 2.5rem);
+      font-weight: 700;
+      color: #fff;
+      margin-bottom: 20px;
+    }
+
+    .cta-section p {
+      color: rgba(255,255,255,0.85);
+      font-size: 1.15rem;
+      margin-bottom: 36px;
+      line-height: 1.7;
+    }
+
+    .cta-buttons {
+      display: flex;
+      justify-content: center;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    /* FOOTER */
+    .footer {
+      background: #0A0F1A;
+      color: rgba(255,255,255,0.7);
+      padding: 80px 24px 40px;
+    }
+
+    .footer-inner {
+      max-width: 1200px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: 2fr repeat(3, 1fr);
+      gap: 60px;
+      margin-bottom: 60px;
+    }
+
+    .footer-brand p {
+      margin-top: 20px;
+      font-size: 0.95rem;
+      line-height: 1.7;
+      max-width: 300px;
+    }
+
+    .footer-col h4 {
+      color: #fff;
+      font-size: 1rem;
+      font-weight: 600;
+      margin-bottom: 24px;
+    }
+
+    .footer-col a {
+      display: block;
+      color: rgba(255,255,255,0.6);
+      text-decoration: none;
+      padding: 8px 0;
+      font-size: 0.9rem;
+      transition: all 0.2s;
+    }
+
+    .footer-col a:hover {
+      color: var(--hd-accent);
+      padding-left: 6px;
+    }
+
+    .footer-bottom {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding-top: 40px;
+      border-top: 1px solid rgba(255,255,255,0.1);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 20px;
+    }
+
+    .footer-bottom p {
+      font-size: 0.85rem;
+    }
+
+    .footer-links {
+      display: flex;
+      gap: 32px;
+    }
+
+    .footer-links a {
+      color: rgba(255,255,255,0.6);
+      text-decoration: none;
+      font-size: 0.85rem;
+      transition: color 0.2s;
+    }
+
+    .footer-links a:hover {
+      color: #fff;
+    }
+
+    /* RESPONSIVE */
+    @media (max-width: 1024px) {
+      .hero-content {
+        grid-template-columns: 1fr;
+        gap: 40px;
+      }
+
+      .hero-visual {
+        order: -1;
+      }
+
+      .nav {
+        display: none;
+      }
+
+      .solution-grid {
+        grid-template-columns: 1fr;
+        max-width: 500px;
+      }
+
+      .problem-grid {
+        grid-template-columns: 1fr;
+        max-width: 500px;
+      }
+
+      .footer-inner {
+        grid-template-columns: 1fr 1fr;
+      }
+    }
+
+    @media (max-width: 768px) {
+      .hero {
+        padding: 60px 24px 80px;
+      }
+
+      .hero-stats {
+        flex-direction: column;
+        gap: 20px;
+      }
+
+      .steps {
+        gap: 24px;
+      }
+
+      .step {
+        flex-direction: column;
+        align-items: center;
+        text-align: center;
+      }
+
+      .step:not(:last-child)::after {
+        display: none;
+      }
+
+      .footer-inner {
+        grid-template-columns: 1fr;
+        gap: 40px;
+      }
+
+      .footer-bottom {
+        flex-direction: column;
+        text-align: center;
+      }
+    }
+  </style>
 </head>
 <body>
+  <!-- HEADER -->
   <header class="header">
-    <div class="container">
-      <div class="logo">HydraulikDoc AI</div>
+    <div class="header-inner">
+      <a href="/static/landing/hydraulikdoc.html" class="logo">
+        <div class="logo-icon">🔧</div>
+        <div class="logo-text">
+          <strong>HydraulikDoc AI</strong>
+          <span>by SBS Deutschland</span>
+        </div>
+      </a>
+
       <nav class="nav">
-        <a href="/static/landing/hydraulikdoc.html" class="nav-link">Start</a>
         <a href="/static/landing/hydraulikdoc.html#problem" class="nav-link">Das Problem</a>
         <a href="/static/landing/hydraulikdoc.html#solution" class="nav-link">Lösung</a>
-        <a href="/static/landing/hydraulikdoc-enterprise.html" class="nav-link nav-link-active">Enterprise</a>
         <a href="/static/landing/hydraulikdoc-docs.html" class="nav-link">Produkt</a>
+        <a href="/static/landing/hydraulikdoc-enterprise.html" class="nav-link">Enterprise</a>
         <a href="/static/landing/hydraulikdoc-partners.html" class="nav-link">Partner</a>
       </nav>
+
+      <div class="header-actions">
+        <a href="https://knowledge-sbsdeutschland.streamlit.app" class="btn-login">Login</a>
+        <a href="https://knowledge-sbsdeutschland.streamlit.app" class="btn-cta">Kostenlos testen →</a>
+      </div>
     </div>
   </header>
 
-  <main>
-    <!-- Hero -->
-    <section class="hero hero-enterprise">
-      <div class="container hero-grid">
-        <div class="hero-content">
-          <h1>Enterprise-ready für Hydraulik-Service &amp; Instandhaltung</h1>
-          <p class="hero-subtitle">
-            Single Sign-on, Rollen, Audit-Trails, DSGVO – ohne auf Geschwindigkeit zu verzichten.
-          </p>
-          <div class="hero-cta-group">
-            <a href="mailto:info@sbsdeutschland.com?subject=HydraulikDoc%20Enterprise%20Gespr%C3%A4ch"
-               class="btn btn-primary">
-              Enterprise-Gespräch buchen
-            </a>
-            <a href="mailto:info@sbsdeutschland.com?subject=HydraulikDoc%20Security%20Whitepaper"
-               class="btn btn-secondary">
-              Security-Whitepaper anfordern
-            </a>
-          </div>
-          <p class="hero-meta">
-            Für IT, Information Security und Geschäftsführung in serviceintensiven Industriebetrieben.
-          </p>
+  <!-- HERO: ENTERPRISE SECURITY -->
+  <section class="hero" id="hero">
+    <div class="hero-content">
+      <div class="hero-text">
+        <div class="hero-badge">
+          <span class="pulse"></span>
+          ENTERPRISE &amp; IT-SECURITY
         </div>
-        <div class="hero-side-card">
-          <h2>Security &amp; Compliance im Fokus</h2>
-          <ul class="hero-list">
-            <li>Hosting in der EU, DSGVO-konforme Auftragsverarbeitung</li>
-            <li>Mandantenfähige Architektur für Werke, Unternehmen, Servicepartner</li>
-            <li>Transparente Protokolle für Audits und Rezertifizierungen</li>
-          </ul>
-        </div>
-      </div>
-    </section>
-
-    <!-- Security & Compliance -->
-    <section class="section">
-      <div class="container">
-        <header class="section-header">
-          <h2>Security &amp; Compliance</h2>
-          <p>HydraulikDoc fügt sich in bestehende Sicherheitsrichtlinien ein – ohne Sonderweg für die IT.</p>
-        </header>
-
-        <div class="enterprise-grid">
-          <article class="card">
-            <h3>Datenhaltung &amp; Hosting</h3>
-            <p>
-              Betrieb auf ISO-konformen Infrastrukturpartnern, Datenhaltung in Deutschland bzw. der EU
-              und klare TOMs für Ihre Datenschutzdokumentation.
-            </p>
-          </article>
-
-          <article class="card">
-            <h3>Verschlüsselung</h3>
-            <p>
-              TLS-gesicherter Zugriff, Verschlüsselung der Datenbestände at rest und gehärtete
-              Standardkonfigurationen für produktive Mandanten.
-            </p>
-          </article>
-
-          <article class="card">
-            <h3>Rollen &amp; Mandanten</h3>
-            <p>
-              Feingranulare Rollenmodelle für Service, Instandhaltung, externe Partner sowie saubere
-              Mandantentrennung über Werke und Unternehmen hinweg.
-            </p>
-          </article>
-        </div>
-
-        <div class="table-wrapper">
-          <h3>Was Ihre IT prüft – was HydraulikDoc bereits mitbringt</h3>
-          <table class="comparison-table">
-            <thead>
-              <tr>
-                <th>IT-Prüfpunkt</th>
-                <th>HydraulikDoc</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>Single Sign-on / Identity</td>
-                <td>Integration via SAML / OIDC (z.B. Azure AD/Entra, Okta, Keycloak)</td>
-              </tr>
-              <tr>
-                <td>Logging &amp; Audit-Trails</td>
-                <td>Nachvollziehbare Protokolle für Login, Suchvorgänge und Dokumentzugriffe</td>
-              </tr>
-              <tr>
-                <td>Datenschutz &amp; DSGVO</td>
-                <td>Auftragsverarbeitungsvertrag, definierte Aufbewahrungs- und Löschkonzepte</td>
-              </tr>
-              <tr>
-                <td>Mandantenfähigkeit</td>
-                <td>Trennung von Werken, Business Units und externen Servicepartnern</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </section>
-
-    <!-- Architektur & Integration -->
-    <section class="section section-alt">
-      <div class="container">
-        <header class="section-header">
-          <h2>Architektur &amp; Integration</h2>
-          <p>HydraulikDoc dockt an Ihre bestehende Systemlandschaft an – statt sie zu ersetzen.</p>
-        </header>
-
-        <div class="enterprise-grid">
-          <article class="card">
-            <h3>Identity &amp; SSO</h3>
-            <ul>
-              <li>Single Sign-on via Azure AD / Entra ID</li>
-              <li>SSO-Optionen für Okta, Keycloak und weitere IdPs</li>
-              <li>Technische Trennung von Test- und Produktionsmandanten</li>
-            </ul>
-          </article>
-
-          <article class="card">
-            <h3>API &amp; Integration</h3>
-            <ul>
-              <li>REST-APIs für Ticket-Systeme und Service-Portale</li>
-              <li>Embedding in bestehende Portale als „Hydraulik-Wissenssuche“</li>
-              <li>Exportfunktionen für Reporting &amp; Dokumentation</li>
-            </ul>
-          </article>
-
-          <article class="card">
-            <h3>Deployment-Optionen</h3>
-            <ul>
-              <li>Standard: Sichere Cloud-Bereitstellung</li>
-              <li>Optional: Private Cloud / dedizierte Instanz</li>
-              <li>Auf Anfrage: On-Premises-Szenarien für regulierte Branchen</li>
-            </ul>
-          </article>
-        </div>
-      </div>
-    </section>
-
-    <!-- Governance & Kontrolle -->
-    <section class="section">
-      <div class="container">
-        <header class="section-header">
-          <h2>Governance &amp; Kontrolle</h2>
-          <p>Kontrollierbare KI-Suche heißt: Sie behalten die Hoheit über Daten, Zugriffe und Nachweise.</p>
-        </header>
-
-        <div class="enterprise-grid">
-          <article class="card">
-            <h3>Logging &amp; Audit-Trails</h3>
-            <p>
-              Dokumentiert wird, wer welche Dokumente gesucht, geöffnet oder kommentiert hat – für interne
-              Nachweise und externe Audits.
-            </p>
-          </article>
-          <article class="card">
-            <h3>Datenlebenszyklus</h3>
-            <p>
-              Konfigurierbare Aufbewahrungsfristen, Löschkonzepte und der kontrollierte Umgang mit
-              Trainingsdaten für KI-Modelle.
-            </p>
-          </article>
-          <article class="card">
-            <h3>Rechte für externe Partner</h3>
-            <p>
-              Gesteuerte Zugriffe für Servicepartner und OEMs – mit sauber abgegrenzten Datenräumen pro Kunde
-              oder Werk.
-            </p>
-          </article>
-        </div>
-      </div>
-    </section>
-
-    <!-- Enterprise CTA -->
-    <section class="section section-cta">
-      <div class="container section-cta-inner">
-        <div>
-          <h2>Ab 50 Nutzer oder mehreren Werken lohnt sich eine dedizierte Instanz</h2>
-          <p>
-            Wir klären in einem kurzen Enterprise-Gespräch Architektur, Security-Frames und organisatorische
-            Einbindung.
-          </p>
-        </div>
-        <div class="section-cta-actions">
-          <a href="mailto:info@sbsdeutschland.com?subject=HydraulikDoc%20Enterprise%20Gespr%C3%A4ch"
-             class="btn btn-primary">
-            Enterprise-Gespräch buchen
+        <h1>Enterprise-ready für Hydraulik‑Service &amp; Instandhaltung</h1>
+        <p class="hero-subtitle">
+          Single Sign-on, Rollen, Audit-Trails, DSGVO – ohne auf Geschwindigkeit für Ihre Serviceteams zu verzichten.
+        </p>
+        <div class="hero-cta-group">
+          <a href="mailto:info@sbsdeutschland.com?subject=HydraulikDoc%20Enterprise%20Gespr%C3%A4ch" class="hero-cta primary">
+            Enterprise-Gespräch buchen →
+          </a>
+          <a href="mailto:info@sbsdeutschland.com?subject=HydraulikDoc%20Security%20Whitepaper" class="hero-cta secondary">
+            Security-Whitepaper anfordern
           </a>
         </div>
+        <p class="hero-subtitle" style="max-width: 520px;">
+          Für IT, Information Security und Geschäftsführung in serviceintensiven Industriebetrieben.
+          HydraulikDoc AI fügt sich in bestehende Sicherheitsrichtlinien ein – ohne Sonderweg für die IT.
+        </p>
       </div>
-    </section>
-  </main>
 
+      <div class="hero-visual">
+        <div class="hero-mockup">
+          <div class="mockup-header">
+            <div class="mockup-dots">
+              <div class="mockup-dot red"></div>
+              <div class="mockup-dot yellow"></div>
+              <div class="mockup-dot green"></div>
+            </div>
+            <span class="mockup-title">Security &amp; Compliance Cockpit</span>
+          </div>
+          <div class="mockup-body">
+            <div class="mockup-question">
+              Welche Systeme greifen auf HydraulikDoc AI zu und wo liegen die Daten?
+            </div>
+            <div class="mockup-answer">
+              <div class="mockup-answer-label">Antwort</div>
+              <div class="mockup-answer-text">
+                HydraulikDoc AI läuft auf ISO-zertifizierten Infrastrukturen in der EU.
+                Zugriffe erfolgen ausschließlich TLS-verschlüsselt, Mandanten werden logisch getrennt
+                und Admin-Aktivitäten sind vollständig protokolliert.
+              </div>
+              <div class="mockup-source">
+                Quelle: Technische Architektur- und TOM-Dokumentation HydraulikDoc AI
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SECURITY & COMPLIANCE IM FOKUS -->
+  <section class="problem" id="security">
+    <div class="section-header">
+      <span class="section-badge">🔐 Security &amp; Compliance</span>
+      <h2>HydraulikDoc fügt sich in Ihre bestehenden Richtlinien ein</h2>
+      <p>
+        Für IT, ISB und Datenschutzbeauftragte ist entscheidend: Wo liegen Daten, wer hat Zugriff,
+        wie sind Rollen, Protokollierung und TOMs geregelt?
+      </p>
+    </div>
+
+    <div class="problem-grid">
+      <div class="problem-card">
+        <div class="problem-number">1</div>
+        <h3>Datenhaltung &amp; Hosting</h3>
+        <p>
+          Betrieb auf ISO-konformen Infrastrukturpartnern, Datenhaltung in Deutschland bzw. der EU
+          und klare TOMs für Ihre Datenschutzdokumentation.
+        </p>
+        <div class="problem-stat">EU / DE</div>
+      </div>
+      <div class="problem-card">
+        <div class="problem-number">2</div>
+        <h3>Verschlüsselung</h3>
+        <p>
+          TLS-gesicherter Zugriff, Verschlüsselung der Datenbestände at rest und gehärtete
+          Standardkonfigurationen für produktive Mandanten.
+        </p>
+        <div class="problem-stat">TLS &amp; at rest</div>
+      </div>
+      <div class="problem-card">
+        <div class="problem-number">3</div>
+        <h3>Rollen &amp; Mandanten</h3>
+        <p>
+          Feingranulare Rollenmodelle für Service, Instandhaltung, externe Partner sowie saubere
+          Mandantentrennung über Werke und Unternehmen hinweg.
+        </p>
+        <div class="problem-stat">RBAC</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ENTERPRISE-FEATURES -->
+  <section class="solution" id="enterprise-features">
+    <div class="section-header">
+      <span class="section-badge">🏢 Enterprise-Features</span>
+      <h2>Was Ihre IT prüft – was HydraulikDoc bereits mitbringt</h2>
+      <p>
+        HydraulikDoc AI ist von Beginn an als Enterprise-Komponente gedacht worden – mit klaren
+        Schnittstellen in Ihre bestehende IT-Landschaft.
+      </p>
+    </div>
+
+    <div class="solution-grid">
+      <div class="solution-card">
+        <div class="solution-icon">🔑</div>
+        <h3>Single Sign-on &amp; Identity</h3>
+        <p>
+          Anbindung an bestehende Identity-Provider (z.&nbsp;B. Azure AD, Keycloak) über SAML oder OIDC.
+          Rollen werden automatisiert aus Gruppen abgeleitet.
+        </p>
+      </div>
+      <div class="solution-card">
+        <div class="solution-icon">📜</div>
+        <h3>Audit-Trails &amp; Protokolle</h3>
+        <p>
+          Lückenlose Nachvollziehbarkeit von Zugriffen, Konfigurationen und Admin-Aktivitäten –
+          inklusive Export für interne und externe Audits.
+        </p>
+      </div>
+      <div class="solution-card">
+        <div class="solution-icon">🧩</div>
+        <h3>Integration in bestehende Systeme</h3>
+        <p>
+          API-basierte Anbindung an Ticketsysteme, Serviceportale oder Instandhaltungssoftware.
+          Optional: White-Label-Embedding in bestehende Portale.
+        </p>
+      </div>
+      <div class="solution-card">
+        <div class="solution-icon">🛡️</div>
+        <h3>Mandanten &amp; Werke</h3>
+        <p>
+          Trennung nach Werken, Geschäftseinheiten oder Servicepartnern. Rechtekonzepte passen sich
+          Ihrer bestehenden Organisationsstruktur an.
+        </p>
+      </div>
+      <div class="solution-card">
+        <div class="solution-icon">📂</div>
+        <h3>Datenlebenszyklus &amp; Löschkonzepte</h3>
+        <p>
+          Konfigurierbare Aufbewahrungsfristen, automatische Löschung inaktiver Datenbestände,
+          klare Prozesse für Export und Deprovisionierung.
+        </p>
+      </div>
+      <div class="solution-card">
+        <div class="solution-icon">🤝</div>
+        <h3>Begleitetes Onboarding</h3>
+        <p>
+          Gemeinsame Workshops mit IT und Fachbereich, Unterstützung bei TOMs, AV-Vertrag
+          und Betriebsdokumentation.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ENTERPRISE-ROLLOUT -->
+  <section class="how-it-works" id="rollout">
+    <div class="section-header">
+      <span class="section-badge">Rollout</span>
+      <h2>In 3 Schritten produktiv im Werk</h2>
+      <p>Vom Pilotbereich bis zum unternehmensweiten Rollout – mit klaren Meilensteinen für IT und Fachbereich.</p>
+    </div>
+
+    <div class="steps">
+      <div class="step">
+        <div class="step-number">1</div>
+        <div class="step-content">
+          <h3>Pilot mit ausgewähltem Werk / Servicebereich</h3>
+          <p>
+            Start mit einem klar abgegrenzten Pilotbereich, z.&nbsp;B. einem Servicewerk oder einer
+            Produktlinie. Dokumente werden kuratiert, Rollen modelliert und erste KPIs festgelegt.
+          </p>
+          <span class="step-highlight">4–6 Wochen Pilotphase</span>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-number">2</div>
+        <div class="step-content">
+          <h3>Integration &amp; Security-Feinschliff</h3>
+          <p>
+            Anbindung an Ihr Identity-Management, Logging- und Monitoring-Systeme.
+            Gemeinsame Durchsprache der Security- und Compliance-Dokumentation mit IT/ISB.
+          </p>
+          <span class="step-highlight">Security- &amp; IT-Review in festen Slots</span>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-number">3</div>
+        <div class="step-content">
+          <h3>Rollout in weitere Werke &amp; Partner</h3>
+          <p>
+            Skalierung auf weitere Standorte, Werke und Servicepartner – inklusive Schulungen,
+            Kommunikationspaketen und Templates für interne Freigaben.
+          </p>
+          <span class="step-highlight">Standardisierter Rollout-Blueprint</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- CTA ENTERPRISE -->
+  <section class="cta-section">
+    <div class="cta-content">
+      <h2>Enterprise-Einführung von HydraulikDoc AI besprechen</h2>
+      <p>
+        Sie planen den Einsatz von KI in Service und Instandhaltung – im Einklang mit Ihren
+        Security- und Compliance-Anforderungen? Lassen Sie uns in einem 30‑minütigen Gespräch
+        die Architektur und nächsten Schritte klären.
+      </p>
+      <div class="cta-buttons">
+        <a href="mailto:info@sbsdeutschland.com?subject=HydraulikDoc%20Enterprise%20Gespr%C3%A4ch" class="hero-cta primary">
+          Enterprise-Gespräch buchen →
+        </a>
+        <a href="mailto:info@sbsdeutschland.com?subject=HydraulikDoc%20Security%20Whitepaper" class="hero-cta secondary">
+          Security-Whitepaper anfordern
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <!-- FOOTER -->
   <footer class="footer">
-    <div class="container">
-      <p>© SBS Deutschland – HydraulikDoc AI</p>
+    <div class="footer-inner">
+      <div class="footer-brand">
+        <a href="/static/landing/hydraulikdoc.html" class="logo">
+          <div class="logo-icon">🔧</div>
+          <div class="logo-text">
+            <strong>HydraulikDoc AI</strong>
+            <span>by SBS Deutschland</span>
+          </div>
+        </a>
+        <p>
+          Die KI-Lösung für technische Dokumentation in der Hydraulik-Branche.
+          Entwickelt in Weinheim, gehostet in Deutschland.
+        </p>
+      </div>
+
+      <div class="footer-col">
+        <h4>Produkt</h4>
+        <a href="/static/landing/hydraulikdoc.html#solution">Features</a>
+        <a href="/static/landing/hydraulikdoc.html#how-it-works">So funktioniert's</a>
+        <a href="/static/landing/hydraulikdoc.html#pricing">Preise</a>
+        <a href="/static/landing/hydraulikdoc.html#faq">FAQ</a>
+      </div>
+
+      <div class="footer-col">
+        <h4>Unternehmen</h4>
+        <a href="https://sbsdeutschland.com/sbshomepage/unternehmen.html">Über SBS Deutschland</a>
+        <a href="https://sbsdeutschland.com/sbshomepage/kontakt.html">Kontakt</a>
+        <a href="https://sbsdeutschland.com">Weitere Produkte</a>
+      </div>
+
+      <div class="footer-col">
+        <h4>Rechtliches</h4>
+        <a href="https://sbsdeutschland.com/static/impressum.html">Impressum</a>
+        <a href="https://sbsdeutschland.com/static/datenschutz.html">Datenschutz</a>
+        <a href="https://sbsdeutschland.com/static/agb.html">AGB</a>
+      </div>
+    </div>
+
+    <div class="footer-bottom">
+      <p>© 2025 SBS Deutschland GmbH · Weinheim · Alle Rechte vorbehalten</p>
+      <div class="footer-links">
+        <a href="mailto:info@sbsdeutschland.com">info@sbsdeutschland.com</a>
+        <a href="https://www.linkedin.com/company/sbs-deutschland">LinkedIn</a>
+      </div>
     </div>
   </footer>
 </body>

@@ -1,190 +1,1093 @@
 <!DOCTYPE html>
 <html lang="de">
 <head>
-  <meta charset="utf-8" />
-  <title>HydraulikDoc AI – Produkt & Updates</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <link rel="stylesheet" href="/static/landing/hydraulikdoc.css" />
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HydraulikDoc AI · Produkt & Funktionen | SBS Deutschland</title>
+  <meta name="description" content="HydraulikDoc AI – KI-Suche in Hydraulik-Dokumentation. Alle Produktfunktionen im Überblick: Suche, Tabellenerkennung, Quellenangabe, Rollen, Integrationen und Workflows.">
+  <meta name="keywords" content="Hydraulik, Dokumentation, KI, Suche, Produkt, Funktionen, Tabellenerkennung, Service, Wartung, Instandhaltung">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔧</text></svg>">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+  <!-- Open Graph -->
+  <meta property="og:title" content="HydraulikDoc AI – Produkt & Funktionen">
+  <meta property="og:description" content="Alle Produktfunktionen von HydraulikDoc AI: KI-Suche in Handbüchern, Tabellenerkennung, Quellenangabe, Rollen & Integrationen.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://sbsdeutschland.com/static/landing/hydraulikdoc-docs.html">
+
+  <style>
+    /* ═══════════════════════════════════════════════════════════════════
+       HYDRAULIKDOC AI - DESIGN SYSTEM
+       Enterprise SaaS Landing Page – Produkt & Funktionen
+       ═══════════════════════════════════════════════════════════════════ */
+
+    :root {
+      /* Brand Colors - Hydraulik */
+      --hd-primary: #0066B3;
+      --hd-primary-dark: #004C8C;
+      --hd-primary-darker: #003366;
+      --hd-accent: #FF8C00;
+      --hd-accent-dark: #E67E00;
+
+      /* Functional */
+      --hd-success: #22C55E;
+      --hd-warning: #F59E0B;
+      --hd-danger: #DC2626;
+
+      /* Neutrals */
+      --hd-text: #1E293B;
+      --hd-text-muted: #64748B;
+      --hd-bg: #F8FAFC;
+      --hd-bg-dark: #0F172A;
+      --hd-border: #E2E8F0;
+      --hd-white: #FFFFFF;
+
+      /* Gradients */
+      --hd-gradient-hero: linear-gradient(135deg, #003366 0%, #0066B3 50%, #004C8C 100%);
+      --hd-gradient-cta: linear-gradient(135deg, #FF8C00 0%, #E67E00 100%);
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      color: var(--hd-text);
+      background: var(--hd-bg);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* HEADER */
+    .header {
+      background: var(--hd-gradient-hero);
+      position: sticky;
+      top: 0;
+      z-index: 1000;
+      box-shadow: 0 2px 20px rgba(0,0,0,0.15);
+    }
+
+    .header-inner {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 0 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 72px;
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      text-decoration: none;
+    }
+
+    .logo-icon {
+      width: 44px;
+      height: 44px;
+      background: var(--hd-gradient-cta);
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.5rem;
+      box-shadow: 0 4px 12px rgba(255, 140, 0, 0.3);
+    }
+
+    .logo-text {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .logo-text strong {
+      color: #fff;
+      font-size: 1.2rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+
+    .logo-text span {
+      color: rgba(255,255,255,0.7);
+      font-size: 0.72rem;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+
+    .nav {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .nav-link {
+      color: rgba(255,255,255,0.9);
+      text-decoration: none;
+      padding: 10px 16px;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      font-weight: 500;
+      transition: all 0.2s;
+    }
+
+    .nav-link:hover {
+      background: rgba(255,255,255,0.1);
+      color: #fff;
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .btn-login {
+      color: rgba(255,255,255,0.9);
+      text-decoration: none;
+      padding: 10px 18px;
+      font-size: 0.9rem;
+      font-weight: 500;
+      border-radius: 8px;
+      transition: all 0.2s;
+    }
+
+    .btn-login:hover {
+      background: rgba(255,255,255,0.1);
+      color: #fff;
+    }
+
+    .btn-cta {
+      background: var(--hd-gradient-cta);
+      color: var(--hd-primary-darker);
+      text-decoration: none;
+      padding: 12px 24px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      border-radius: 8px;
+      transition: all 0.25s;
+      box-shadow: 0 4px 12px rgba(255, 140, 0, 0.3);
+    }
+
+    .btn-cta:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 20px rgba(255, 140, 0, 0.4);
+    }
+
+    /* HERO */
+    .hero {
+      background: var(--hd-gradient-hero);
+      padding: 80px 24px 100px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .hero::before {
+      content: '';
+      position: absolute;
+      top: -50%;
+      right: -20%;
+      width: 80%;
+      height: 200%;
+      background: radial-gradient(ellipse at center, rgba(255, 140, 0, 0.08) 0%, transparent 60%);
+      pointer-events: none;
+    }
+
+    .hero::after {
+      content: '';
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 120px;
+      background: linear-gradient(to top, var(--hd-bg) 0%, transparent 100%);
+    }
+
+    .hero-content {
+      max-width: 1200px;
+      margin: 0 auto;
+      position: relative;
+      z-index: 1;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 60px;
+      align-items: center;
+    }
+
+    .hero-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 18px;
+      background: rgba(255,255,255,0.08);
+      backdrop-filter: blur(10px);
+      border-radius: 999px;
+      font-size: 0.8rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      border: 1px solid rgba(255,255,255,0.15);
+      color: #fff;
+      margin-bottom: 24px;
+    }
+
+    .pulse {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--hd-accent);
+      box-shadow: 0 0 12px var(--hd-accent);
+      animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.6; transform: scale(1.3); }
+    }
+
+    .hero h1 {
+      font-size: clamp(2.3rem, 4.8vw, 3.4rem);
+      font-weight: 800;
+      color: #fff;
+      line-height: 1.1;
+      margin-bottom: 24px;
+      letter-spacing: -0.03em;
+    }
+
+    .hero-subtitle {
+      font-size: 1.15rem;
+      color: rgba(255,255,255,0.85);
+      margin-bottom: 32px;
+      line-height: 1.7;
+      max-width: 540px;
+    }
+
+    .hero-cta-group {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 16px;
+      margin-bottom: 40px;
+    }
+
+    .hero-cta {
+      padding: 16px 32px;
+      border-radius: 10px;
+      font-weight: 600;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      transition: all 0.25s ease;
+      font-size: 1rem;
+    }
+
+    .hero-cta.primary {
+      background: var(--hd-white);
+      color: var(--hd-primary-dark);
+      box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+    }
+
+    .hero-cta.primary:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 8px 30px rgba(0,0,0,0.2);
+    }
+
+    .hero-cta.secondary {
+      background: rgba(255,255,255,0.1);
+      color: #fff;
+      border: 1px solid rgba(255,255,255,0.3);
+      backdrop-filter: blur(10px);
+    }
+
+    .hero-cta.secondary:hover {
+      background: rgba(255,255,255,0.15);
+      border-color: rgba(255,255,255,0.5);
+    }
+
+    .hero-visual {
+      position: relative;
+    }
+
+    .hero-mockup {
+      background: rgba(15, 23, 42, 0.9);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 16px;
+      padding: 12px;
+      box-shadow: 0 40px 80px rgba(0,0,0,0.4);
+    }
+
+    .mockup-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 16px;
+      border-bottom: 1px solid rgba(255,255,255,0.1);
+    }
+
+    .mockup-dots {
+      display: flex;
+      gap: 6px;
+    }
+
+    .mockup-dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+    }
+
+    .mockup-dot.red { background: #EF4444; }
+    .mockup-dot.yellow { background: #F59E0B; }
+    .mockup-dot.green { background: #22C55E; }
+
+    .mockup-title {
+      color: rgba(255,255,255,0.5);
+      font-size: 0.8rem;
+      flex: 1;
+      text-align: center;
+    }
+
+    .mockup-body {
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .mockup-question {
+      background: rgba(0, 102, 179, 0.2);
+      border: 1px solid rgba(0, 102, 179, 0.3);
+      padding: 14px 18px;
+      border-radius: 10px;
+      color: rgba(255,255,255,0.9);
+      font-size: 0.95rem;
+    }
+
+    .mockup-answer {
+      background: rgba(255, 140, 0, 0.1);
+      border-left: 4px solid var(--hd-accent);
+      padding: 16px 20px;
+      border-radius: 0 10px 10px 0;
+    }
+
+    .mockup-answer-label {
+      font-size: 0.75rem;
+      color: var(--hd-accent);
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 8px;
+    }
+
+    .mockup-answer-text {
+      color: rgba(255,255,255,0.9);
+      font-size: 0.95rem;
+      line-height: 1.6;
+    }
+
+    .mockup-source {
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid rgba(255,255,255,0.1);
+      font-size: 0.8rem;
+      color: rgba(255,255,255,0.5);
+    }
+
+    /* GENERISCHE SECTIONS */
+    .section-header {
+      text-align: center;
+      max-width: 700px;
+      margin: 0 auto 60px;
+    }
+
+    .section-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(0, 102, 179, 0.08);
+      color: var(--hd-primary);
+      padding: 8px 18px;
+      border-radius: 999px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 20px;
+    }
+
+    .section-header h2 {
+      font-size: clamp(1.8rem, 4vw, 2.5rem);
+      font-weight: 700;
+      color: var(--hd-text);
+      margin-bottom: 16px;
+      letter-spacing: -0.02em;
+    }
+
+    .section-header p {
+      color: var(--hd-text-muted);
+      font-size: 1.1rem;
+      line-height: 1.7;
+    }
+
+    .solution {
+      padding: 100px 24px;
+      background: var(--hd-bg);
+    }
+
+    .how-it-works {
+      padding: 100px 24px;
+      background: var(--hd-white);
+    }
+
+    .use-cases {
+      padding: 100px 24px;
+      background: var(--hd-bg);
+    }
+
+    /* FEATURE GRID */
+    .solution-grid {
+      max-width: 1200px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 28px;
+    }
+
+    .solution-card {
+      background: var(--hd-white);
+      border: 1px solid var(--hd-border);
+      border-radius: 16px;
+      padding: 36px;
+      transition: all 0.3s ease;
+    }
+
+    .solution-card:hover {
+      transform: translateY(-4px);
+      box-shadow: 0 12px 40px rgba(0, 102, 179, 0.1);
+      border-color: var(--hd-primary);
+    }
+
+    .solution-icon {
+      width: 64px;
+      height: 64px;
+      background: linear-gradient(135deg, var(--hd-primary) 0%, var(--hd-primary-dark) 100%);
+      border-radius: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.6rem;
+      margin-bottom: 24px;
+      box-shadow: 0 8px 20px rgba(0, 102, 179, 0.2);
+    }
+
+    .solution-card h3 {
+      font-size: 1.2rem;
+      font-weight: 600;
+      color: var(--hd-text);
+      margin-bottom: 12px;
+    }
+
+    .solution-card p {
+      color: var(--hd-text-muted);
+      font-size: 0.95rem;
+      line-height: 1.6;
+    }
+
+    /* STEPS / WORKFLOWS */
+    .steps {
+      max-width: 900px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+    }
+
+    .step {
+      display: flex;
+      gap: 40px;
+      align-items: flex-start;
+      padding: 40px 0;
+      position: relative;
+    }
+
+    .step:not(:last-child)::after {
+      content: '';
+      position: absolute;
+      left: 39px;
+      top: 100px;
+      bottom: 0;
+      width: 2px;
+      background: linear-gradient(to bottom, var(--hd-primary) 0%, var(--hd-border) 100%);
+    }
+
+    .step-number {
+      width: 80px;
+      height: 80px;
+      background: linear-gradient(135deg, var(--hd-primary) 0%, var(--hd-primary-dark) 100%);
+      border-radius: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.8rem;
+      font-weight: 800;
+      color: #fff;
+      flex-shrink: 0;
+      box-shadow: 0 12px 30px rgba(0, 102, 179, 0.25);
+      position: relative;
+      z-index: 1;
+    }
+
+    .step-content h3 {
+      font-size: 1.4rem;
+      font-weight: 600;
+      color: var(--hd-text);
+      margin-bottom: 12px;
+    }
+
+    .step-content p {
+      color: var(--hd-text-muted);
+      font-size: 1.05rem;
+      line-height: 1.7;
+      margin-bottom: 16px;
+    }
+
+    .step-highlight {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(0, 102, 179, 0.08);
+      color: var(--hd-primary);
+      padding: 8px 16px;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      font-weight: 600;
+    }
+
+    /* USE CASES */
+    .use-cases-grid {
+      max-width: 1200px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 24px;
+    }
+
+    .use-case-card {
+      background: linear-gradient(135deg, var(--hd-primary) 0%, var(--hd-primary-dark) 100%);
+      border-radius: 16px;
+      padding: 32px;
+      color: #fff;
+      transition: all 0.3s ease;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .use-case-card::before {
+      content: '';
+      position: absolute;
+      top: -50%;
+      right: -50%;
+      width: 100%;
+      height: 100%;
+      background: radial-gradient(circle, rgba(255,255,255,0.1) 0%, transparent 60%);
+    }
+
+    .use-case-card:hover {
+      transform: translateY(-6px);
+      box-shadow: 0 20px 40px rgba(0, 102, 179, 0.3);
+    }
+
+    .use-case-icon {
+      font-size: 2.5rem;
+      margin-bottom: 20px;
+      position: relative;
+    }
+
+    .use-case-card h3 {
+      font-size: 1.15rem;
+      font-weight: 600;
+      margin-bottom: 10px;
+      position: relative;
+    }
+
+    .use-case-card p {
+      font-size: 0.9rem;
+      opacity: 0.9;
+      line-height: 1.5;
+      position: relative;
+    }
+
+    /* CTA */
+    .cta-section {
+      padding: 100px 24px;
+      background: var(--hd-gradient-hero);
+      text-align: center;
+    }
+
+    .cta-content {
+      max-width: 700px;
+      margin: 0 auto;
+    }
+
+    .cta-section h2 {
+      font-size: clamp(1.8rem, 4vw, 2.5rem);
+      font-weight: 700;
+      color: #fff;
+      margin-bottom: 20px;
+    }
+
+    .cta-section p {
+      color: rgba(255,255,255,0.85);
+      font-size: 1.15rem;
+      margin-bottom: 36px;
+      line-height: 1.7;
+    }
+
+    .cta-buttons {
+      display: flex;
+      justify-content: center;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    /* FOOTER */
+    .footer {
+      background: #0A0F1A;
+      color: rgba(255,255,255,0.7);
+      padding: 80px 24px 40px;
+    }
+
+    .footer-inner {
+      max-width: 1200px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: 2fr repeat(3, 1fr);
+      gap: 60px;
+      margin-bottom: 60px;
+    }
+
+    .footer-brand p {
+      margin-top: 20px;
+      font-size: 0.95rem;
+      line-height: 1.7;
+      max-width: 300px;
+    }
+
+    .footer-col h4 {
+      color: #fff;
+      font-size: 1rem;
+      font-weight: 600;
+      margin-bottom: 24px;
+    }
+
+    .footer-col a {
+      display: block;
+      color: rgba(255,255,255,0.6);
+      text-decoration: none;
+      padding: 8px 0;
+      font-size: 0.9rem;
+      transition: all 0.2s;
+    }
+
+    .footer-col a:hover {
+      color: var(--hd-accent);
+      padding-left: 6px;
+    }
+
+    .footer-bottom {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding-top: 40px;
+      border-top: 1px solid rgba(255,255,255,0.1);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 20px;
+    }
+
+    .footer-bottom p {
+      font-size: 0.85rem;
+    }
+
+    .footer-links {
+      display: flex;
+      gap: 32px;
+    }
+
+    .footer-links a {
+      color: rgba(255,255,255,0.6);
+      text-decoration: none;
+      font-size: 0.85rem;
+      transition: color 0.2s;
+    }
+
+    .footer-links a:hover {
+      color: #fff;
+    }
+
+    /* RESPONSIVE */
+    @media (max-width: 1024px) {
+      .hero-content {
+        grid-template-columns: 1fr;
+        gap: 40px;
+      }
+
+      .hero-visual {
+        order: -1;
+      }
+
+      .nav {
+        display: none;
+      }
+
+      .solution-grid {
+        grid-template-columns: 1fr;
+        max-width: 500px;
+      }
+
+      .use-cases-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+
+      .footer-inner {
+        grid-template-columns: 1fr 1fr;
+      }
+    }
+
+    @media (max-width: 768px) {
+      .hero {
+        padding: 60px 24px 80px;
+      }
+
+      .steps {
+        gap: 24px;
+      }
+
+      .step {
+        flex-direction: column;
+        align-items: center;
+        text-align: center;
+      }
+
+      .step:not(:last-child)::after {
+        display: none;
+      }
+
+      .use-cases-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .footer-inner {
+        grid-template-columns: 1fr;
+        gap: 40px;
+      }
+
+      .footer-bottom {
+        flex-direction: column;
+        text-align: center;
+      }
+    }
+  </style>
 </head>
 <body>
+  <!-- HEADER -->
   <header class="header">
-    <div class="container">
-      <div class="logo">HydraulikDoc AI</div>
+    <div class="header-inner">
+      <a href="/static/landing/hydraulikdoc.html" class="logo">
+        <div class="logo-icon">🔧</div>
+        <div class="logo-text">
+          <strong>HydraulikDoc AI</strong>
+          <span>by SBS Deutschland</span>
+        </div>
+      </a>
+
       <nav class="nav">
-        <a href="/static/landing/hydraulikdoc.html" class="nav-link">Start</a>
         <a href="/static/landing/hydraulikdoc.html#problem" class="nav-link">Das Problem</a>
         <a href="/static/landing/hydraulikdoc.html#solution" class="nav-link">Lösung</a>
+        <a href="/static/landing/hydraulikdoc-docs.html" class="nav-link">Produkt</a>
         <a href="/static/landing/hydraulikdoc-enterprise.html" class="nav-link">Enterprise</a>
-        <a href="/static/landing/hydraulikdoc-docs.html" class="nav-link nav-link-active">Produkt</a>
         <a href="/static/landing/hydraulikdoc-partners.html" class="nav-link">Partner</a>
       </nav>
+
+      <div class="header-actions">
+        <a href="https://knowledge-sbsdeutschland.streamlit.app" class="btn-login">Login</a>
+        <a href="https://knowledge-sbsdeutschland.streamlit.app" class="btn-cta">Kostenlos testen →</a>
+      </div>
     </div>
   </header>
 
-  <main>
-    <!-- Hero -->
-    <section class="hero">
-      <div class="container hero-grid">
-        <div class="hero-content">
-          <h1>HydraulikDoc AI – Produktüberblick und Updates</h1>
-          <p class="hero-subtitle">
-            Alle Funktionen, Roadmap und Changelog an einem Ort – wie Sie es von Enterprise-SaaS erwarten.
-          </p>
+  <!-- HERO: PRODUKT -->
+  <section class="hero" id="hero">
+    <div class="hero-content">
+      <div class="hero-text">
+        <div class="hero-badge">
+          <span class="pulse"></span>
+          PRODUKT &amp; FUNKTIONEN
         </div>
-      </div>
-    </section>
-
-    <!-- Funktionsmatrix -->
-    <section class="section">
-      <div class="container">
-        <header class="section-header">
-          <h2>Funktionsübersicht</h2>
-          <p>Transparente Pläne – Starter für den Einstieg, Professional für Teams, Enterprise für Werke &amp; Konzerne.</p>
-        </header>
-
-        <div class="table-wrapper">
-          <table class="pricing-table">
-            <thead>
-              <tr>
-                <th>Funktion</th>
-                <th>Starter</th>
-                <th>Professional</th>
-                <th>Enterprise</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>Multi-Dokument-Suche (PDF, Zeichnungen)</td>
-                <td>✔︎</td>
-                <td>✔︎</td>
-                <td>✔︎</td>
-              </tr>
-              <tr>
-                <td>Tabellenerkennung (z.B. Rexroth-Datenblätter)</td>
-                <td>✔︎</td>
-                <td>✔︎</td>
-                <td>✔︎</td>
-              </tr>
-              <tr>
-                <td>Video-Analyse (Displays, Fehlercodes)</td>
-                <td>–</td>
-                <td>In Entwicklung – Pilotkunden gesucht</td>
-                <td>In Entwicklung – Pilotkunden gesucht</td>
-              </tr>
-              <tr>
-                <td>Rollen &amp; Rechte</td>
-                <td>Basis-Rollen</td>
-                <td>Erweiterte Rollen</td>
-                <td>Feingranular inkl. Partnerzugriff</td>
-              </tr>
-              <tr>
-                <td>API-Zugriff</td>
-                <td>–</td>
-                <td>Optional</td>
-                <td>Umfangreiche Integrations-APIs</td>
-              </tr>
-              <tr>
-                <td>Single Sign-on (SSO)</td>
-                <td>–</td>
-                <td>Optional</td>
-                <td>SSO (Azure AD/Entra, Okta, Keycloak)</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </section>
-
-    <!-- What's New -->
-    <section class="section section-alt">
-      <div class="container">
-        <header class="section-header">
-          <h2>What’s New</h2>
-          <p>Kurz und knapp: die wichtigsten Änderungen für Service, Instandhaltung und IT.</p>
-        </header>
-
-        <div class="changelog-list">
-          <article class="changelog-item">
-            <h3>2026-02</h3>
-            <ul>
-              <li>Verbesserte Tabellenerkennung für Rexroth-Datenblätter.</li>
-              <li>Optimierte Antwortzeiten bei großen Dokumentenbeständen.</li>
-            </ul>
-          </article>
-
-          <article class="changelog-item">
-            <h3>2026-01</h3>
-            <ul>
-              <li>Erste interne Tests der Video-Analyse für Displays und Fehlercodes.</li>
-              <li>Verfeinerte Trefferlisten für häufige Servicefragen.</li>
-            </ul>
-          </article>
-        </div>
-      </div>
-    </section>
-
-    <!-- Roadmap -->
-    <section class="section">
-      <div class="container">
-        <header class="section-header">
-          <h2>Roadmap (High-Level)</h2>
-          <p>Ein Blick nach vorn – bewusst ohne Feature-Versprechen, aber mit klarer Richtung.</p>
-        </header>
-
-        <div class="roadmap-grid">
-          <article class="card">
-            <h3>Jetzt</h3>
-            <ul>
-              <li>Hydraulik-PDFs, Zeichnungen, Service-Dokumente</li>
-              <li>Service-Suche für Werkstatt, Service und Support</li>
-              <li>ROI-Reporting über Nutzung und Trefferqualität</li>
-            </ul>
-          </article>
-
-          <article class="card">
-            <h3>Nächste</h3>
-            <ul>
-              <li>Video-Analyse für Maschinen-Displays und Fehlercodes</li>
-              <li>Integration in Service-Portale und Ticket-Systeme</li>
-              <li>Erweiterte Mandanten-Reports für Werke &amp; Gruppen</li>
-            </ul>
-          </article>
-
-          <article class="card">
-            <h3>Später</h3>
-            <ul>
-              <li>Schaltplan-Verständnis für komplexe Hydrauliksysteme</li>
-              <li>Mobile App für Serviceeinsätze vor Ort</li>
-              <li>Vertiefte OEM-Integrationen</li>
-            </ul>
-          </article>
-        </div>
-      </div>
-    </section>
-
-    <!-- CTA -->
-    <section class="section section-cta">
-      <div class="container section-cta-inner">
-        <div>
-          <h2>Pilotkunde werden oder Feature-Wünsche einbringen?</h2>
-          <p>
-            Wir stimmen Roadmap und Prioritäten mit ausgewählten Kunden gemeinsam ab – mit Fokus auf
-            messbaren Service-Impact.
-          </p>
-        </div>
-        <div class="section-cta-actions">
-          <a href="mailto:info@sbsdeutschland.com?subject=HydraulikDoc%20Produktfeedback%20%2F%20Pilotkunde"
-             class="btn btn-primary">
-            Kontakt aufnehmen
+        <h1>Das Produkt hinter HydraulikDoc AI</h1>
+        <p class="hero-subtitle">
+          KI-gestützte Suche in technischer Dokumentation – gebaut für Hydraulik-Service, Instandhaltung und technischen Support.
+        </p>
+        <div class="hero-cta-group">
+          <a href="https://knowledge-sbsdeutschland.streamlit.app" class="hero-cta primary">
+            Live-Demo im Browser →
+          </a>
+          <a href="/static/landing/hydraulikdoc-enterprise.html" class="hero-cta secondary">
+            Enterprise-Funktionen ansehen
           </a>
         </div>
+        <p class="hero-subtitle" style="max-width: 520px;">
+          Von der PDF-Verarbeitung über Tabellenerkennung bis zur exakten Quellenangabe:
+          HydraulikDoc AI deckt den gesamten Weg von der Frage zur belastbaren Antwort ab.
+        </p>
       </div>
-    </section>
-  </main>
 
+      <div class="hero-visual">
+        <div class="hero-mockup">
+          <div class="mockup-header">
+            <div class="mockup-dots">
+              <div class="mockup-dot red"></div>
+              <div class="mockup-dot yellow"></div>
+              <div class="mockup-dot green"></div>
+            </div>
+            <span class="mockup-title">Produkt-Ansicht</span>
+          </div>
+          <div class="mockup-body">
+            <div class="mockup-question">
+              Zeig mir alle Druckwerte für den HY-500 Zylinder im Betriebszustand.
+            </div>
+            <div class="mockup-answer">
+              <div class="mockup-answer-label">Antwort</div>
+              <div class="mockup-answer-text">
+                HydraulikDoc AI durchsucht alle hinterlegten Handbücher, extrahiert Tabellen
+                und zeigt Ihnen die relevanten Druckbereiche mit Quellenangabe an – inklusive Seitenzahl.
+              </div>
+              <div class="mockup-source">
+                Quelle: Beispiel-Handbuch HY-500, Datenblatt &amp; Wartungsanleitung
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- PRODUKT-FEATURES -->
+  <section class="solution" id="features">
+    <div class="section-header">
+      <span class="section-badge">Funktionen</span>
+      <h2>Was HydraulikDoc AI im Alltag leistet</h2>
+      <p>Die wichtigsten Funktionsbausteine für Ihre Serviceteams – klar strukturiert.</p>
+    </div>
+
+    <div class="solution-grid">
+      <div class="solution-card">
+        <div class="solution-icon">🔍</div>
+        <h3>Natürliche Sprachsuche</h3>
+        <p>
+          Fragen Sie in Ihrer eigenen Sprache nach Druckwerten, Schaltplänen oder Ersatzteilen.
+          HydraulikDoc AI versteht Fachbegriffe und Kontext aus der Hydraulik.
+        </p>
+      </div>
+      <div class="solution-card">
+        <div class="solution-icon">📊</div>
+        <h3>Tabellenerkennung</h3>
+        <p>
+          Automatische Erkennung von Tabellen mit Druckwerten, Drehmomenten oder Stücklisten –
+          auch in komplex layouteten PDFs.
+        </p>
+      </div>
+      <div class="solution-card">
+        <div class="solution-icon">📎</div>
+        <h3>Exakte Quellenangabe</h3>
+        <p>
+          Jede Antwort kommt mit Dokumentname, Seitenzahl und markierter Textstelle.
+          So behalten Sie jederzeit die Kontrolle.
+        </p>
+      </div>
+      <div class="solution-card">
+        <div class="solution-icon">⚙️</div>
+        <h3>Mehrere Dokumente gleichzeitig</h3>
+        <p>
+          Laden Sie Handbücher, Datenblätter und Wartungsanleitungen hoch und durchsuchen Sie
+          sie in einem Schritt – ohne Dokumentwechsel.
+        </p>
+      </div>
+      <div class="solution-card">
+        <div class="solution-icon">📥</div>
+        <h3>Upload &amp; Versionierung</h3>
+        <p>
+          Neue Versionen von Handbüchern lassen sich einfach hochladen.
+          Alte Stände bleiben nachvollziehbar, werden aber klar gekennzeichnet.
+        </p>
+      </div>
+      <div class="solution-card">
+        <div class="solution-icon">📈</div>
+        <h3>Nutzungsstatistiken</h3>
+        <p>
+          Sehen Sie, welche Dokumente und Fragen besonders häufig genutzt werden –
+          als Grundlage für Optimierungen in Service und Dokumentation.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- WORKFLOWS -->
+  <section class="how-it-works" id="workflows">
+    <div class="section-header">
+      <span class="section-badge">Workflows</span>
+      <h2>Typische Abläufe mit HydraulikDoc AI</h2>
+      <p>Vom ersten Upload bis zur etablierten Nutzung im Service.</p>
+    </div>
+
+    <div class="steps">
+      <div class="step">
+        <div class="step-number">1</div>
+        <div class="step-content">
+          <h3>Dokumente importieren</h3>
+          <p>
+            Sie wählen die relevanten Handbücher und Datenblätter, laden sie hoch
+            und ordnen sie einem Produkt oder einer Anlage zu.
+          </p>
+          <span class="step-highlight">Import in wenigen Minuten</span>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-number">2</div>
+        <div class="step-content">
+          <h3>KI-Index aufbauen</h3>
+          <p>
+            HydraulikDoc AI extrahiert Text, Tabellen und Strukturinformation und
+            erstellt einen durchsuchbaren Index – ohne Anpassung der Original-PDFs.
+          </p>
+          <span class="step-highlight">Automatische Verarbeitung</span>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-number">3</div>
+        <div class="step-content">
+          <h3>Fragen stellen &amp; Antworten nutzen</h3>
+          <p>
+            Servicetechniker nutzen HydraulikDoc AI im Browser oder eingebettet
+            in bestehende Portale und kopieren Antworten inkl. Quellenangabe in ihre Berichte.
+          </p>
+          <span class="step-highlight">Direkt im Einsatz messbar</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- USE CASES -->
+  <section class="use-cases" id="use-cases">
+    <div class="section-header">
+      <span class="section-badge">Anwendungsfälle</span>
+      <h2>Wo HydraulikDoc AI im Einsatz ist</h2>
+      <p>Überall dort, wo technische Dokumentation schnell und zuverlässig gefunden werden muss.</p>
+    </div>
+
+    <div class="use-cases-grid">
+      <div class="use-case-card">
+        <div class="use-case-icon">🛠️</div>
+        <h3>Service &amp; Außendienst</h3>
+        <p>
+          Techniker finden Druckwerte und Ersatzteilnummern direkt beim Kunden
+          – ohne langes Blättern in Ordnern und PDFs.
+        </p>
+      </div>
+      <div class="use-case-card">
+        <div class="use-case-icon">🏭</div>
+        <h3>Instandhaltung im Werk</h3>
+        <p>
+          Werkstatt-Teams lösen Störungen schneller, weil alle relevanten Handbücher
+          an einem zentralen Ort durchsuchbar sind.
+        </p>
+      </div>
+      <div class="use-case-card">
+        <div class="use-case-icon">🎓</div>
+        <h3>Schulung &amp; Onboarding</h3>
+        <p>
+          Neue Mitarbeitende lernen mit realen Fragen zu arbeiten und bekommen
+          gleichzeitig den sicheren Zugang zur Dokumentation.
+        </p>
+      </div>
+      <div class="use-case-card">
+        <div class="use-case-icon">📞</div>
+        <h3>Technischer Support</h3>
+        <p>
+          Hotline-Teams beantworten Kundenfragen schneller und konsistenter –
+          auf Basis der offiziellen Dokumentation statt von Notizzetteln.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- CTA -->
+  <section class="cta-section">
+    <div class="cta-content">
+      <h2>Produkt im eigenen Szenario ausprobieren</h2>
+      <p>
+        Laden Sie ein eigenes Handbuch hoch und testen Sie, wie HydraulikDoc AI
+        mit den Fragen Ihrer Servicetechniker umgeht – ohne Risiko, ohne Setup-Projekt.
+      </p>
+      <div class="cta-buttons">
+        <a href="https://knowledge-sbsdeutschland.streamlit.app" class="hero-cta primary">
+          Testzugang öffnen →
+        </a>
+        <a href="mailto:info@sbsdeutschland.com?subject=HydraulikDoc%20Produktdemo" class="hero-cta secondary">
+          Geführte Produktdemo anfragen
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <!-- FOOTER -->
   <footer class="footer">
-    <div class="container">
-      <p>© SBS Deutschland – HydraulikDoc AI</p>
+    <div class="footer-inner">
+      <div class="footer-brand">
+        <a href="/static/landing/hydraulikdoc.html" class="logo">
+          <div class="logo-icon">🔧</div>
+          <div class="logo-text">
+            <strong>HydraulikDoc AI</strong>
+            <span>by SBS Deutschland</span>
+          </div>
+        </a>
+        <p>
+          Die KI-Lösung für technische Dokumentation in der Hydraulik-Branche.
+          Entwickelt in Weinheim, gehostet in Deutschland.
+        </p>
+      </div>
+
+      <div class="footer-col">
+        <h4>Produkt</h4>
+        <a href="/static/landing/hydraulikdoc.html#solution">Features</a>
+        <a href="/static/landing/hydraulikdoc.html#how-it-works">So funktioniert's</a>
+        <a href="/static/landing/hydraulikdoc.html#pricing">Preise</a>
+        <a href="/static/landing/hydraulikdoc.html#faq">FAQ</a>
+      </div>
+
+      <div class="footer-col">
+        <h4>Unternehmen</h4>
+        <a href="https://sbsdeutschland.com/sbshomepage/unternehmen.html">Über SBS Deutschland</a>
+        <a href="https://sbsdeutschland.com/sbshomepage/kontakt.html">Kontakt</a>
+        <a href="https://sbsdeutschland.com">Weitere Produkte</a>
+      </div>
+
+      <div class="footer-col">
+        <h4>Rechtliches</h4>
+        <a href="https://sbsdeutschland.com/static/impressum.html">Impressum</a>
+        <a href="https://sbsdeutschland.com/static/datenschutz.html">Datenschutz</a>
+        <a href="https://sbsdeutschland.com/static/agb.html">AGB</a>
+      </div>
+    </div>
+
+    <div class="footer-bottom">
+      <p>© 2025 SBS Deutschland GmbH · Weinheim · Alle Rechte vorbehalten</p>
+      <div class="footer-links">
+        <a href="mailto:info@sbsdeutschland.com">info@sbsdeutschland.com</a>
+        <a href="https://www.linkedin.com/company/sbs-deutschland">LinkedIn</a>
+      </div>
     </div>
   </footer>
 </body>
