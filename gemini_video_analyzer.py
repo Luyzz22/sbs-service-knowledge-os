@@ -31,7 +31,7 @@ class GeminiVideoAnalyzer:
     Nutzt Gemini 1.5 Pro's massive 2M Token Context Window
     """
     
-    def __init__(self, api_key: str = None, project_id: str = None, location: str = "europe-west3", credentials_json: str = None):
+    def __init__(self, api_key: str = None, project_id: str = None, location: str = "global", credentials_json: str = None):
         """
         Initialize Gemini Video Analyzer
         
@@ -44,7 +44,7 @@ class GeminiVideoAnalyzer:
         self.api_key = api_key
         self.project_id = project_id
         self.location = location
-        self.model_name = "gemini-1.5-pro-002"
+        self.model_name = "gemini-2.5-pro"
         self.credentials_json = credentials_json
         
         # Initialize Vertex AI
