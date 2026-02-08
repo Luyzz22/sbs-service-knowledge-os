@@ -224,3 +224,16 @@ Proprietär - SBS Deutschland GmbH
 **SBS Deutschland GmbH**  
 Website: [sbsdeutschland.com](https://sbsdeutschland.com)  
 GitHub: [github.com/Luyzz22](https://github.com/Luyzz22)
+
+## 🆕 NEU: Video-Diagnose (Project Hephaestus)
+
+HydraulikDoc AI kann jetzt **Videos analysieren**!
+
+### Features:
+- 🎥 **Multimodale Analyse**: Video + Audio + PDF gleichzeitig
+- 🔊 **Audio-Anomalie-Erkennung**: Kavitation, Lagerschäden, Lufteinschlüsse
+- 📄 **Automatische Handbuch-Referenz**: Findet die relevante Seite
+- ⚡ **Gemini 2.5 Pro**: Neuestes Google AI Modell
+
+### Demo:
+[Video-Diagnose testen](https://knowledge-sbsdeutschland.streamlit.app)
