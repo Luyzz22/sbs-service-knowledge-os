@@ -33,6 +33,9 @@ def render_video_analyzer_tab():
         eine KI-gestützte Audio-Diagnose basierend auf dem Wartungshandbuch!
     </div>
     """, unsafe_allow_html=True)
+
+    # DSGVO Disclaimer
+    st.warning("⚠️ **Beta-Feature:** Videos und Handbücher werden zur Analyse über Google Cloud (Vertex AI) verarbeitet. Für Enterprise-Kunden mit DSGVO-Anforderungen: Kontaktieren Sie uns für eine EU-konforme Lösung.")
     
     # Check if user has access (Premium Feature)
     if st.session_state.user.role == "demo":
