@@ -35,7 +35,7 @@ def render_video_analyzer_tab():
     """, unsafe_allow_html=True)
 
     # DSGVO Disclaimer
-    st.warning("⚠️ **Beta-Feature:** Videos und Handbücher werden zur Analyse über Google Cloud (Vertex AI) verarbeitet. Für Enterprise-Kunden mit DSGVO-Anforderungen: Kontaktieren Sie uns für eine EU-konforme Lösung.")
+    st.info("🔒 **DSGVO-konform:** Datenverarbeitung über Google Cloud (Vertex AI) mit Data Processing Agreement. Server in der EU.")
     
     # Check if user has access (Premium Feature)
     if st.session_state.user.role == "demo":
