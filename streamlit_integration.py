@@ -186,12 +186,17 @@ def analyze_with_gemini(
                     st.markdown("## 📊 Diagnose-Ergebnis")
                     
                     # Display in nice format
-                    st.markdown(f"""
-                    <div style='background: #f8f9fa; padding: 1.5rem; 
-                                border-radius: 10px; border-left: 4px solid #FF8C00;'>
-                        {result['analysis'].replace('\n', '<br>')}
-                    </div>
-                    """, unsafe_allow_html=True)
+                    st.markdown(
+                        """
+                        <div style='background: #f8f9fa; padding: 1.5rem; 
+                                    border-radius: 10px; border-left: 4px solid #FF8C00;'>
+                        """
+                        + result["analysis"].replace("\n", "<br>")
+                        + """
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
                     
                     # Metadata
                     st.markdown("---")

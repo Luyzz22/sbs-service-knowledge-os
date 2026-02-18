@@ -27,6 +27,8 @@ COPYRIGHT © 2026 SBS DEUTSCHLAND GMBH. ALL RIGHTS RESERVED.
 """
 
 import streamlit as st
+from fluid_advisor import FluidSample, FluidAssessment, assess_fluid
+from incident_model import Incident, IncidentPriority
 import tempfile
 import os
 import time
@@ -1497,6 +1499,66 @@ def render_documents_tab(llama_key, openai_key):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+def render_fluid_advisor_tab():
+    st.header("💧 Hydraulik Fluid & Service Advisor")
+
+    col_left, col_right = st.columns([2, 3])
+
+    with col_left:
+        st.subheader("Neue Probe erfassen")
+
+        asset_id = st.text_input("Anlage / Aggregat-ID", "")
+        taken_at = datetime.now()
+
+        particle_count = st.number_input(
+            "Partikelzahl (ISO 4406 / ml)", min_value=0.0, step=100.0, value=0.0
+        )
+        water_content = st.number_input(
+            "Wassergehalt (%)", min_value=0.0, max_value=100.0, step=0.01, value=0.0
+        )
+
+        if st.button("Analyse starten", type="primary", use_container_width=True):
+            sample = FluidSample(
+                asset_id=asset_id or "UNBEKANNT",
+                taken_at=taken_at,
+                particle_count=particle_count or None,
+                water_content=water_content or None,
+            )
+            assessment = assess_fluid(sample)
+            st.session_state["last_fluid_assessment"] = assessment
+
+    with col_right:
+        st.subheader("Bewertung")
+
+        assessment = st.session_state.get("last_fluid_assessment")
+        if not assessment:
+            st.info("Noch keine Fluidprobe analysiert.")
+            return
+
+        st.metric("FluidScore", f"{assessment.score}/100", assessment.status)
+        st.write(assessment.summary)
+
+        st.markdown("**Empfehlungen & Begründungen**")
+        for rec in assessment.recommendations:
+            st.markdown(f"- {rec}")
+
+        st.markdown("---")
+        if st.button("🚨 Incident aus Fluidbewertung anlegen", key="fluid_incident_button_main", use_container_width=True):
+            incident = Incident.create_fluid_incident(
+                asset_id=assessment.asset_id,
+                summary=assessment.summary,
+                details="\n".join(assessment.recommendations),
+                priority=IncidentPriority.P2 if assessment.status != "OK" else IncidentPriority.P3,
+                fluid_assessment_id=assessment.sample_time.isoformat(),
+                owner=st.session_state.get("username", "unassigned"),
+            )
+            incidents = st.session_state.get("incidents", [])
+            incidents.append(incident)
+            st.session_state["incidents"] = incidents
+            st.success(f"Incident {incident.incident_id} angelegt.")
+
+
+
 # MAIN APPLICATION ORCHESTRATOR - ENTERPRISE 4-TAB
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -1519,12 +1581,12 @@ def main():
     final_llama, final_openai = render_sidebar(llama_key, openai_key)
     
     if VIDEO_AVAILABLE:
-        tab_docs, tab_query, tab_video, tab_settings = st.tabs([
-            "📚 Dokumente", "🔍 Abfrage", "🎬 Video-Diagnose", "⚙️ Einstellungen"
+        tab_docs, tab_query, tab_video, tab_fluid, tab_settings = st.tabs([
+            "📚 Dokumente", "🔍 Abfrage", "🎬 Video-Diagnose", "💧 Fluid & Service Advisor", "⚙️ Einstellungen"
         ])
     else:
-        tab_docs, tab_query, tab_settings = st.tabs([
-            "📚 Dokumente", "🔍 Abfrage", "⚙️ Einstellungen"
+        tab_docs, tab_query, tab_fluid, tab_settings = st.tabs([
+            "📚 Dokumente", "🔍 Abfrage", "💧 Fluid & Service Advisor", "⚙️ Einstellungen"
         ])
         tab_video = None
     
@@ -1533,6 +1595,9 @@ def main():
     
     with tab_query:
         render_chat_interface()
+    
+    with tab_fluid:
+        render_fluid_advisor_tab()
     
     if tab_video is not None:
         with tab_video:
