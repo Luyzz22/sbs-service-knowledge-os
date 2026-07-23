@@ -29,10 +29,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-          cache: pip
-          cache-dependency-path: |
-            requirements.txt
-            requirements_video.txt
 
       - name: Validate Python sources
         run: python -m compileall -q app.py fluid_advisor.py gemini_video_analyzer.py incident_model.py streamlit_integration.py
