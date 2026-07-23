@@ -1,0 +1,124 @@
+name: Test, publish, and deploy
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: production-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  PYTHON_VERSION: "3.11"
+  REGISTRY: ghcr.io
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements_video.txt
+
+      - name: Validate Python sources
+        run: python -m compileall -q app.py fluid_advisor.py gemini_video_analyzer.py incident_model.py streamlit_integration.py
+
+      - name: Run domain tests
+        run: python -m unittest discover --start-directory tests --verbose
+
+      - name: Validate shell scripts
+        run: bash -n ops/scripts/*.sh
+
+      - name: Validate Compose model
+        env:
+          ACME_EMAIL: ci@example.invalid
+        run: docker compose --env-file .env.example config --quiet
+
+  publish:
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    outputs:
+      image: ${{ steps.image.outputs.name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Derive image name
+        id: image
+        shell: bash
+        run: echo "name=${REGISTRY}/${GITHUB_REPOSITORY,,}" >>"${GITHUB_OUTPUT}"
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build application image
+        run: docker build --tag "${{ steps.image.outputs.name }}:${GITHUB_SHA}" .
+
+      - name: Push immutable image
+        if: github.event_name != 'pull_request'
+        run: docker push "${{ steps.image.outputs.name }}:${GITHUB_SHA}"
+
+  deploy:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure pinned SSH identity
+        shell: bash
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.HETZNER_SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.HETZNER_SSH_KNOWN_HOSTS }}
+        run: |
+          install -d -m 0700 "$HOME/.ssh"
+          printf '%s\n' "$SSH_PRIVATE_KEY" >"$HOME/.ssh/deploy_key"
+          printf '%s\n' "$SSH_KNOWN_HOSTS" >"$HOME/.ssh/known_hosts"
+          chmod 0600 "$HOME/.ssh/deploy_key" "$HOME/.ssh/known_hosts"
+
+      - name: Upload deployment manifests
+        env:
+          HOST: ${{ secrets.HETZNER_HOST }}
+          PORT: ${{ secrets.HETZNER_PORT }}
+          USER: ${{ secrets.HETZNER_USER }}
+          DEPLOY_PATH: ${{ secrets.HETZNER_DEPLOY_PATH }}
+        run: |
+          ssh -i "$HOME/.ssh/deploy_key" -p "$PORT" "$USER@$HOST" "install -d -m 0750 '$DEPLOY_PATH'"
+          scp -i "$HOME/.ssh/deploy_key" -P "$PORT" -r \
+            .dockerignore docker-compose.yml ops "$USER@$HOST:$DEPLOY_PATH/"
+
+      - name: Authenticate host and deploy blue/green release
+        env:
+          HOST: ${{ secrets.HETZNER_HOST }}
+          PORT: ${{ secrets.HETZNER_PORT }}
+          USER: ${{ secrets.HETZNER_USER }}
+          DEPLOY_PATH: ${{ secrets.HETZNER_DEPLOY_PATH }}
+          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
+          GHCR_READ_TOKEN: ${{ secrets.GHCR_READ_TOKEN }}
+          IMAGE: ${{ needs.publish.outputs.image }}
+        run: |
+          printf '%s' "$GHCR_READ_TOKEN" | ssh -i "$HOME/.ssh/deploy_key" -p "$PORT" "$USER@$HOST" \
+            "docker login ghcr.io --username '$GHCR_USERNAME' --password-stdin"
+          ssh -i "$HOME/.ssh/deploy_key" -p "$PORT" "$USER@$HOST" \
+            "cd '$DEPLOY_PATH' && chmod 0550 ops/scripts/*.sh && ./ops/scripts/deploy.sh '$IMAGE' '$GITHUB_SHA'"

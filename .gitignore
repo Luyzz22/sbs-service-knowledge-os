@@ -15,6 +15,14 @@ __pycache__/
 logs/
 *.log
 
+# Production runtime state
+.deploy/
+backups/
+ops/traefik/dynamic/app.yml
+ops/traefik/dynamic/app.yml.*
+secrets/*
+!secrets/README.md
+
 # macOS
 .DS_Store
 
