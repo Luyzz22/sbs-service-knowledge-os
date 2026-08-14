@@ -3,5 +3,5 @@ bandit[toml]==1.9.4
 cyclonedx-bom==7.3.1
 pip-audit==2.10.1
 ruff==0.16.3
-mypy==1.20.2
+mypy==2.3.0
 types-requests==2.33.0.20260712
