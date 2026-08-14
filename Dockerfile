@@ -41,6 +41,12 @@ RUN apt-get update && \
 
 COPY --from=builder /opt/venv /opt/venv
 
+# Package installers are build-time tooling. They are not needed to run the
+# service and their vendored dependencies unnecessarily enlarge the production
+# attack surface. Remove both the base-image and virtual-environment copies.
+RUN /usr/local/bin/python -m pip uninstall --yes pip setuptools wheel && \
+    /opt/venv/bin/python -m pip uninstall --yes pip setuptools wheel
+
 WORKDIR /app
 COPY app.py fluid_advisor.py incident_model.py ./
 COPY compliance ./compliance

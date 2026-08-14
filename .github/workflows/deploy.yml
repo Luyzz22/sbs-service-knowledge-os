@@ -88,6 +88,11 @@ jobs:
       - name: Build hardened image
         run: docker build --tag hydraulikdoc:${GITHUB_SHA} .
 
+      - name: Smoke-test hardened runtime
+        run: >-
+          docker run --rm --entrypoint python hydraulikdoc:${GITHUB_SHA}
+          -c "import openai, psycopg, streamlit; import hydraulikdoc.ui; print('runtime-imports-ok')"
+
       - name: Scan image filesystem
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
