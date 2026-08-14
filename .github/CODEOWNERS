@@ -1,0 +1,7 @@
+# Security-sensitive boundaries require an accountable human reviewer.
+/infra/azure/ @Luyzz22
+/.github/workflows/ @Luyzz22
+/hydraulikdoc/auth.py @Luyzz22
+/hydraulikdoc/config.py @Luyzz22
+/hydraulikdoc/repository.py @Luyzz22
+/db/migrations/ @Luyzz22

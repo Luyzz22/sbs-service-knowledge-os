@@ -16,3 +16,4 @@ data
 secrets
 tmp
 uploads
+sbom*.json

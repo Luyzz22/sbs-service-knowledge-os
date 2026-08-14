@@ -1,7 +1,7 @@
-from datetime import datetime, timezone
 import json
 import logging
 import unittest
+from datetime import UTC, datetime
 
 from compliance.audit import AuditLogger, AuditOutcome, SubjectPseudonymizer
 from compliance.retention import RecordClass, RetentionPolicy
@@ -66,14 +66,15 @@ class RetentionTests(unittest.TestCase):
                 "AUDIT_EVENT_RETENTION_DAYS": "90",
                 "CONTRACT_ACCEPTANCE_RETENTION_DAYS": "365",
                 "DATA_SUBJECT_REQUEST_RETENTION_DAYS": "180",
+                "INCIDENT_RETENTION_DAYS": "30",
                 "UPLOADED_CONTENT_RETENTION_DAYS": "1",
             }
         )
-        created_at = datetime(2026, 7, 23, tzinfo=timezone.utc)
+        created_at = datetime(2026, 7, 23, tzinfo=UTC)
 
         expires_at = policy.expires_at(RecordClass.AI_INTERACTION, created_at)
 
-        self.assertEqual(expires_at, datetime(2026, 7, 30, tzinfo=timezone.utc))
+        self.assertEqual(expires_at, datetime(2026, 7, 30, tzinfo=UTC))
 
     def test_naive_timestamps_are_rejected(self) -> None:
         policy = RetentionPolicy.from_environment({})

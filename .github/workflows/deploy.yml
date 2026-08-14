@@ -1,4 +1,4 @@
-name: Test, publish, and deploy
+name: Enterprise CI and Azure release
 
 on:
   pull_request:
@@ -8,113 +8,310 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: production-${{ github.ref }}
+  group: hydraulikdoc-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
 permissions:
   contents: read
-  packages: write
 
 env:
   PYTHON_VERSION: "3.11"
-  REGISTRY: ghcr.io
+  AZURE_LOCATION: germanywestcentral
+  RESOURCE_GROUP: rg-hydraulikdoc-prod
+  IMAGE_REPOSITORY: hydraulikdoc
 
 jobs:
   validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+            requirements.lock
+            requirements-dev.lock
 
-      - name: Validate Python sources
-        run: python -m compileall -q app.py fluid_advisor.py gemini_video_analyzer.py incident_model.py streamlit_integration.py
+      - name: Install verified toolchain
+        run: python -m pip install --require-hashes -r requirements-dev.lock
 
-      - name: Run domain tests
+      - name: Compile Python sources
+        run: python -m compileall -q app.py compliance hydraulikdoc fluid_advisor.py incident_model.py ops/scripts/*.py
+
+      - name: Lint and format gate
+        run: |
+          ruff check app.py compliance hydraulikdoc fluid_advisor.py incident_model.py tests ops/scripts/*.py
+          ruff format --check app.py compliance hydraulikdoc fluid_advisor.py incident_model.py tests ops/scripts/*.py
+
+      - name: Type safety gate
+        run: mypy hydraulikdoc compliance fluid_advisor.py incident_model.py ops/scripts/*.py
+
+      - name: Unit and policy tests
         run: python -m unittest discover --start-directory tests --verbose
+
+      - name: Security static analysis
+        run: bandit -c pyproject.toml -r app.py compliance hydraulikdoc fluid_advisor.py incident_model.py ops/scripts
+
+      - name: Dependency vulnerability audit
+        run: pip-audit -r requirements.lock
+
+      - name: Generate CycloneDX SBOM
+        run: cyclonedx-py requirements requirements.lock --output-format JSON --output-file sbom.cdx.json
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: sbom-${{ github.sha }}
+          path: sbom.cdx.json
+          if-no-files-found: error
+          retention-days: 90
 
       - name: Validate shell scripts
         run: bash -n ops/scripts/*.sh
 
-      - name: Validate Compose model
+      - name: Validate private-edge Compose model
         env:
+          APP_HOST: ci.example.invalid
           ACME_EMAIL: ci@example.invalid
         run: docker compose --env-file .env.example config --quiet
 
-  publish:
-    needs: validate
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    outputs:
-      image: ${{ steps.image.outputs.name }}
-    steps:
-      - uses: actions/checkout@v4
+      - name: Validate Azure Bicep
+        run: az bicep build --file infra/azure/main.bicep --stdout >/dev/null
 
-      - name: Derive image name
-        id: image
-        shell: bash
-        run: echo "name=${REGISTRY}/${GITHUB_REPOSITORY,,}" >>"${GITHUB_OUTPUT}"
+      - name: Build hardened image
+        run: docker build --tag hydraulikdoc:${GITHUB_SHA} .
 
-      - name: Log in to GHCR
-        if: github.event_name != 'pull_request'
-        uses: docker/login-action@v3
+      - name: Scan image filesystem
+        uses: aquasecurity/trivy-action@915b19bbe73b92a6cf82a1bc12b087c9a19a5fe2 # v0.28.0
         with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          image-ref: hydraulikdoc:${{ github.sha }}
+          format: sarif
+          output: trivy-results.sarif
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
 
-      - name: Build application image
-        run: docker build --tag "${{ steps.image.outputs.name }}:${GITHUB_SHA}" .
+      - name: Upload scan result
+        if: always() && hashFiles('trivy-results.sarif') != ''
+        uses: github/codeql-action/upload-sarif@d6317709a54fd87078d323eeb0e48ec331c8e621 # v3
+        with:
+          sarif_file: trivy-results.sarif
 
-      - name: Push immutable image
-        if: github.event_name != 'pull_request'
-        run: docker push "${{ steps.image.outputs.name }}:${GITHUB_SHA}"
+  postgres-security:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17.10-bookworm@sha256:9b18b78397054fce88a9552e9d5a3ad5bb7fd258c5b3cc1c5028e46373d6ea8f
+        env:
+          POSTGRES_DB: hydraulikdoc
+          POSTGRES_PASSWORD: integration-admin-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d hydraulikdoc"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements.lock
+
+      - name: Install database runtime
+        run: python -m pip install --require-hashes -r requirements.lock
+
+      - name: Bootstrap non-admin runtime role
+        env:
+          DATABASE_HOST: 127.0.0.1
+          DATABASE_PORT: "5432"
+          DATABASE_NAME: hydraulikdoc
+          DATABASE_SSLMODE: disable
+          DATABASE_ADMIN_USER: postgres
+          DATABASE_ADMIN_PASSWORD: integration-admin-only
+          DATABASE_USER: hydraulikdoc_app
+          DATABASE_PASSWORD: integration-runtime-only
+          DATABASE_LIFECYCLE_USER: hydraulikdoc_lifecycle
+          DATABASE_LIFECYCLE_PASSWORD: integration-lifecycle-only
+        run: python ops/scripts/bootstrap-postgres.py
+
+      - name: Verify FORCE RLS and least privilege
+        env:
+          RUN_POSTGRES_INTEGRATION: "true"
+          INTEGRATION_DATABASE_ADMIN_URL: postgresql://postgres:integration-admin-only@127.0.0.1:5432/hydraulikdoc?sslmode=disable
+          INTEGRATION_DATABASE_APP_URL: postgresql://hydraulikdoc_app:integration-runtime-only@127.0.0.1:5432/hydraulikdoc?sslmode=disable
+          INTEGRATION_DATABASE_LIFECYCLE_URL: postgresql://hydraulikdoc_lifecycle:integration-lifecycle-only@127.0.0.1:5432/hydraulikdoc?sslmode=disable
+        run: python -m unittest tests.test_postgres_integration --verbose
 
   deploy:
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-    needs: publish
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      github.event_name != 'pull_request' &&
+      vars.AZURE_DEPLOY_ENABLED == 'true' &&
+      vars.COMPLIANCE_RELEASE_APPROVED == 'true' &&
+      vars.RETENTION_POLICY_APPROVED == 'true'
+      && vars.AI_EVALUATION_EVIDENCE_ID != ''
+    needs:
+      - validate
+      - postgres-security
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 60
     environment: production
+    permissions:
+      contents: read
+      id-token: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - name: Configure pinned SSH identity
+      - name: Azure login through GitHub OIDC
+        uses: azure/login@8216e11d8cd9b42fe925c852af8e76311ff067ac # v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Create resource group
+        run: az group create --name "$RESOURCE_GROUP" --location "$AZURE_LOCATION" --tags application=HydraulikDoc environment=prod managedBy=github-actions
+
+      - name: Provision platform foundation
         shell: bash
         env:
-          SSH_PRIVATE_KEY: ${{ secrets.HETZNER_SSH_PRIVATE_KEY }}
-          SSH_KNOWN_HOSTS: ${{ secrets.HETZNER_SSH_KNOWN_HOSTS }}
+          ENTRA_CLIENT_SECRET: ${{ secrets.ENTRA_CLIENT_SECRET }}
+          AUDIT_HMAC_KEY: ${{ secrets.AUDIT_HMAC_KEY }}
+          POSTGRES_ADMIN_PASSWORD: ${{ secrets.POSTGRES_ADMIN_PASSWORD }}
+          POSTGRES_APP_PASSWORD: ${{ secrets.POSTGRES_APP_PASSWORD }}
+          POSTGRES_LIFECYCLE_PASSWORD: ${{ secrets.POSTGRES_LIFECYCLE_PASSWORD }}
+          TLS_CERTIFICATE_PFX_BASE64: ${{ secrets.TLS_CERTIFICATE_PFX_BASE64 }}
         run: |
-          install -d -m 0700 "$HOME/.ssh"
-          printf '%s\n' "$SSH_PRIVATE_KEY" >"$HOME/.ssh/deploy_key"
-          printf '%s\n' "$SSH_KNOWN_HOSTS" >"$HOME/.ssh/known_hosts"
-          chmod 0600 "$HOME/.ssh/deploy_key" "$HOME/.ssh/known_hosts"
+          az deployment group create \
+            --name "hydraulikdoc-foundation-${GITHUB_RUN_ID}" \
+            --resource-group "$RESOURCE_GROUP" \
+            --template-file infra/azure/main.bicep \
+            --parameters \
+              publicHostname="${{ vars.PUBLIC_HOSTNAME }}" \
+              entraTenantId="${{ secrets.AZURE_TENANT_ID }}" \
+              entraClientId="${{ secrets.ENTRA_APP_CLIENT_ID }}" \
+              entraClientSecret="$ENTRA_CLIENT_SECRET" \
+              auditHmacKey="$AUDIT_HMAC_KEY" \
+              postgresAdminPassword="$POSTGRES_ADMIN_PASSWORD" \
+              postgresAppPassword="$POSTGRES_APP_PASSWORD" \
+              postgresLifecyclePassword="$POSTGRES_LIFECYCLE_PASSWORD" \
+              tlsCertificatePfxBase64="$TLS_CERTIFICATE_PFX_BASE64" \
+              containerImage="foundation.invalid/hydraulikdoc:pending" \
+              deployApplication=false \
+              deploymentEvidenceId="PENDING-${GITHUB_SHA}" \
+              aiEvaluationEvidenceId="PENDING-${GITHUB_SHA}" \
+              complianceReleaseApproved=false \
+              retentionPolicyApproved=false \
+              retentionPolicyId="PENDING-${GITHUB_SHA}" \
+              registryPublicNetworkAccess=Enabled \
+              chatModelName="${{ vars.AZURE_CHAT_MODEL_NAME }}" \
+              chatModelVersion="${{ vars.AZURE_CHAT_MODEL_VERSION }}"
 
-      - name: Upload deployment manifests
-        env:
-          HOST: ${{ secrets.HETZNER_HOST }}
-          PORT: ${{ secrets.HETZNER_PORT }}
-          USER: ${{ secrets.HETZNER_USER }}
-          DEPLOY_PATH: ${{ secrets.HETZNER_DEPLOY_PATH }}
+      - name: Resolve private registry
+        id: registry
+        shell: bash
         run: |
-          ssh -i "$HOME/.ssh/deploy_key" -p "$PORT" "$USER@$HOST" "install -d -m 0750 '$DEPLOY_PATH'"
-          scp -i "$HOME/.ssh/deploy_key" -P "$PORT" -r \
-            .dockerignore docker-compose.yml ops "$USER@$HOST:$DEPLOY_PATH/"
+          registry_name="$(az deployment group show --resource-group "$RESOURCE_GROUP" --name "hydraulikdoc-foundation-${GITHUB_RUN_ID}" --query properties.outputs.registryName.value -o tsv)"
+          login_server="$(az acr show --name "$registry_name" --query loginServer -o tsv)"
+          echo "name=$registry_name" >>"$GITHUB_OUTPUT"
+          echo "server=$login_server" >>"$GITHUB_OUTPUT"
 
-      - name: Authenticate host and deploy blue/green release
-        env:
-          HOST: ${{ secrets.HETZNER_HOST }}
-          PORT: ${{ secrets.HETZNER_PORT }}
-          USER: ${{ secrets.HETZNER_USER }}
-          DEPLOY_PATH: ${{ secrets.HETZNER_DEPLOY_PATH }}
-          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
-          GHCR_READ_TOKEN: ${{ secrets.GHCR_READ_TOKEN }}
-          IMAGE: ${{ needs.publish.outputs.image }}
+      - name: Build image inside Azure Container Registry
+        run: az acr build --registry "${{ steps.registry.outputs.name }}" --image "$IMAGE_REPOSITORY:${GITHUB_SHA}" --file Dockerfile .
+
+      - name: Resolve immutable image digest
+        id: image
+        shell: bash
         run: |
-          printf '%s' "$GHCR_READ_TOKEN" | ssh -i "$HOME/.ssh/deploy_key" -p "$PORT" "$USER@$HOST" \
-            "docker login ghcr.io --username '$GHCR_USERNAME' --password-stdin"
-          ssh -i "$HOME/.ssh/deploy_key" -p "$PORT" "$USER@$HOST" \
-            "cd '$DEPLOY_PATH' && chmod 0550 ops/scripts/*.sh && ./ops/scripts/deploy.sh '$IMAGE' '$GITHUB_SHA'"
+          digest="$(az acr manifest show-metadata --registry "${{ steps.registry.outputs.name }}" --name "$IMAGE_REPOSITORY:${GITHUB_SHA}" --query digest -o tsv)"
+          echo "ref=${{ steps.registry.outputs.server }}/$IMAGE_REPOSITORY@$digest" >>"$GITHUB_OUTPUT"
+
+      - name: Close the temporary registry build boundary
+        if: always() && steps.registry.outputs.name != ''
+        run: az acr update --name "${{ steps.registry.outputs.name }}" --public-network-enabled false
+
+      - name: Deploy approved immutable release
+        shell: bash
+        env:
+          ENTRA_CLIENT_SECRET: ${{ secrets.ENTRA_CLIENT_SECRET }}
+          AUDIT_HMAC_KEY: ${{ secrets.AUDIT_HMAC_KEY }}
+          POSTGRES_ADMIN_PASSWORD: ${{ secrets.POSTGRES_ADMIN_PASSWORD }}
+          POSTGRES_APP_PASSWORD: ${{ secrets.POSTGRES_APP_PASSWORD }}
+          POSTGRES_LIFECYCLE_PASSWORD: ${{ secrets.POSTGRES_LIFECYCLE_PASSWORD }}
+          TLS_CERTIFICATE_PFX_BASE64: ${{ secrets.TLS_CERTIFICATE_PFX_BASE64 }}
+        run: |
+          az deployment group create \
+            --name "hydraulikdoc-release-${GITHUB_RUN_ID}" \
+            --resource-group "$RESOURCE_GROUP" \
+            --template-file infra/azure/main.bicep \
+            --parameters \
+              publicHostname="${{ vars.PUBLIC_HOSTNAME }}" \
+              entraTenantId="${{ secrets.AZURE_TENANT_ID }}" \
+              entraClientId="${{ secrets.ENTRA_APP_CLIENT_ID }}" \
+              entraClientSecret="$ENTRA_CLIENT_SECRET" \
+              auditHmacKey="$AUDIT_HMAC_KEY" \
+              postgresAdminPassword="$POSTGRES_ADMIN_PASSWORD" \
+              postgresAppPassword="$POSTGRES_APP_PASSWORD" \
+              postgresLifecyclePassword="$POSTGRES_LIFECYCLE_PASSWORD" \
+              tlsCertificatePfxBase64="$TLS_CERTIFICATE_PFX_BASE64" \
+              containerImage="${{ steps.image.outputs.ref }}" \
+              deployApplication=true \
+              deploymentEvidenceId="GHA-${GITHUB_RUN_ID}-${GITHUB_SHA}" \
+              aiEvaluationEvidenceId="${{ vars.AI_EVALUATION_EVIDENCE_ID }}" \
+              complianceReleaseApproved="${{ vars.COMPLIANCE_RELEASE_APPROVED }}" \
+              retentionPolicyApproved="${{ vars.RETENTION_POLICY_APPROVED }}" \
+              retentionPolicyId="${{ vars.RETENTION_POLICY_ID }}" \
+              registryPublicNetworkAccess=Disabled \
+              chatModelName="${{ vars.AZURE_CHAT_MODEL_NAME }}" \
+              chatModelVersion="${{ vars.AZURE_CHAT_MODEL_VERSION }}"
+
+      - name: Bootstrap database role and schema
+        shell: bash
+        run: |
+          job_name="$(az deployment group show --resource-group "$RESOURCE_GROUP" --name "hydraulikdoc-release-${GITHUB_RUN_ID}" --query properties.outputs.databaseBootstrapJobName.value -o tsv)"
+          execution_name="$(az containerapp job start --resource-group "$RESOURCE_GROUP" --name "$job_name" --query name -o tsv)"
+          for attempt in $(seq 1 60); do
+            status="$(az containerapp job execution show --resource-group "$RESOURCE_GROUP" --name "$job_name" --job-execution-name "$execution_name" --query properties.status -o tsv)"
+            case "$status" in
+              Succeeded) exit 0 ;;
+              Failed) echo "Database bootstrap failed" >&2; exit 1 ;;
+            esac
+            sleep 10
+          done
+          echo "Database bootstrap timed out" >&2
+          exit 1
+
+      - name: Verify retention propagation control
+        shell: bash
+        run: |
+          job_name="$(az deployment group show --resource-group "$RESOURCE_GROUP" --name "hydraulikdoc-release-${GITHUB_RUN_ID}" --query properties.outputs.retentionLifecycleJobName.value -o tsv)"
+          execution_name="$(az containerapp job start --resource-group "$RESOURCE_GROUP" --name "$job_name" --query name -o tsv)"
+          for attempt in $(seq 1 60); do
+            status="$(az containerapp job execution show --resource-group "$RESOURCE_GROUP" --name "$job_name" --job-execution-name "$execution_name" --query properties.status -o tsv)"
+            case "$status" in
+              Succeeded) exit 0 ;;
+              Failed) echo "Retention propagation verification failed" >&2; exit 1 ;;
+            esac
+            sleep 10
+          done
+          echo "Retention propagation verification timed out" >&2
+          exit 1
+
+      - name: Restart and verify application
+        shell: bash
+        run: |
+          app_name="$(az deployment group show --resource-group "$RESOURCE_GROUP" --name "hydraulikdoc-release-${GITHUB_RUN_ID}" --query properties.outputs.applicationName.value -o tsv)"
+          az containerapp revision restart --resource-group "$RESOURCE_GROUP" --name "$app_name" --revision "$(az containerapp revision list --resource-group "$RESOURCE_GROUP" --name "$app_name" --query '[0].name' -o tsv)"
+          curl --fail --silent --show-error --retry 12 --retry-all-errors --retry-delay 10 "https://${{ vars.PUBLIC_HOSTNAME }}/_stcore/health"

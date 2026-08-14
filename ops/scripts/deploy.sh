@@ -48,7 +48,7 @@ if [[ "${has_active}" == false ]]; then
     APP_HOST="${app_host}" "${script_dir}/render-traefik-config.sh" "${target_slot}"
 fi
 
-base_services=(traefik postgres qdrant)
+base_services=(traefik postgres)
 if [[ "${backup_enabled:-false}" == "true" ]]; then
     base_services+=(backup)
 fi

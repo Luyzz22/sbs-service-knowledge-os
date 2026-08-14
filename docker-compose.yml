@@ -7,17 +7,26 @@ x-app-common: &app-common
     dockerfile: Dockerfile
   restart: unless-stopped
   environment:
-    OPENAI_API_KEY_FILE: /run/secrets/openai_api_key
-    LLAMA_CLOUD_API_KEY_FILE: /run/secrets/llama_cloud_api_key
+    APP_ENV: development
+    AUTH_MODE: local
+    AI_BACKEND: disabled
+    PERSISTENCE_BACKEND: postgres
+    DEFAULT_TENANT_ID: ${DEFAULT_TENANT_ID:-private-edge-tenant}
+    PUBLIC_BASE_URL: https://${APP_HOST:?Set APP_HOST in .env}
+    LOCAL_USERS_JSON_FILE: /run/secrets/local_users_json
+    AUDIT_HMAC_KEY_FILE: /run/secrets/audit_hmac_key
+    DATABASE_SSLMODE: disable
     DATABASE_HOST: postgres
     DATABASE_PORT: "5432"
     DATABASE_NAME: ${POSTGRES_DB:-sbs_knowledge_os}
     DATABASE_USER: ${POSTGRES_USER:-sbs_app}
     DATABASE_PASSWORD_FILE: /run/secrets/postgres_password
-    QDRANT_URL: http://qdrant:6333
+    AUTO_MIGRATE_DATABASE: "true"
+    REQUIRE_HUMAN_REVIEW: "true"
+    COMPLIANCE_RELEASE_APPROVED: "false"
   secrets:
-    - openai_api_key
-    - llama_cloud_api_key
+    - local_users_json
+    - audit_hmac_key
     - postgres_password
   expose:
     - "8501"
@@ -26,8 +35,6 @@ x-app-common: &app-common
     - proxy
   depends_on:
     postgres:
-      condition: service_healthy
-    qdrant:
       condition: service_healthy
   read_only: true
   tmpfs:
@@ -50,7 +57,7 @@ x-app-common: &app-common
 
 services:
   traefik:
-    image: traefik:v3.5
+    image: traefik:v3.5@sha256:16acb89c6db341182970d6fdafece31303b0a380a8ed7aa51682e225229bf1d2
     restart: unless-stopped
     command:
       - --api.dashboard=false
@@ -104,7 +111,7 @@ services:
     <<: *app-common
 
   postgres:
-    image: postgres:17.10-bookworm
+    image: postgres:17.10-bookworm@sha256:9b18b78397054fce88a9552e9d5a3ad5bb7fd258c5b3cc1c5028e46373d6ea8f
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-sbs_knowledge_os}
@@ -152,35 +159,6 @@ services:
       - no-new-privileges:true
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-sbs_app} -d ${POSTGRES_DB:-sbs_knowledge_os}"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 20s
-
-  qdrant:
-    image: qdrant/qdrant:v1.15.5
-    restart: unless-stopped
-    environment:
-      QDRANT__LOG_LEVEL: INFO
-      QDRANT__SERVICE__ENABLE_CORS: "false"
-      QDRANT__TELEMETRY_DISABLED: "true"
-    volumes:
-      - type: bind
-        source: ${QDRANT_DATA_DIR:-./data/qdrant}
-        target: /qdrant/storage
-    expose:
-      - "6333"
-      - "6334"
-    networks:
-      - backend
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    healthcheck:
-      test:
-        - CMD-SHELL
-        - "bash -c ':> /dev/tcp/127.0.0.1/6333'"
       interval: 10s
       timeout: 5s
       retries: 10
@@ -237,10 +215,10 @@ volumes:
   traefik_letsencrypt:
 
 secrets:
-  openai_api_key:
-    file: ${OPENAI_API_KEY_FILE:-./secrets/openai_api_key}
-  llama_cloud_api_key:
-    file: ${LLAMA_CLOUD_API_KEY_FILE:-./secrets/llama_cloud_api_key}
+  local_users_json:
+    file: ${LOCAL_USERS_JSON_FILE:-./secrets/local_users_json}
+  audit_hmac_key:
+    file: ${AUDIT_HMAC_KEY_FILE:-./secrets/audit_hmac_key}
   postgres_password:
     file: ${POSTGRES_PASSWORD_FILE:-./secrets/postgres_password}
   restic_password:

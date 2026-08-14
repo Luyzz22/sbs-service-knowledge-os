@@ -2,18 +2,19 @@
 
 from __future__ import annotations
 
+import os
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from enum import Enum
-import os
-from typing import Mapping, Optional
+from enum import StrEnum
 
 
-class RecordClass(str, Enum):
+class RecordClass(StrEnum):
     AI_INTERACTION = "ai_interaction"
     AUDIT_EVENT = "audit_event"
     CONTRACT_ACCEPTANCE = "contract_acceptance"
     DATA_SUBJECT_REQUEST = "data_subject_request"
+    INCIDENT = "incident"
     UPLOADED_CONTENT = "uploaded_content"
 
 
@@ -22,15 +23,17 @@ _ENV_KEYS = {
     RecordClass.AUDIT_EVENT: "AUDIT_EVENT_RETENTION_DAYS",
     RecordClass.CONTRACT_ACCEPTANCE: "CONTRACT_ACCEPTANCE_RETENTION_DAYS",
     RecordClass.DATA_SUBJECT_REQUEST: "DATA_SUBJECT_REQUEST_RETENTION_DAYS",
+    RecordClass.INCIDENT: "INCIDENT_RETENTION_DAYS",
     RecordClass.UPLOADED_CONTENT: "UPLOADED_CONTENT_RETENTION_DAYS",
 }
 
 _OPERATIONAL_DEFAULTS = {
-    RecordClass.AI_INTERACTION: 30,
-    RecordClass.AUDIT_EVENT: 365,
+    RecordClass.AI_INTERACTION: 90,
+    RecordClass.AUDIT_EVENT: 730,
     RecordClass.CONTRACT_ACCEPTANCE: 3650,
     RecordClass.DATA_SUBJECT_REQUEST: 1095,
-    RecordClass.UPLOADED_CONTENT: 1,
+    RecordClass.INCIDENT: 730,
+    RecordClass.UPLOADED_CONTENT: 365,
 }
 
 
@@ -46,14 +49,14 @@ class RetentionPolicy:
             names = ", ".join(sorted(item.value for item in missing))
             raise ValueError(f"Missing retention classes: {names}")
         for record_class, days in self.days_by_class.items():
-            if not isinstance(days, int) or days <= 0:
-                raise ValueError(f"Retention for {record_class.value} must be positive")
+            if not isinstance(days, int) or not 1 <= days <= 3650:
+                raise ValueError(f"Retention for {record_class.value} must be between 1 and 3650 days")
 
     @classmethod
     def from_environment(
         cls,
-        environment: Optional[Mapping[str, str]] = None,
-    ) -> "RetentionPolicy":
+        environment: Mapping[str, str] | None = None,
+    ) -> RetentionPolicy:
         values = environment if environment is not None else os.environ
         configured: dict[RecordClass, int] = {}
         for record_class, env_key in _ENV_KEYS.items():

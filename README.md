@@ -1,239 +1,105 @@
-# SBS Service Knowledge OS
+# HydraulikDoc Enterprise
 
-**Intelligente Suche in technischen Handbüchern | RAG-System für den deutschen Maschinenbau**
+HydraulikDoc ist ein mandantenfähiger Arbeitsraum für industrielle Instandhaltung. Die Anwendung verbindet Anlagenregister, technische PDF-Dokumentation, quellengebundene KI-Entwürfe, deterministische Zustandsbewertung, Fluidbewertung, Incidents und prüfbare Human-Review-Nachweise.
 
-Entwickelt von [SBS Deutschland GmbH](https://sbsdeutschland.com)
+Der Produktionspfad ist bewusst auf Microsoft Azure begrenzt. Google Gemini, LlamaCloud und Qdrant gehören nicht mehr zum Runtime- oder Containerpfad.
 
----
+## Produktgrenzen
 
-## Überblick
+- HydraulikDoc unterstützt Fachkräfte; es steuert keine Maschine.
+- Autonome Maschinensteuerung und Beschäftigtenüberwachung sind technisch gesperrt.
+- Jeder KI-Entwurf bleibt `draft`, bis eine berechtigte Person ihn akzeptiert, ablehnt oder einen Experten anfordert.
+- Nur akzeptierte Ergebnisse können durch Rollen mit `analysis:export` als Nachweis exportiert werden.
+- Aussagen wie „DSGVO-konform“, „zertifiziert“ oder „kein Drittlandrisiko“ werden nicht aus Code abgeleitet. Verträge, DSFA/TIA, Betriebsrat, Rechtsgrundlage, Löschkonzept und Betriebsnachweise bleiben Release-Gates.
 
-Das Service Knowledge OS ist ein spezialisiertes RAG-System (Retrieval Augmented Generation), das für die präzise Suche in technischen Wartungshandbüchern optimiert ist. Im Gegensatz zu herkömmlichen PDF-Readern kann dieses System:
+## Produktionsarchitektur
 
-- **Komplexe Tabellen** korrekt extrahieren (Drehmomente, Maße, Teilenummern)
-- **Strukturierte Daten** aus technischen Dokumenten verstehen
-- **Präzise Quellenangaben** mit Seitenzahlen liefern
-- **Halluzinationen vermeiden** durch strikte Quellenbasierung
+| Ebene | Implementierung |
+| --- | --- |
+| Edge | Azure Application Gateway WAF v2, TLS, Rate Limit, OWASP-/Bot-Regeln |
+| Identität | Microsoft Entra ID / Container Apps Easy Auth, App-Rollen, 30-Minuten-Idle-Timeout |
+| Compute | Azure Container Apps, mindestens zwei Replikate, Managed Identity, Read-only Container |
+| Dokumente | Private Azure Blob Storage, Defender for Storage On-upload Malware Scanning |
+| Extraktion | Azure AI Document Intelligence `prebuilt-layout` |
+| Retrieval | Azure AI Search, Hybrid- und Vektorsuche, verpflichtender Tenant-Filter |
+| Generierung | Azure OpenAI Deployment, Temperature 0, versionierter Prompt, Zitatvalidierung |
+| Fachdaten | Azure Database for PostgreSQL Flexible Server, private Netzwerkanbindung, FORCE RLS einschließlich Tenant-Stammdaten |
+| Secrets | Azure Key Vault und Managed Identity; statische Azure-Service-Keys sind in Produktion verboten |
+| Lifecycle | Täglicher Azure Container Apps Job mit separater DB-Rolle löscht abgelaufene Daten aus Search, Blob und PostgreSQL |
+| Lieferkette | GitHub OIDC, Bicep, immutable Image Digest, SBOM, Ruff, mypy, Bandit, pip-audit und Trivy |
 
-## Tech Stack
+Details: [Azure-Zielarchitektur](docs/architecture/azure-enterprise.md), [Kontrollmatrix](docs/compliance/control-matrix.md), [Marktscan](docs/market/market-scan-de-hydraulics-2026.md).
 
-| Komponente | Technologie | Zweck |
-|------------|-------------|-------|
-| UI Framework | Streamlit | Web-Interface |
-| PDF-Parsing | LlamaParse | Tabellenextraktion |
-| Orchestrierung | LlamaIndex | RAG-Pipeline |
-| Vector Store | Qdrant (In-Memory) | Semantische Suche |
-| LLM Backend | Azure OpenAI GPT-4o | Antwortgenerierung |
+## Lokal starten
 
----
-
-## Installation
-
-### 1. Repository klonen
+Voraussetzungen: Python 3.11 und eine virtuelle Umgebung.
 
 ```bash
-git clone https://github.com/Luyzz22/sbs-service-knowledge-os.git
-cd sbs-service-knowledge-os
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install --require-hashes -r requirements-dev.lock
+cp .env.example .env
+python -c "from argon2 import PasswordHasher; print(PasswordHasher().hash('ein-langes-lokales-passwort'))"
 ```
 
-### 2. Python-Umgebung einrichten
+Den Hash in eine nicht versionierte Datei `secrets/local_users_json` eintragen:
 
-```bash
-# Empfohlen: Virtual Environment
-python -m venv venv
-source venv/bin/activate  # Linux/Mac
-# oder: venv\Scripts\activate  # Windows
-
-# Abhängigkeiten installieren
-pip install -r requirements.txt
+```json
+{
+  "entwickler": {
+    "password_hash": "$argon2id$...",
+    "role": "admin",
+    "display_name": "Lokale Entwicklung"
+  }
+}
 ```
 
-### 3. Anwendung starten
+Ein mindestens 32 Byte langes zufälliges HMAC-Geheimnis in `secrets/audit_hmac_key` ablegen. Danach die Variablen laden und starten:
 
 ```bash
+set -a
+source .env
+set +a
 streamlit run app.py
 ```
 
-Die Anwendung öffnet sich unter `http://localhost:8501`
+Der lokale Default hat `AI_BACKEND=disabled` und `PERSISTENCE_BACKEND=memory`. Er sendet keine Dokumente an externe KI-Dienste.
 
----
+## Qualitätssicherung
 
-## API-Keys einrichten
-
-### LlamaCloud API Key (für LlamaParse)
-
-LlamaParse ist der Schlüssel für präzise Tabellenextraktion. So erhalten Sie einen API Key:
-
-1. **Account erstellen**: Gehen Sie zu [cloud.llamaindex.ai](https://cloud.llamaindex.ai/)
-2. **Registrieren**: Erstellen Sie einen kostenlosen Account
-3. **API Key generieren**: 
-   - Navigieren Sie zu "API Keys" im Dashboard
-   - Klicken Sie auf "Create new key"
-   - Kopieren Sie den Key (Format: `llx-...`)
-
-**Kosten**: LlamaParse bietet ein kostenloses Kontingent von 1.000 Seiten/Tag. Für Produktion: ~$0.003 pro Seite.
-
-### Azure OpenAI Konfiguration
-
-Sie benötigen ein Azure OpenAI Deployment:
-
-1. **Azure Portal**: [portal.azure.com](https://portal.azure.com)
-2. **OpenAI Ressource erstellen**:
-   - Suchen Sie nach "Azure OpenAI"
-   - Erstellen Sie eine neue Ressource
-3. **Modelle deployen**:
-   - GPT-4o (für Antwortgenerierung)
-   - text-embedding-ada-002 (für Vektorisierung)
-4. **Credentials kopieren**:
-   - **Endpoint**: `https://[ihre-ressource].openai.azure.com/`
-   - **API Key**: Im Bereich "Keys and Endpoint"
-   - **Deployment Names**: Die Namen Ihrer Deployments
-
----
-
-## Verwendung
-
-### Schritt 1: API-Keys eingeben
-
-Geben Sie in der Sidebar Ihre API-Keys ein:
-- LlamaCloud API Key
-- Azure OpenAI Endpoint
-- Azure OpenAI API Key
-- Deployment-Namen (GPT-4o und Embeddings)
-
-### Schritt 2: PDF hochladen
-
-Laden Sie ein technisches Handbuch im PDF-Format hoch. Das System:
-1. Analysiert das PDF mit LlamaParse (inkl. Tabellen)
-2. Erstellt einen durchsuchbaren Vektor-Index
-3. Zeigt den Status "Bereit" an
-
-### Schritt 3: Fragen stellen
-
-Stellen Sie technische Fragen im Chat-Interface:
-
-```
-✓ "Wie hoch ist das Anzugsdrehmoment für Schraube M12?"
-✓ "Welches Öl wird für das Getriebe empfohlen?"
-✓ "Was sind die Wartungsintervalle für den Hydraulikfilter?"
-✓ "Welche Sicherheitshinweise gelten bei der Demontage?"
+```bash
+ruff check app.py compliance hydraulikdoc fluid_advisor.py incident_model.py tests ops/scripts
+ruff format --check app.py compliance hydraulikdoc fluid_advisor.py incident_model.py tests ops/scripts
+mypy hydraulikdoc compliance fluid_advisor.py incident_model.py ops/scripts/*.py
+python -m unittest discover --start-directory tests --verbose
+bandit -c pyproject.toml -r app.py compliance hydraulikdoc ops/scripts
+pip-audit -r requirements.lock
+PYTHONPATH=. python ops/scripts/run-ai-evaluation.py  # mit geschütztem Goldset und Azure-Evalprofil
+az bicep build --file infra/azure/main.bicep --stdout >/dev/null
+docker build -t hydraulikdoc:local .
 ```
 
-Das System antwortet mit:
-- Präziser Information aus dem Dokument
-- Quellenangabe (Seitenzahl)
-- Oder: "Diese Information ist im hochgeladenen Dokument nicht enthalten."
+## Produktionsfreigabe
 
----
+Eine Azure-Auslieferung läuft nur, wenn alle drei Repository-Variablen explizit `true` sind:
 
-## Architektur
+- `AZURE_DEPLOY_ENABLED`
+- `COMPLIANCE_RELEASE_APPROVED`
+- `RETENTION_POLICY_APPROVED`
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                         STREAMLIT UI                                │
-│  ┌─────────────┐  ┌─────────────────────────────────────────────┐  │
-│  │   Sidebar   │  │              Chat Interface                 │  │
-│  │  - API Keys │  │  User: "Drehmoment M12?"                    │  │
-│  │  - Upload   │  │  Bot:  "45 Nm (Quelle: Seite 23)"           │  │
-│  │  - Status   │  │                                             │  │
-│  └─────────────┘  └─────────────────────────────────────────────┘  │
-└────────────────────────────────┬────────────────────────────────────┘
-                                 │
-                    ┌────────────▼────────────┐
-                    │      LlamaIndex         │
-                    │   Query Engine          │
-                    └────────────┬────────────┘
-                                 │
-         ┌───────────────────────┼───────────────────────┐
-         │                       │                       │
-┌────────▼────────┐    ┌────────▼────────┐    ┌────────▼────────┐
-│   LlamaParse    │    │     Qdrant      │    │  Azure OpenAI   │
-│  PDF → Markdown │    │  Vector Store   │    │   GPT-4o        │
-│  (Tabellen!)    │    │  (Similarity)   │    │  (Generation)   │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-```
+Zusätzlich müssen `RETENTION_POLICY_ID`, Modellname/-version, Hostname, Zertifikat und Entra-Anwendung evidenzbasiert hinterlegt sein. Die vollständige Abfolge steht im [Azure-Deployment-Runbook](docs/runbooks/azure-deployment.md).
+Zusätzlich ist eine nicht-leere `AI_EVALUATION_EVIDENCE_ID` aus der [fachlichen AI-Evaluation](docs/compliance/ai-evaluation.md) technisch erforderlich.
 
----
+## Dokumentation
 
-## Konfiguration für Produktion
+- [Produktdefinition](PRODUCT.md)
+- [Designsystem](DESIGN.md)
+- [Security Policy](SECURITY.md)
+- [AI System Card](docs/compliance/ai-system-card.md)
+- [Incident Response](docs/runbooks/incident-response.md)
+- [Backup und Restore](docs/runbooks/backup-restore.md)
+- [Datenschutz und Retention](docs/runbooks/privacy-retention.md)
 
-### Persistenter Qdrant-Speicher
+## Lizenz und Verantwortung
 
-Für Produktion sollte Qdrant persistent betrieben werden:
-
-```python
-# Änderung in app.py
-# Statt:
-client = QdrantClient(":memory:")
-
-# Verwenden Sie:
-client = QdrantClient(
-    host="localhost",  # oder Qdrant Cloud URL
-    port=6333,
-    api_key="your-qdrant-api-key"  # für Qdrant Cloud
-)
-```
-
-### Docker Deployment
-
-```dockerfile
-FROM python:3.11-slim
-
-WORKDIR /app
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-COPY app.py .
-
-EXPOSE 8501
-
-CMD ["streamlit", "run", "app.py", "--server.port=8501", "--server.address=0.0.0.0"]
-```
-
-### Umgebungsvariablen (empfohlen für Produktion)
-
-Erstellen Sie eine `.env` Datei:
-
-```env
-LLAMA_CLOUD_API_KEY=llx-...
-AZURE_OPENAI_API_KEY=...
-AZURE_OPENAI_ENDPOINT=https://...
-AZURE_GPT4O_DEPLOYMENT=gpt-4o
-AZURE_EMBEDDING_DEPLOYMENT=text-embedding-ada-002
-```
-
----
-
-## Roadmap
-
-- [ ] Multi-PDF Support (mehrere Handbücher gleichzeitig)
-- [ ] Persistente Qdrant-Anbindung (Cloud/Docker)
-- [ ] Benutzerauthentifizierung
-- [ ] Export der Antworten (PDF/Word)
-- [ ] Mehrsprachigkeit (EN/DE)
-- [ ] Integration mit SAP/ERP-Systemen
-
----
-
-## Lizenz
-
-Proprietär - SBS Deutschland GmbH
-
-## Kontakt
-
-**SBS Deutschland GmbH**  
-Website: [sbsdeutschland.com](https://sbsdeutschland.com)  
-GitHub: [github.com/Luyzz22](https://github.com/Luyzz22)
-
-## 🆕 NEU: Video-Diagnose (Project Hephaestus)
-
-HydraulikDoc AI kann jetzt **Videos analysieren**!
-
-### Features:
-- 🎥 **Multimodale Analyse**: Video + Audio + PDF gleichzeitig
-- 🔊 **Audio-Anomalie-Erkennung**: Kavitation, Lagerschäden, Lufteinschlüsse
-- 📄 **Automatische Handbuch-Referenz**: Findet die relevante Seite
-- ⚡ **Gemini 2.5 Pro**: Neuestes Google AI Modell
-
-### Demo:
-[Video-Diagnose testen](https://knowledge-sbsdeutschland.streamlit.app)
+Vor einer Kundeninstanz müssen Lizenz, Supportmodell, AVV/DPA, Unterauftragsverarbeiter, Informationspflichten und regulatorische Verantwortlichkeiten vertraglich festgelegt werden. Dieses Repository liefert technische Kontrollen und Evidenzpunkte, keine Rechtsberatung und keine Zertifizierung.

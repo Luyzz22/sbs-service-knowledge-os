@@ -1,7 +1,6 @@
-from dataclasses import dataclass, field
-from datetime import datetime
-from typing import List, Optional
 import uuid
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
 
 
 class IncidentStatus:
@@ -29,10 +28,10 @@ class Incident:
     summary: str
     details: str
     opened_at: datetime
-    resolved_at: Optional[datetime] = None
-    owner: Optional[str] = None
-    related_fluid_assessment_ids: List[str] = field(default_factory=list)
-    related_video_analysis_ids: List[str] = field(default_factory=list)
+    resolved_at: datetime | None = None
+    owner: str | None = None
+    related_fluid_assessment_ids: list[str] = field(default_factory=list)
+    related_video_analysis_ids: list[str] = field(default_factory=list)
 
     @staticmethod
     def create_fluid_incident(
@@ -40,8 +39,8 @@ class Incident:
         summary: str,
         details: str,
         priority: str,
-        fluid_assessment_id: Optional[str] = None,
-        owner: Optional[str] = None,
+        fluid_assessment_id: str | None = None,
+        owner: str | None = None,
     ) -> "Incident":
         incident_id = str(uuid.uuid4())
         related_fluid = [fluid_assessment_id] if fluid_assessment_id else []
@@ -53,7 +52,7 @@ class Incident:
             status=IncidentStatus.NEW,
             summary=summary,
             details=details,
-            opened_at=datetime.utcnow(),
+            opened_at=datetime.now(UTC),
             owner=owner,
             related_fluid_assessment_ids=related_fluid,
         )

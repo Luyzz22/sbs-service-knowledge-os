@@ -1,5 +1,5 @@
-from datetime import datetime, timezone
 import unittest
+from datetime import UTC, datetime
 
 from fluid_advisor import FluidSample, assess_fluid
 from incident_model import Incident, IncidentPriority, IncidentStatus
@@ -9,7 +9,7 @@ class FluidAdvisorTests(unittest.TestCase):
     def test_healthy_sample_remains_ok(self) -> None:
         sample = FluidSample(
             asset_id="asset-1",
-            taken_at=datetime.now(timezone.utc),
+            taken_at=datetime.now(UTC),
             particle_count=200,
             water_content=0.02,
         )
@@ -23,7 +23,7 @@ class FluidAdvisorTests(unittest.TestCase):
     def test_combined_threshold_breaches_are_critical(self) -> None:
         sample = FluidSample(
             asset_id="asset-2",
-            taken_at=datetime.now(timezone.utc),
+            taken_at=datetime.now(UTC),
             particle_count=1_500,
             water_content=0.2,
         )
@@ -33,6 +33,14 @@ class FluidAdvisorTests(unittest.TestCase):
         self.assertEqual(assessment.score, 20)
         self.assertEqual(assessment.status, "KRITISCH")
         self.assertTrue(any("Wassergehalt" in item for item in assessment.recommendations))
+
+    def test_unbounded_fluid_values_are_rejected(self) -> None:
+        with self.assertRaisesRegex(ValueError, "between 0 and 100"):
+            FluidSample(
+                asset_id="asset-3",
+                taken_at=datetime.now(UTC),
+                water_content=101,
+            )
 
 
 class IncidentTests(unittest.TestCase):

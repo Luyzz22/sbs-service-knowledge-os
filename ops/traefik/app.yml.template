@@ -18,10 +18,12 @@ http:
     security-headers:
       headers:
         browserXssFilter: true
+        contentSecurityPolicy: "default-src 'self'; connect-src 'self' wss:; img-src 'self' data: blob:; font-src 'self' data:; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
         contentTypeNosniff: true
         customFrameOptionsValue: SAMEORIGIN
         forceSTSHeader: true
         frameDeny: false
+        permissionsPolicy: "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
         referrerPolicy: strict-origin-when-cross-origin
         stsIncludeSubdomains: true
         stsPreload: true

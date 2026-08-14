@@ -2,18 +2,19 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
-from enum import Enum
 import hashlib
 import hmac
 import json
 import logging
-from typing import Any, Mapping, Optional
 import uuid
+from collections.abc import Mapping
+from dataclasses import asdict, dataclass, field
+from datetime import UTC, datetime
+from enum import StrEnum
+from typing import Any
 
 
-class AuditOutcome(str, Enum):
+class AuditOutcome(StrEnum):
     SUCCESS = "success"
     DENIED = "denied"
     FAILURE = "failure"
@@ -22,30 +23,40 @@ class AuditOutcome(str, Enum):
 _ALLOWED_METADATA_KEYS = frozenset(
     {
         "collection",
+        "deletion_count",
+        "deployment",
         "document_count",
         "duration_ms",
         "error_code",
+        "evidence_id",
+        "failure_count",
         "model",
         "page_count",
+        "prompt_version",
         "provider",
         "reason_code",
+        "region",
         "request_type",
+        "review_status",
+        "risk_class",
         "role",
         "source_count",
         "status_code",
+        "tenant_count",
+        "tenant_mode",
     }
 )
 
 
 def _utc_now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
-def _isoformat(value: Optional[datetime]) -> Optional[str]:
+def _isoformat(value: datetime | None) -> str | None:
     return value.isoformat().replace("+00:00", "Z") if value else None
 
 
-def _sanitise_metadata(metadata: Optional[Mapping[str, Any]]) -> dict[str, Any]:
+def _sanitise_metadata(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
     """Keep only explicitly approved, bounded technical metadata."""
     if not metadata:
         return {}
@@ -70,10 +81,10 @@ class SubjectPseudonymizer:
         self._secret = secret
         self._namespace = namespace
 
-    def token(self, identifier: Optional[str]) -> Optional[str]:
+    def token(self, identifier: str | None) -> str | None:
         if not identifier:
             return None
-        message = f"{self._namespace}:{identifier}".encode("utf-8")
+        message = f"{self._namespace}:{identifier}".encode()
         digest = hmac.new(self._secret, message, hashlib.sha256).hexdigest()
         return f"psn_v1_{digest}"
 
@@ -82,12 +93,12 @@ class SubjectPseudonymizer:
 class AuditEvent:
     action: str
     outcome: AuditOutcome
-    actor_token: Optional[str] = None
-    subject_token: Optional[str] = None
-    resource_type: Optional[str] = None
-    resource_token: Optional[str] = None
-    legal_basis: Optional[str] = None
-    expires_at: Optional[datetime] = None
+    actor_token: str | None = None
+    subject_token: str | None = None
+    resource_type: str | None = None
+    resource_token: str | None = None
+    legal_basis: str | None = None
+    expires_at: datetime | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
     event_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     occurred_at: datetime = field(default_factory=_utc_now)
@@ -115,7 +126,7 @@ class AuditLogger:
     def __init__(
         self,
         pseudonymizer: SubjectPseudonymizer,
-        logger: Optional[logging.Logger] = None,
+        logger: logging.Logger | None = None,
     ) -> None:
         self._pseudonymizer = pseudonymizer
         self._logger = logger or logging.getLogger("hydraulikdoc.audit")
@@ -125,13 +136,13 @@ class AuditLogger:
         *,
         action: str,
         outcome: AuditOutcome,
-        actor_id: Optional[str] = None,
-        subject_id: Optional[str] = None,
-        resource_type: Optional[str] = None,
-        resource_id: Optional[str] = None,
-        legal_basis: Optional[str] = None,
-        expires_at: Optional[datetime] = None,
-        metadata: Optional[Mapping[str, Any]] = None,
+        actor_id: str | None = None,
+        subject_id: str | None = None,
+        resource_type: str | None = None,
+        resource_id: str | None = None,
+        legal_basis: str | None = None,
+        expires_at: datetime | None = None,
+        metadata: Mapping[str, Any] | None = None,
     ) -> AuditEvent:
         event = AuditEvent(
             action=action,
