@@ -66,7 +66,7 @@ jobs:
       - name: Generate CycloneDX SBOM
         run: cyclonedx-py requirements requirements.lock --output-format JSON --output-file sbom.cdx.json
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: sbom-${{ github.sha }}
           path: sbom.cdx.json
@@ -106,7 +106,7 @@ jobs:
 
       - name: Upload scan result
         if: always() && hashFiles('trivy-results.sarif') != ''
-        uses: github/codeql-action/upload-sarif@d6317709a54fd87078d323eeb0e48ec331c8e621 # v3
+        uses: github/codeql-action/upload-sarif@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4
         with:
           sarif_file: trivy-results.sarif
 
