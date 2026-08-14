@@ -1,0 +1,25 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "publicHostname": { "value": "knowledge.example.de" },
+    "entraTenantId": { "value": "00000000-0000-0000-0000-000000000000" },
+    "entraClientId": { "value": "00000000-0000-0000-0000-000000000000" },
+    "entraClientSecret": { "reference": { "keyVault": { "id": "/subscriptions/.../resourceGroups/.../providers/Microsoft.KeyVault/vaults/..." }, "secretName": "bootstrap-entra-client-secret" } },
+    "auditHmacKey": { "reference": { "keyVault": { "id": "/subscriptions/.../resourceGroups/.../providers/Microsoft.KeyVault/vaults/..." }, "secretName": "bootstrap-audit-hmac" } },
+    "postgresAdminPassword": { "reference": { "keyVault": { "id": "/subscriptions/.../resourceGroups/.../providers/Microsoft.KeyVault/vaults/..." }, "secretName": "bootstrap-postgres-admin" } },
+    "postgresAppPassword": { "reference": { "keyVault": { "id": "/subscriptions/.../resourceGroups/.../providers/Microsoft.KeyVault/vaults/..." }, "secretName": "bootstrap-postgres-app" } },
+    "postgresLifecyclePassword": { "reference": { "keyVault": { "id": "/subscriptions/.../resourceGroups/.../providers/Microsoft.KeyVault/vaults/..." }, "secretName": "bootstrap-postgres-lifecycle" } },
+    "tlsCertificatePfxBase64": { "reference": { "keyVault": { "id": "/subscriptions/.../resourceGroups/.../providers/Microsoft.KeyVault/vaults/..." }, "secretName": "bootstrap-public-tls-pfx-base64" } },
+    "containerImage": { "value": "replace.azurecr.io/hydraulikdoc@sha256:replace" },
+    "deployApplication": { "value": false },
+    "deploymentEvidenceId": { "value": "PENDING" },
+    "aiEvaluationEvidenceId": { "value": "PENDING" },
+    "complianceReleaseApproved": { "value": false },
+    "retentionPolicyApproved": { "value": false },
+    "retentionPolicyId": { "value": "PENDING" },
+    "registryPublicNetworkAccess": { "value": "Disabled" },
+    "chatModelName": { "value": "REVIEW_IN_TARGET_REGION" },
+    "chatModelVersion": { "value": "REVIEW_IN_TARGET_REGION" }
+  }
+}

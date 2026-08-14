@@ -1,0 +1,34 @@
+[
+  {
+    "allowedMemberTypes": ["User"],
+    "description": "Read approved HydraulikDoc knowledge and assets.",
+    "displayName": "HydraulikDoc Viewer",
+    "id": "2a35c7a0-1998-4c53-9ad1-2ac23727c001",
+    "isEnabled": true,
+    "value": "HydraulikDoc.Viewer"
+  },
+  {
+    "allowedMemberTypes": ["User"],
+    "description": "Maintain knowledge, run diagnostics, create incidents and review drafts.",
+    "displayName": "HydraulikDoc Technician",
+    "id": "2a35c7a0-1998-4c53-9ad1-2ac23727c002",
+    "isEnabled": true,
+    "value": "HydraulikDoc.Technician"
+  },
+  {
+    "allowedMemberTypes": ["User"],
+    "description": "Manage assets, review analyses and export accepted evidence.",
+    "displayName": "HydraulikDoc Supervisor",
+    "id": "2a35c7a0-1998-4c53-9ad1-2ac23727c003",
+    "isEnabled": true,
+    "value": "HydraulikDoc.Supervisor"
+  },
+  {
+    "allowedMemberTypes": ["User"],
+    "description": "Administer all HydraulikDoc application capabilities.",
+    "displayName": "HydraulikDoc Administrator",
+    "id": "2a35c7a0-1998-4c53-9ad1-2ac23727c004",
+    "isEnabled": true,
+    "value": "HydraulikDoc.Admin"
+  }
+]

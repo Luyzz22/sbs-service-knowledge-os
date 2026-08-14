@@ -1,0 +1,45 @@
+http:
+  routers:
+    application:
+      entryPoints:
+        - websecure
+      rule: "Host(`__APP_HOST__`)"
+      service: active-application
+      middlewares:
+        - response-compression
+        - security-headers
+        - upload-limit
+      tls:
+        certResolver: letsencrypt
+
+  middlewares:
+    response-compression:
+      compress: {}
+    security-headers:
+      headers:
+        browserXssFilter: true
+        contentSecurityPolicy: "default-src 'self'; connect-src 'self' wss:; img-src 'self' data: blob:; font-src 'self' data:; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+        contentTypeNosniff: true
+        customFrameOptionsValue: SAMEORIGIN
+        forceSTSHeader: true
+        frameDeny: false
+        permissionsPolicy: "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+        referrerPolicy: strict-origin-when-cross-origin
+        stsIncludeSubdomains: true
+        stsPreload: true
+        stsSeconds: 31536000
+    upload-limit:
+      buffering:
+        maxRequestBodyBytes: 52428800
+        memRequestBodyBytes: 2097152
+
+  services:
+    active-application:
+      loadBalancer:
+        passHostHeader: true
+        servers:
+          - url: http://__APP_TARGET__:8501
+        healthCheck:
+          path: /_stcore/health
+          interval: 10s
+          timeout: 3s

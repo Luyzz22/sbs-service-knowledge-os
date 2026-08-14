@@ -1,31 +1,39 @@
-# Virtual Environment
+# Virtual environments and tool caches
 venv/
 .venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
 
-# Environment Variables (WICHTIG - niemals committen!)
+# Environment variables and local credentials
 .env
 .env.local
+.streamlit/secrets.toml
 
 # Python
 __pycache__/
 *.py[cod]
 *.so
 
-# Logs
+# Logs and generated security artifacts
 logs/
 *.log
+sbom*.json
 
-# macOS
-.DS_Store
+# Production runtime state
+.deploy/
+backups/
+ops/traefik/dynamic/app.yml
+ops/traefik/dynamic/app.yml.*
+secrets/*
+!secrets/README.md
 
-# Streamlit
-.streamlit/secrets.toml
-
-# Uploads & Data
+# Uploads and customer data
 uploads/
 data/
 *.pdf
 
-# IDE
+# macOS and IDEs
+.DS_Store
 .idea/
 .vscode/

@@ -1,39 +1,10 @@
-streamlit>=1.31.0
-llama-index>=0.10.0
-llama-parse>=0.4.0
-llama-index-llms-openai>=0.1.0
-llama-index-embeddings-openai>=0.1.0
-llama-index-vector-stores-qdrant>=0.2.0
-qdrant-client>=1.7.0
-openai>=1.10.0
-python-dotenv>=1.0.0
-nest-asyncio>=1.6.0
-httpx>=0.26.0
-# ══════════════════════════════════════════════════════════════════════════════
-# GEMINI VIDEO ANALYZER DEPENDENCIES
-# ══════════════════════════════════════════════════════════════════════════════
-
-# Core Google Cloud
-google-cloud-aiplatform>=1.38.0  # Vertex AI SDK für Gemini 1.5 Pro
-google-auth>=2.23.0
-google-cloud-storage>=2.10.0  # Für große Video-Uploads zu GCS
-
-# Streamlit Integration (optional)
-streamlit>=1.28.0
-
-# Existing dependencies (aus deiner App)
-llama-parse
-llama-index
-llama-index-vector-stores-qdrant
-llama-index-llms-openai
-llama-index-embeddings-openai
-qdrant-client
-openai
-python-dotenv
-
-# Gemini Video Analyzer (Project Hephaestus)
-google-cloud-aiplatform>=1.38.0
-google-auth>=2.23.0
-google-cloud-storage>=2.10.0
-llama-index-retrievers-bm25
-google-generativeai>=0.3.0
+# Production runtime. Keep upper bounds to avoid unreviewed major upgrades.
+streamlit==1.61.1
+# Streamlit declares watchdog only outside macOS; pin it directly so the
+# hash-locked runtime remains reproducible on the Linux image and CI runners.
+watchdog==6.0.0
+openai==2.54.0
+azure-identity==1.25.3
+httpx==0.28.1
+psycopg[binary]==3.3.4
+argon2-cffi==25.1.0
