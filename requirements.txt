@@ -1,5 +1,8 @@
 # Production runtime. Keep upper bounds to avoid unreviewed major upgrades.
 streamlit==1.61.1
+# Streamlit declares watchdog only outside macOS; pin it directly so the
+# hash-locked runtime remains reproducible on the Linux image and CI runners.
+watchdog==6.0.0
 openai==2.54.0
 azure-identity==1.25.3
 httpx==0.28.1
