@@ -65,6 +65,13 @@ class PostgresSecurityIntegrationTests(unittest.TestCase):
                 )
                 self.assertEqual(cursor.fetchone(), (True, False, False, False))
                 cursor.execute(
+                    """SELECT
+                    has_column_privilege(current_user, 'incidents', 'status', 'UPDATE'),
+                    has_column_privilege(current_user, 'incidents', 'details', 'UPDATE'),
+                    has_column_privilege(current_user, 'incidents', 'tenant_id', 'UPDATE')"""
+                )
+                self.assertEqual(cursor.fetchone(), (True, False, False))
+                cursor.execute(
                     """INSERT INTO audit_events
                     (event_id, tenant_id, action, outcome, occurred_at, retention_until, event_hash)
                     VALUES (%s,%s,'integration.expired','success',now(),now() - interval '1 day',%s)""",

@@ -118,6 +118,9 @@ def main() -> None:
             cursor.execute(
                 sql.SQL("GRANT UPDATE ON TABLE documents, assets, analysis_runs TO {}").format(sql.Identifier(app_user))
             )
+            cursor.execute(
+                sql.SQL("GRANT UPDATE (status, updated_at) ON TABLE incidents TO {}").format(sql.Identifier(app_user))
+            )
             cursor.execute(sql.SQL("GRANT SELECT, INSERT ON TABLE audit_events TO {}").format(sql.Identifier(app_user)))
             cursor.execute(
                 sql.SQL("GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO {}").format(sql.Identifier(app_user))

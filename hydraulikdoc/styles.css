@@ -91,6 +91,61 @@
   font-size: 0.82rem;
 }
 
+.hd-state-wide {
+  grid-template-columns: repeat(5, 1fr);
+}
+
+.hd-incident {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 1rem;
+  margin: 1rem 0;
+  padding: 1rem 1.25rem;
+  background: var(--hd-surface);
+  border: 1px solid var(--hd-border);
+  border-radius: 16px;
+}
+
+.hd-incident strong {
+  display: block;
+  margin-bottom: 0.35rem;
+  color: var(--hd-muted);
+  font-size: 0.82rem;
+}
+
+.hd-incident-critical {
+  border-left: 4px solid #b42318;
+}
+
+.hd-status {
+  display: inline-block;
+  padding: 0.1rem 0.6rem;
+  border: 1px solid var(--hd-border);
+  border-radius: 999px;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.hd-status-new {
+  background: #fff5f5;
+  border-color: #b42318;
+  color: #8f1c13;
+}
+
+.hd-status-acknowledged,
+.hd-status-in_progress {
+  background: #fffaf0;
+  border-color: #b7791f;
+  color: #7a4f12;
+}
+
+.hd-status-resolved,
+.hd-status-closed {
+  background: #f1f7f3;
+  border-color: #3f7d55;
+  color: #2d5c3e;
+}
+
 .hd-notice {
   margin: 1rem 0;
   padding: 1rem 1.25rem;
@@ -140,6 +195,37 @@
   }
 
   .hd-state > div {
+    border-right: 0;
+    border-bottom: 1px solid var(--hd-border);
+  }
+
+  /* Status counters stay on one row on tablets; declared after .hd-state to win the cascade. */
+  .hd-state-wide {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+
+  .hd-state-wide > div {
+    padding: 0.75rem 0.6rem;
+    border-right: 1px solid var(--hd-border);
+    border-bottom: 0;
+  }
+
+  .hd-state-wide strong {
+    font-size: 0.75rem;
+  }
+
+  .hd-incident {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 560px) {
+  .hd-state-wide,
+  .hd-incident {
+    grid-template-columns: 1fr;
+  }
+
+  .hd-state-wide > div {
     border-right: 0;
     border-bottom: 1px solid var(--hd-border);
   }

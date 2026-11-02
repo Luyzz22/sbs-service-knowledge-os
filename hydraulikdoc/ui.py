@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import html
 import io
 import json
 import re
@@ -33,7 +34,15 @@ from .condition_monitoring import (
 )
 from .config import AppSettings, AuthMode, ConfigurationError, get_settings
 from .governance import GroundedAnswer, ReviewStatus, UseCase, evaluate_use_case
-from .repository import EnterpriseRepository, get_repository
+from .repository import (
+    INCIDENT_CLOSE_PERMISSION,
+    INCIDENT_STATUSES,
+    INCIDENT_TRANSITIONS,
+    EnterpriseRepository,
+    IncidentRecord,
+    IncidentTransitionRejected,
+    get_repository,
+)
 from .security import InputRejected, public_error_code, validate_pdf_upload
 
 APP_VERSION = "5.0.0-enterprise"
@@ -42,6 +51,31 @@ unvollständig oder falsch sein. Vor Wartung, Freigabe, Ersatzteilbestellung ode
 Maschinenhandlung muss eine qualifizierte Person die Originalquelle, Betriebsanweisung,
 Gefährdungsbeurteilung und anwendbare LOTO-Regeln prüfen. HydraulikDoc steuert keine Maschine
 und ersetzt weder Herstellerfreigaben noch Fachverantwortung."""
+INCIDENT_STATUS_LABELS = {
+    "new": "Neu",
+    "acknowledged": "Bestätigt",
+    "in_progress": "In Bearbeitung",
+    "resolved": "Behoben",
+    "closed": "Abgeschlossen",
+}
+INCIDENT_ACTION_LABELS = {
+    "acknowledged": "Bestätigen",
+    "in_progress": "Bearbeitung starten",
+    "resolved": "Als behoben melden",
+    "closed": "Abnehmen und abschließen",
+}
+INCIDENT_SEVERITY_LABELS = {
+    "ok": "OK",
+    "warning": "Warnung",
+    "critical": "Kritisch",
+    "p1": "P1 · kritisch",
+    "p2": "P2 · hoch",
+    "p3": "P3 · mittel",
+    "p4": "P4 · niedrig",
+}
+OPEN_INCIDENT_STATUSES = ("new", "acknowledged", "in_progress")
+# Resolved incidents stay visible by default because they still await supervisor sign-off.
+DEFAULT_INCIDENT_FILTER = (*OPEN_INCIDENT_STATUSES, "resolved")
 PRIVACY_NOTICE = """HydraulikDoc verarbeitet Ihre Entra-Kennung pseudonymisiert für Rollenprüfung,
 Auditnachweise, KI-Interaktionen und von Ihnen ausgelöste Incidents. Freitextfragen werden nicht
 protokolliert; in der Fachdatenbank wird nur ein Hash gespeichert. Die konkrete Rechtsgrundlage,
@@ -711,30 +745,185 @@ def _fluid(principal: UserPrincipal, repository: EnterpriseRepository) -> None:
             st.success(f"Incident {incident.incident_id} wurde angelegt.")
 
 
+def _incident_option_label(incident: IncidentRecord) -> str:
+    # Status is shown in the detail panel; Streamlit may keep a stale option label after a rerun.
+    return f"{incident.title} · {incident.asset_id} · {incident.incident_id[:8]}"
+
+
+def _transition_incident(
+    principal: UserPrincipal,
+    repository: EnterpriseRepository,
+    incident: IncidentRecord,
+    target: str,
+) -> None:
+    try:
+        updated = repository.transition_incident(
+            principal, incident.incident_id, expected=incident.status, target=target
+        )
+    except (PermissionError, IncidentTransitionRejected, KeyError) as error:
+        reason = error.args[0] if isinstance(error, (PermissionError, IncidentTransitionRejected)) else "NOT_FOUND"
+        repository.emit_audit(
+            principal,
+            action="incident.status.denied",
+            outcome=AuditOutcome.DENIED,
+            resource_type="incident",
+            resource_id=incident.incident_id,
+            metadata={"reason_code": reason, "previous_status": incident.status, "incident_status": target},
+        )
+        st.error(
+            "Statuswechsel nicht durchgeführt. Der Incident wurde zwischenzeitlich geändert "
+            f"oder Ihre Rolle ist dafür nicht freigegeben. Referenz {reason}"
+        )
+        return
+    repository.emit_audit(
+        principal,
+        action="incident.status.changed",
+        outcome=AuditOutcome.SUCCESS,
+        resource_type="incident",
+        resource_id=updated.incident_id,
+        metadata={"previous_status": incident.status, "incident_status": updated.status, "role": principal.role},
+    )
+    st.session_state.incident_notice = (
+        f"Incident {updated.incident_id[:8]} steht jetzt auf „{INCIDENT_STATUS_LABELS[updated.status]}“."
+    )
+    st.rerun()
+
+
+def _incident_detail(principal: UserPrincipal, repository: EnterpriseRepository, incident: IncidentRecord) -> None:
+    status_label = INCIDENT_STATUS_LABELS.get(incident.status, incident.status)
+    severity_label = INCIDENT_SEVERITY_LABELS.get(incident.severity, incident.severity)
+    critical = incident.severity in {"critical", "p1"} and incident.status in OPEN_INCIDENT_STATUSES
+    st.markdown(
+        f"""
+        <div class="hd-incident{" hd-incident-critical" if critical else ""}">
+          <div><strong>Status</strong><span class="hd-status hd-status-{html.escape(incident.status)}">{html.escape(status_label)}</span></div>
+          <div><strong>Schwere</strong>{html.escape(severity_label)}</div>
+          <div><strong>Asset</strong><code>{html.escape(incident.asset_id)}</code></div>
+          <div><strong>Erstellt</strong>{incident.created_at:%d.%m.%Y %H:%M} UTC</div>
+          <div><strong>Letzte Änderung</strong>{(incident.updated_at or incident.created_at):%d.%m.%Y %H:%M} UTC</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.markdown(f"**{incident.title}**")
+    if incident.details:
+        st.text(incident.details)
+    else:
+        st.caption("Keine Befunddetails hinterlegt.")
+    if critical:
+        st.warning(
+            "Kritischer Befund: Abschalt-, Sicherheits- und LOTO-Bewertung durch eine qualifizierte Person dokumentieren."
+        )
+
+    next_statuses = INCIDENT_TRANSITIONS.get(incident.status, ())
+    if not next_statuses:
+        st.caption("Abgeschlossen. Weitere Statuswechsel sind nicht vorgesehen.")
+        return
+    if not principal.can("incident:write"):
+        st.caption("Ihre Rolle darf Incidents einsehen, aber keinen Status ändern.")
+        return
+    st.write("Nächster Schritt")
+    columns = st.columns(len(next_statuses))
+    for column, target in zip(columns, next_statuses, strict=True):
+        label = INCIDENT_ACTION_LABELS.get(target, INCIDENT_STATUS_LABELS[target])
+        if target == "in_progress" and incident.status == "resolved":
+            label = "Wieder öffnen"
+        allowed = target != "closed" or principal.can(INCIDENT_CLOSE_PERMISSION)
+        if column.button(
+            label,
+            key=f"incident:{incident.incident_id}:{target}",
+            type="primary" if target == next_statuses[0] and allowed else "secondary",
+            disabled=not allowed,
+            width="stretch",
+        ):
+            _transition_incident(principal, repository, incident, target)
+        if not allowed:
+            column.caption("Abnahme erfordert die Rolle Supervisor oder Admin.")
+
+
 def _incidents(principal: UserPrincipal, repository: EnterpriseRepository) -> None:
     st.header("Incident Workflow")
     st.caption(
         "Technische Auffälligkeiten werden nachvollziehbar erfasst; Meldepflichten bleiben organisatorisch zu bewerten."
     )
+    if notice := st.session_state.pop("incident_notice", None):
+        st.success(notice)
     incidents = repository.list_incidents(principal)
     if not incidents:
-        st.info("Keine Incidents vorhanden.")
+        st.info(
+            "Keine Incidents vorhanden. Incidents entstehen aus einer Bewertung im Condition Monitoring oder im Fluid-Bereich."
+        )
+        return
+
+    counts = {status: sum(1 for item in incidents if item.status == status) for status in INCIDENT_STATUSES}
+    st.markdown(
+        '<div class="hd-state hd-state-wide">'
+        + "".join(
+            f"<div><strong>{INCIDENT_STATUS_LABELS[status]}</strong>{counts[status]}</div>"
+            for status in INCIDENT_STATUSES
+        )
+        + "</div>",
+        unsafe_allow_html=True,
+    )
+
+    status_filter, severity_filter, asset_filter = st.columns(3)
+    selected_statuses = status_filter.multiselect(
+        "Status",
+        INCIDENT_STATUSES,
+        default=DEFAULT_INCIDENT_FILTER,
+        format_func=lambda option: INCIDENT_STATUS_LABELS[option],
+        key="incident-status-filter",
+    )
+    severities = sorted(
+        {item.severity for item in incidents},
+        key=lambda option: tuple(INCIDENT_SEVERITY_LABELS).index(option) if option in INCIDENT_SEVERITY_LABELS else 99,
+    )
+    selected_severities = severity_filter.multiselect(
+        "Schwere",
+        severities,
+        format_func=lambda option: INCIDENT_SEVERITY_LABELS.get(option, option),
+        placeholder="Alle",
+        key="incident-severity-filter",
+    )
+    asset_ids = sorted({item.asset_id for item in incidents})
+    selected_asset = asset_filter.selectbox(
+        "Asset", ("", *asset_ids), format_func=lambda option: option or "Alle", key="incident-asset-filter"
+    )
+    visible = [
+        item
+        for item in incidents
+        if (not selected_statuses or item.status in selected_statuses)
+        and (not selected_severities or item.severity in selected_severities)
+        and (not selected_asset or item.asset_id == selected_asset)
+    ]
+    if not visible:
+        st.info("Kein Incident entspricht den gewählten Filtern.")
         return
     st.dataframe(
         [
             {
-                "ID": item.incident_id,
+                "ID": item.incident_id[:8],
                 "Asset": item.asset_id,
                 "Titel": item.title,
-                "Schwere": item.severity,
-                "Status": item.status,
-                "Erstellt": item.created_at.isoformat(),
+                "Schwere": INCIDENT_SEVERITY_LABELS.get(item.severity, item.severity),
+                "Status": INCIDENT_STATUS_LABELS.get(item.status, item.status),
+                "Erstellt": item.created_at.strftime("%d.%m.%Y %H:%M"),
+                "Geändert": (item.updated_at or item.created_at).strftime("%d.%m.%Y %H:%M"),
             }
-            for item in incidents
+            for item in visible
         ],
         width="stretch",
         hide_index=True,
     )
+    st.subheader("Incident bearbeiten")
+    by_id = {item.incident_id: item for item in visible}
+    selected_id = st.selectbox(
+        "Incident",
+        tuple(by_id),
+        format_func=lambda option: _incident_option_label(by_id[option]),
+        key="incident-selected",
+    )
+    _incident_detail(principal, repository, by_id[selected_id])
 
 
 def _governance(principal: UserPrincipal, repository: EnterpriseRepository, settings: AppSettings) -> None:
