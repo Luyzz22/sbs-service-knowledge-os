@@ -30,6 +30,7 @@ from hydraulikdoc.repository import (
     InMemoryRepository,
     _audit_chain_key,
     _event_hash,
+    missing_analysis_fields,
 )
 from hydraulikdoc.security import InputRejected, odata_literal, validate_pdf_upload
 
@@ -186,6 +187,14 @@ class GovernanceTests(unittest.TestCase):
         self.assertEqual(repository.answer_review_status(author, answer.answer_id), ReviewStatus.ACCEPTED)
 
 
+COMPLETE_ANALYSIS = {
+    "containment_action": "Presse stillgesetzt und gegen Wiedereinschalten gesichert",
+    "root_cause": "Druckbegrenzungsventil verschlissen, Federbruch",
+    "corrective_action": "Ventil getauscht, Einstelldruck auf 300 bar geprüft",
+    "effectiveness_check": "48 h Druckaufzeichnung ohne Überschreitung",
+}
+
+
 class IncidentWorkflowTests(unittest.TestCase):
     def setUp(self) -> None:
         self.repository = InMemoryRepository(AppSettings.from_environment({"APP_ENV": "test"}))
@@ -197,6 +206,13 @@ class IncidentWorkflowTests(unittest.TestCase):
         )
         self.incident = self.repository.create_incident(
             self.technician, asset_id="PRESSE-04", title="Druck kritisch", severity="critical", details="P_HIGH"
+        )
+        # Workflow tests run with a complete 8D; the gating rules are covered in IncidentAnalysisTests.
+        self.repository.update_incident_analysis(
+            self.technician,
+            self.incident.incident_id,
+            expected_updated_at=self.incident.updated_at,
+            analysis=COMPLETE_ANALYSIS,
         )
 
     def _move(self, principal: UserPrincipal, target: str) -> IncidentRecord:
@@ -246,6 +262,111 @@ class IncidentWorkflowTests(unittest.TestCase):
                 foreign, self.incident.incident_id, expected="new", target="acknowledged"
             )
         self.assertEqual(self.repository.list_incidents(foreign), ())
+
+
+class IncidentAnalysisTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.repository = InMemoryRepository(AppSettings.from_environment({"APP_ENV": "test"}))
+        self.technician = UserPrincipal(
+            "tech", "tenant-a", "Tech", "technician", permissions=ROLE_PERMISSIONS["technician"]
+        )
+        self.supervisor = UserPrincipal(
+            "lead", "tenant-a", "Lead", "supervisor", permissions=ROLE_PERMISSIONS["supervisor"]
+        )
+
+    def _incident(self, severity: str) -> IncidentRecord:
+        incident = self.repository.create_incident(
+            self.technician, asset_id="PRESSE-04", title="Befund", severity=severity, details=""
+        )
+        return self.repository.transition_incident(
+            self.technician, incident.incident_id, expected="new", target="in_progress"
+        )
+
+    def _analyse(self, incident: IncidentRecord, **fields: str) -> IncidentRecord:
+        analysis = {field: "" for field in COMPLETE_ANALYSIS} | fields
+        return self.repository.update_incident_analysis(
+            self.technician, incident.incident_id, expected_updated_at=incident.updated_at, analysis=analysis
+        )
+
+    def test_critical_incident_needs_8d_before_resolution_and_effectiveness_before_closing(self) -> None:
+        incident = self._incident("critical")
+        self.assertEqual(
+            missing_analysis_fields(incident, "resolved"), ("containment_action", "root_cause", "corrective_action")
+        )
+        with self.assertRaisesRegex(IncidentTransitionRejected, "ANALYSIS_INCOMPLETE"):
+            self.repository.transition_incident(
+                self.technician, incident.incident_id, expected="in_progress", target="resolved"
+            )
+        incident = self._analyse(
+            incident,
+            containment_action=COMPLETE_ANALYSIS["containment_action"],
+            root_cause=COMPLETE_ANALYSIS["root_cause"],
+            corrective_action=COMPLETE_ANALYSIS["corrective_action"],
+        )
+        resolved = self.repository.transition_incident(
+            self.technician, incident.incident_id, expected="in_progress", target="resolved"
+        )
+        with self.assertRaisesRegex(IncidentTransitionRejected, "ANALYSIS_INCOMPLETE"):
+            self.repository.transition_incident(
+                self.supervisor, incident.incident_id, expected="resolved", target="closed"
+            )
+        resolved = self._analyse(resolved, **COMPLETE_ANALYSIS)
+        closed = self.repository.transition_incident(
+            self.supervisor, resolved.incident_id, expected="resolved", target="closed"
+        )
+        self.assertEqual(closed.root_cause, COMPLETE_ANALYSIS["root_cause"])
+
+    def test_warning_only_needs_a_documented_measure(self) -> None:
+        incident = self._incident("warning")
+        self.assertEqual(missing_analysis_fields(incident, "resolved"), ("corrective_action",))
+        incident = self._analyse(incident, corrective_action="Filter gewechselt, Kontrollprobe geplant")
+        resolved = self.repository.transition_incident(
+            self.technician, incident.incident_id, expected="in_progress", target="resolved"
+        )
+        self.assertEqual(missing_analysis_fields(resolved, "closed"), ())
+
+    def test_placeholder_text_does_not_count_as_analysis(self) -> None:
+        incident = self._analyse(self._incident("warning"), corrective_action="  ok  ")
+        self.assertEqual(missing_analysis_fields(incident, "resolved"), ("corrective_action",))
+
+    def test_concurrent_analysis_edit_is_rejected(self) -> None:
+        incident = self._incident("critical")
+        self._analyse(incident, root_cause="Erste Bearbeitung der Ursache")
+        with self.assertRaisesRegex(IncidentTransitionRejected, "STALE_VERSION"):
+            self._analyse(incident, root_cause="Zweite Bearbeitung überschreibt")
+
+    def test_closed_incident_analysis_is_immutable(self) -> None:
+        incident = self._analyse(self._incident("critical"), **COMPLETE_ANALYSIS)
+        resolved = self.repository.transition_incident(
+            self.technician, incident.incident_id, expected="in_progress", target="resolved"
+        )
+        closed = self.repository.transition_incident(
+            self.supervisor, resolved.incident_id, expected="resolved", target="closed"
+        )
+        with self.assertRaisesRegex(IncidentTransitionRejected, "INCIDENT_CLOSED"):
+            self._analyse(closed, **COMPLETE_ANALYSIS)
+
+    def test_history_records_creation_status_and_analysis_with_role_only(self) -> None:
+        incident = self._incident("warning")
+        self._analyse(incident, corrective_action="Filter gewechselt, Kontrollprobe geplant")
+        events = self.repository.list_incident_events(self.supervisor, incident.incident_id)
+        self.assertEqual(
+            [(item.event_type, item.previous_status, item.new_status) for item in events],
+            [("created", None, "new"), ("status_changed", "new", "in_progress"), ("analysis_updated", None, None)],
+        )
+        self.assertEqual({item.actor_role for item in events}, {"technician"})
+        self.assertFalse(any(item.is_own for item in events))
+        self.assertTrue(
+            all(item.is_own for item in self.repository.list_incident_events(self.technician, incident.incident_id))
+        )
+        foreign = UserPrincipal("x", "tenant-b", "X", "admin", permissions=ROLE_PERMISSIONS["admin"])
+        self.assertEqual(self.repository.list_incident_events(foreign, incident.incident_id), ())
+
+    def test_unchanged_analysis_does_not_create_history_noise(self) -> None:
+        incident = self._analyse(self._incident("warning"), corrective_action="Filter gewechselt, Kontrollprobe")
+        self._analyse(incident, corrective_action="Filter gewechselt, Kontrollprobe")
+        events = self.repository.list_incident_events(self.technician, incident.incident_id)
+        self.assertEqual(sum(1 for item in events if item.event_type == "analysis_updated"), 1)
 
 
 class RetrievalTests(unittest.TestCase):

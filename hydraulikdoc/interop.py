@@ -191,7 +191,7 @@ def build_sap_notifications(
                 "PRIOK": SAP_PRIORITY_BY_SEVERITY.get(incident.severity, "3"),
                 "TPLNR": functional_location,
                 "EQUNR": equipment_number,
-                "LANGTEXT": incident.details,
+                "LANGTEXT": _long_text(incident),
                 "HD_INCIDENT_ID": incident.incident_id,
                 "HD_ASSET_ID": incident.asset_id,
                 "HD_STATUS": incident.status,
@@ -199,6 +199,20 @@ def build_sap_notifications(
             }
         )
     return SapNotificationExport(tuple(rows), tuple(missing))
+
+
+_LONG_TEXT_SECTIONS = (
+    ("containment_action", "Sofortmaßnahme"),
+    ("root_cause", "Ursache"),
+    ("corrective_action", "Abstellmaßnahme"),
+    ("effectiveness_check", "Wirksamkeitsprüfung"),
+)
+
+
+def _long_text(incident: IncidentRecord) -> str:
+    sections = [incident.details] if incident.details else []
+    sections += [f"{label}: {value}" for field, label in _LONG_TEXT_SECTIONS if (value := getattr(incident, field))]
+    return "\n".join(sections)
 
 
 def _spreadsheet_safe(value: str) -> str:

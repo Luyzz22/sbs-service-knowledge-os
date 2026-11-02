@@ -1,6 +1,7 @@
 import csv
 import io
 import unittest
+from dataclasses import replace
 from datetime import UTC, datetime
 
 from hydraulikdoc.auth import ROLE_PERMISSIONS, UserPrincipal
@@ -119,6 +120,18 @@ class SapNotificationExportTests(unittest.TestCase):
         self.assertEqual((row["TPLNR"], row["EQUNR"]), ("1000-W1-H3-P04", "10004711"))
         self.assertEqual(row["LANGTEXT"], "P_HIGH: 312 bar")
         self.assertEqual(export.missing_reference, ())
+
+    def test_long_text_carries_documented_8d_measures(self) -> None:
+        incident = replace(
+            _incident("WERK1-P04", "critical"),
+            root_cause="Druckbegrenzungsventil verschlissen",
+            corrective_action="Ventil getauscht",
+        )
+        long_text = build_sap_notifications([incident], [], "M2").rows[0]["LANGTEXT"]
+        self.assertEqual(
+            long_text,
+            "P_HIGH: 312 bar\nUrsache: Druckbegrenzungsventil verschlissen\nAbstellmaßnahme: Ventil getauscht",
+        )
 
     def test_missing_technical_object_is_reported(self) -> None:
         export = build_sap_notifications([_incident("UNBEKANNT", "warning")], [], "M2")

@@ -44,6 +44,10 @@ from .interop import (
     to_spreadsheet_csv,
 )
 from .repository import (
+    EIGHT_D_SEVERITIES,
+    INCIDENT_ANALYSIS_FIELDS,
+    INCIDENT_ANALYSIS_MAX_CHARS,
+    INCIDENT_ANALYSIS_MIN_CHARS,
     INCIDENT_CLOSE_PERMISSION,
     INCIDENT_STATUSES,
     INCIDENT_TRANSITIONS,
@@ -53,6 +57,7 @@ from .repository import (
     IncidentRecord,
     IncidentTransitionRejected,
     get_repository,
+    missing_analysis_fields,
 )
 from .security import InputRejected, public_error_code, validate_pdf_upload
 
@@ -85,6 +90,19 @@ INCIDENT_SEVERITY_LABELS = {
     "p4": "P4 · niedrig",
 }
 OPEN_INCIDENT_STATUSES = ("new", "acknowledged", "in_progress")
+ANALYSIS_LABELS = {
+    "containment_action": "D3 Sofortmaßnahme",
+    "root_cause": "D4 Ursache",
+    "corrective_action": "D5/D6 Abstellmaßnahme",
+    "effectiveness_check": "D7 Wirksamkeitsprüfung",
+}
+ANALYSIS_HELP = {
+    "containment_action": "Wie wurde der Schaden begrenzt? Zum Beispiel Stillsetzung, Sperrung, Sortierung.",
+    "root_cause": "Technische Ursache und, falls bekannt, warum sie nicht früher entdeckt wurde.",
+    "corrective_action": "Dauerhafte Abstellung: Reparatur, Tausch, Einstellung, Prozessänderung.",
+    "effectiveness_check": "Womit ist belegt, dass die Maßnahme wirkt? Messreihe, Folgeprobe, Zeitraum.",
+}
+ROLE_LABELS = {"viewer": "Leser", "technician": "Techniker", "supervisor": "Supervisor", "admin": "Admin"}
 CRITICAL_SEVERITIES = frozenset({"critical", "p1"})
 CRITICALITY_LABELS = {
     "low": "Niedrig",
@@ -1024,10 +1042,83 @@ def _incident_detail(principal: UserPrincipal, repository: EnterpriseRepository,
         st.warning(
             "Kritischer Befund: Abschalt-, Sicherheits- und LOTO-Bewertung durch eine qualifizierte Person dokumentieren."
         )
+    _incident_analysis(principal, repository, incident)
+    _incident_actions(principal, repository, incident)
+    _incident_history(principal, repository, incident)
 
+
+def _incident_analysis(principal: UserPrincipal, repository: EnterpriseRepository, incident: IncidentRecord) -> None:
+    st.markdown("#### Analyse und Maßnahmen (8D)")
+    if incident.severity in EIGHT_D_SEVERITIES:
+        st.caption(
+            "8D-pflichtig: D3, D4 und D5/D6 sind vor „Als behoben melden“ zu dokumentieren, D7 vor der Abnahme. "
+            f"Je Feld mindestens {INCIDENT_ANALYSIS_MIN_CHARS} Zeichen."
+        )
+    else:
+        st.caption(
+            "Vor „Als behoben melden“ ist mindestens die Abstellmaßnahme (D5/D6) zu dokumentieren. "
+            "Die übrigen Felder sind empfohlen."
+        )
+    editable = principal.can("incident:write") and incident.status != "closed"
+    if not editable:
+        for field in INCIDENT_ANALYSIS_FIELDS:
+            st.markdown(f"**{ANALYSIS_LABELS[field]}**")
+            value = getattr(incident, field)
+            if value:
+                st.text(value)
+            else:
+                st.caption("Nicht dokumentiert.")
+        return
+    st.caption(
+        "Ursachen technisch und prozessbezogen beschreiben. Keine Personennamen, Schuldzuweisungen oder "
+        "Leistungsbewertungen eintragen; HydraulikDoc ist kein Werkzeug zur Beschäftigtenbewertung."
+    )
+    version = (incident.updated_at or incident.created_at).timestamp()
+    with st.form(f"incident-analysis:{incident.incident_id}"):
+        values = {
+            field: st.text_area(
+                ANALYSIS_LABELS[field],
+                value=getattr(incident, field),
+                max_chars=INCIDENT_ANALYSIS_MAX_CHARS,
+                height=90,
+                key=f"analysis:{incident.incident_id}:{field}:{version}",
+                help=ANALYSIS_HELP[field],
+            )
+            for field in INCIDENT_ANALYSIS_FIELDS
+        }
+        submitted = st.form_submit_button("Analyse speichern")
+    if not submitted:
+        return
+    try:
+        repository.update_incident_analysis(
+            principal,
+            incident.incident_id,
+            expected_updated_at=incident.updated_at or incident.created_at,
+            analysis=values,
+        )
+    except (PermissionError, IncidentTransitionRejected, KeyError) as error:
+        reason = error.args[0] if isinstance(error, (PermissionError, IncidentTransitionRejected)) else "NOT_FOUND"
+        st.error(
+            "Analyse nicht gespeichert. Der Incident wurde zwischenzeitlich geändert oder ist abgeschlossen; "
+            f"bitte Ansicht neu laden. Referenz {reason}"
+        )
+        return
+    repository.emit_audit(
+        principal,
+        action="incident.analysis.updated",
+        outcome=AuditOutcome.SUCCESS,
+        resource_type="incident",
+        resource_id=incident.incident_id,
+        metadata={"incident_status": incident.status, "role": principal.role},
+    )
+    st.session_state.incident_notice = f"Analyse für Incident {incident.incident_id[:8]} wurde gespeichert."
+    st.rerun()
+
+
+def _incident_actions(principal: UserPrincipal, repository: EnterpriseRepository, incident: IncidentRecord) -> None:
     next_statuses = INCIDENT_TRANSITIONS.get(incident.status, ())
     if not next_statuses:
-        st.caption("Abgeschlossen. Weitere Statuswechsel sind nicht vorgesehen.")
+        st.caption("Abgeschlossen. Weitere Statuswechsel und Änderungen der Analyse sind nicht vorgesehen.")
         return
     if not principal.can("incident:write"):
         st.caption("Ihre Rolle darf Incidents einsehen, aber keinen Status ändern.")
@@ -1038,7 +1129,9 @@ def _incident_detail(principal: UserPrincipal, repository: EnterpriseRepository,
         label = INCIDENT_ACTION_LABELS.get(target, INCIDENT_STATUS_LABELS[target])
         if target == "in_progress" and incident.status == "resolved":
             label = "Wieder öffnen"
-        allowed = target != "closed" or principal.can(INCIDENT_CLOSE_PERMISSION)
+        missing = missing_analysis_fields(incident, target)
+        role_allowed = target != "closed" or principal.can(INCIDENT_CLOSE_PERMISSION)
+        allowed = role_allowed and not missing
         if column.button(
             label,
             key=f"incident:{incident.incident_id}:{target}",
@@ -1047,8 +1140,35 @@ def _incident_detail(principal: UserPrincipal, repository: EnterpriseRepository,
             width="stretch",
         ):
             _transition_incident(principal, repository, incident, target)
-        if not allowed:
+        if not role_allowed:
             column.caption("Abnahme erfordert die Rolle Supervisor oder Admin.")
+        elif missing:
+            column.caption("Zuerst dokumentieren: " + ", ".join(ANALYSIS_LABELS[field] for field in missing) + ".")
+
+
+def _incident_history(principal: UserPrincipal, repository: EnterpriseRepository, incident: IncidentRecord) -> None:
+    st.markdown("#### Verlauf")
+    events = repository.list_incident_events(principal, incident.incident_id)
+    if not events:
+        st.caption("Für diesen Incident liegt kein Verlauf vor (vor Einführung der Verlaufserfassung angelegt).")
+        return
+    entries = []
+    for event in events:
+        if event.event_type == "created":
+            text = "Angelegt"
+        elif event.event_type == "status_changed":
+            previous = INCIDENT_STATUS_LABELS.get(event.previous_status or "", event.previous_status or "–")
+            current = INCIDENT_STATUS_LABELS.get(event.new_status or "", event.new_status or "–")
+            text = f"Status {previous} → {current}"
+        else:
+            text = "Analyse und Maßnahmen aktualisiert"
+        actor = ROLE_LABELS.get(event.actor_role, event.actor_role) + (" (Sie)" if event.is_own else "")
+        entries.append(
+            f"<li><time>{event.occurred_at:%d.%m.%Y %H:%M} UTC</time>"
+            f"<span>{html.escape(text)}</span><small>{html.escape(actor)}</small></li>"
+        )
+    st.markdown(f'<ol class="hd-timeline">{"".join(entries)}</ol>', unsafe_allow_html=True)
+    st.caption("Personen werden nur mit Rolle angezeigt; die pseudonymisierte Kennung bleibt im Auditnachweis.")
 
 
 def _render_sap_handover(

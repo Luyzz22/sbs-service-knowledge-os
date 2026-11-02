@@ -77,6 +77,7 @@ def main() -> None:
         "analysis_runs",
         "analysis_reviews",
         "incidents",
+        "incident_events",
         "notice_acceptances",
         "privacy_requests",
         "audit_events",
@@ -119,7 +120,10 @@ def main() -> None:
                 sql.SQL("GRANT UPDATE ON TABLE documents, assets, analysis_runs TO {}").format(sql.Identifier(app_user))
             )
             cursor.execute(
-                sql.SQL("GRANT UPDATE (status, updated_at) ON TABLE incidents TO {}").format(sql.Identifier(app_user))
+                sql.SQL(
+                    "GRANT UPDATE (status, updated_at, containment_action, root_cause, corrective_action, "
+                    "effectiveness_check) ON TABLE incidents TO {}"
+                ).format(sql.Identifier(app_user))
             )
             cursor.execute(sql.SQL("GRANT SELECT, INSERT ON TABLE audit_events TO {}").format(sql.Identifier(app_user)))
             cursor.execute(

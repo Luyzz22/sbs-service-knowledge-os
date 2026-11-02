@@ -68,9 +68,27 @@ class PostgresSecurityIntegrationTests(unittest.TestCase):
                     """SELECT
                     has_column_privilege(current_user, 'incidents', 'status', 'UPDATE'),
                     has_column_privilege(current_user, 'incidents', 'details', 'UPDATE'),
-                    has_column_privilege(current_user, 'incidents', 'tenant_id', 'UPDATE')"""
+                    has_column_privilege(current_user, 'incidents', 'tenant_id', 'UPDATE'),
+                    has_column_privilege(current_user, 'incidents', 'root_cause', 'UPDATE'),
+                    has_table_privilege(current_user, 'incident_events', 'INSERT'),
+                    has_table_privilege(current_user, 'incident_events', 'UPDATE'),
+                    has_table_privilege(current_user, 'incident_events', 'DELETE')"""
                 )
-                self.assertEqual(cursor.fetchone(), (True, False, False))
+                self.assertEqual(cursor.fetchone(), (True, False, False, True, True, False, False))
+                incident_id = str(uuid.uuid4())
+                cursor.execute(
+                    """INSERT INTO incidents
+                    (incident_id, tenant_id, asset_id, title, details, severity, status, created_by_token,
+                     retention_until)
+                    VALUES (%s,%s,'a1','Expired','','warning','closed','token',now() - interval '1 day')""",
+                    (incident_id, self.tenant_a),
+                )
+                cursor.execute(
+                    """INSERT INTO incident_events
+                    (event_id, tenant_id, incident_id, event_type, new_status, actor_role, actor_token)
+                    VALUES (%s,%s,%s,'created','new','technician','token')""",
+                    (str(uuid.uuid4()), self.tenant_a, incident_id),
+                )
                 cursor.execute(
                     """INSERT INTO audit_events
                     (event_id, tenant_id, action, outcome, occurred_at, retention_until, event_hash)
@@ -83,7 +101,12 @@ class PostgresSecurityIntegrationTests(unittest.TestCase):
                 with connection.cursor() as cursor:
                     cursor.execute("SELECT purge_expired_tenant_data(%s)", (self.tenant_a,))
 
-        for statement in ("CREATE TABLE runtime_must_not_create(id int)", "DELETE FROM audit_events"):
+        for statement in (
+            "CREATE TABLE runtime_must_not_create(id int)",
+            "DELETE FROM audit_events",
+            "DELETE FROM incident_events",
+            "UPDATE incident_events SET actor_role='admin'",
+        ):
             with self.assertRaises(InsufficientPrivilege):
                 with self.psycopg.connect(self.app_dsn) as connection:
                     with connection.cursor() as cursor:
@@ -99,7 +122,9 @@ class PostgresSecurityIntegrationTests(unittest.TestCase):
                 self.assertEqual(cursor.fetchall(), [(self.tenant_a,), (self.tenant_b,)])
                 cursor.execute("SELECT set_config('app.tenant_id', %s, true)", (self.tenant_a,))
                 cursor.execute("SELECT purge_expired_tenant_data(%s)", (self.tenant_a,))
-                self.assertEqual(cursor.fetchone()[0]["audit_events"], 1)
+                purged = cursor.fetchone()[0]
+                self.assertEqual(purged["audit_events"], 1)
+                self.assertEqual((purged["incident_events"], purged["incidents"]), (1, 1))
 
         for statement in ("CREATE TABLE lifecycle_must_not_create(id int)", "DELETE FROM audit_events"):
             with self.assertRaises(InsufficientPrivilege):
