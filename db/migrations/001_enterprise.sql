@@ -35,6 +35,10 @@ CREATE TABLE IF NOT EXISTS assets (
     PRIMARY KEY (tenant_id, asset_id)
 );
 
+-- SAP PM references: functional location (TPLNR, max. 40) and equipment number (EQUNR, max. 18).
+ALTER TABLE assets ADD COLUMN IF NOT EXISTS functional_location text NOT NULL DEFAULT '';
+ALTER TABLE assets ADD COLUMN IF NOT EXISTS equipment_number text NOT NULL DEFAULT '';
+
 CREATE TABLE IF NOT EXISTS analysis_runs (
     answer_id uuid PRIMARY KEY,
     tenant_id text NOT NULL REFERENCES tenants(tenant_id),

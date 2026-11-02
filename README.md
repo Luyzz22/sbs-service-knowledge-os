@@ -93,6 +93,7 @@ Zusätzlich ist eine nicht-leere `AI_EVALUATION_EVIDENCE_ID` aus der [fachlichen
 ## Dokumentation
 
 - [Produktdefinition](PRODUCT.md)
+- [Enterprise-Review DACH und Roadmap](docs/product/enterprise-review-2026-11.md)
 - [Designsystem](DESIGN.md)
 - [Security Policy](SECURITY.md)
 - [AI System Card](docs/compliance/ai-system-card.md)

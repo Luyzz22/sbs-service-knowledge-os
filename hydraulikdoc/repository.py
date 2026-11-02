@@ -86,6 +86,8 @@ class AssetRecord:
     criticality: str
     status: str
     updated_at: datetime
+    functional_location: str = ""
+    equipment_number: str = ""
 
 
 @dataclass(frozen=True)
@@ -116,6 +118,8 @@ class EnterpriseRepository(Protocol):
         manufacturer: str,
         model: str,
         criticality: str,
+        functional_location: str = "",
+        equipment_number: str = "",
     ) -> AssetRecord: ...
 
     def list_assets(self, principal: UserPrincipal) -> tuple[AssetRecord, ...]: ...
@@ -229,6 +233,8 @@ class InMemoryRepository:
         manufacturer: str,
         model: str,
         criticality: str,
+        functional_location: str = "",
+        equipment_number: str = "",
     ) -> AssetRecord:
         record = AssetRecord(
             asset_id=asset_id[:120],
@@ -240,6 +246,8 @@ class InMemoryRepository:
             criticality=criticality,
             status="active",
             updated_at=_now(),
+            functional_location=functional_location[:40],
+            equipment_number=equipment_number[:18],
         )
         with self._lock:
             self._assets[(principal.tenant_id, record.asset_id)] = record
@@ -533,8 +541,16 @@ class PostgresRepository:
                 purge_function = cursor.fetchone()[0]
                 cursor.execute("SELECT to_regprocedure('public.list_retention_tenant_ids()')")
                 tenant_function = cursor.fetchone()[0]
+                cursor.execute(
+                    """SELECT count(*) FROM information_schema.columns
+                    WHERE table_schema='public' AND table_name='assets'
+                      AND column_name IN ('functional_location', 'equipment_number')"""
+                )
+                sap_columns = cursor.fetchone()[0]
         if protected != required_tables or purge_function is None or tenant_function is None:
             raise RuntimeError("Database schema is missing required RLS or lifecycle controls")
+        if sap_columns != 2:
+            raise RuntimeError("Database schema is missing asset SAP reference columns; run the bootstrap migration")
 
     def upsert_asset(
         self,
@@ -546,6 +562,8 @@ class PostgresRepository:
         manufacturer: str,
         model: str,
         criticality: str,
+        functional_location: str = "",
+        equipment_number: str = "",
     ) -> AssetRecord:
         updated = _now()
         with self._connect() as connection:
@@ -557,11 +575,14 @@ class PostgresRepository:
                 )
                 cursor.execute(
                     """INSERT INTO assets
-                    (asset_id, tenant_id, name, site, manufacturer, model, criticality, status, updated_at)
-                    VALUES (%s,%s,%s,%s,%s,%s,%s,'active',%s)
+                    (asset_id, tenant_id, name, site, manufacturer, model, criticality, status, updated_at,
+                     functional_location, equipment_number)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,'active',%s,%s,%s)
                     ON CONFLICT (tenant_id, asset_id) DO UPDATE SET
                     name=excluded.name, site=excluded.site, manufacturer=excluded.manufacturer,
-                    model=excluded.model, criticality=excluded.criticality, updated_at=excluded.updated_at""",
+                    model=excluded.model, criticality=excluded.criticality, updated_at=excluded.updated_at,
+                    functional_location=excluded.functional_location,
+                    equipment_number=excluded.equipment_number""",
                     (
                         asset_id[:120],
                         principal.tenant_id,
@@ -571,6 +592,8 @@ class PostgresRepository:
                         model[:160],
                         criticality,
                         updated,
+                        functional_location[:40],
+                        equipment_number[:18],
                     ),
                 )
         return AssetRecord(
@@ -583,6 +606,8 @@ class PostgresRepository:
             criticality,
             "active",
             updated,
+            functional_location[:40],
+            equipment_number[:18],
         )
 
     def list_assets(self, principal: UserPrincipal) -> tuple[AssetRecord, ...]:
@@ -591,7 +616,8 @@ class PostgresRepository:
                 self._tenant(cursor, principal.tenant_id)
                 cursor.execute(
                     """SELECT asset_id, tenant_id, name, site, manufacturer, model,
-                    criticality, status, updated_at FROM assets ORDER BY site, name"""
+                    criticality, status, updated_at, functional_location, equipment_number
+                    FROM assets ORDER BY site, name"""
                 )
                 return tuple(AssetRecord(*row) for row in cursor.fetchall())
 

@@ -7,7 +7,6 @@ import hashlib
 import html
 import io
 import json
-import re
 import time
 from datetime import UTC, datetime
 from pathlib import Path
@@ -34,10 +33,22 @@ from .condition_monitoring import (
 )
 from .config import AppSettings, AuthMode, ConfigurationError, get_settings
 from .governance import GroundedAnswer, ReviewStatus, UseCase, evaluate_use_case
+from .interop import (
+    ASSET_ID_PATTERN,
+    EQUIPMENT_PATTERN,
+    FUNCTIONAL_LOCATION_PATTERN,
+    SAP_NOTIFICATION_COLUMNS,
+    asset_import_template,
+    build_sap_notifications,
+    parse_asset_csv,
+    to_spreadsheet_csv,
+)
 from .repository import (
     INCIDENT_CLOSE_PERMISSION,
     INCIDENT_STATUSES,
     INCIDENT_TRANSITIONS,
+    AssetRecord,
+    DocumentRecord,
     EnterpriseRepository,
     IncidentRecord,
     IncidentTransitionRejected,
@@ -74,6 +85,29 @@ INCIDENT_SEVERITY_LABELS = {
     "p4": "P4 · niedrig",
 }
 OPEN_INCIDENT_STATUSES = ("new", "acknowledged", "in_progress")
+CRITICAL_SEVERITIES = frozenset({"critical", "p1"})
+CRITICALITY_LABELS = {
+    "low": "Niedrig",
+    "medium": "Mittel",
+    "high": "Hoch",
+    "safety_critical": "Sicherheitskritisch",
+}
+ASSET_STATUS_LABELS = {
+    "active": "Aktiv",
+    "maintenance": "In Wartung",
+    "out_of_service": "Außer Betrieb",
+    "retired": "Stillgelegt",
+}
+NAV_PAGES = (
+    "Leitstand",
+    "Assets",
+    "Wissensbasis",
+    "Condition Monitoring",
+    "Fluid",
+    "Incidents",
+    "Governance",
+    "System",
+)
 # Resolved incidents stay visible by default because they still await supervisor sign-off.
 DEFAULT_INCIDENT_FILTER = (*OPEN_INCIDENT_STATUSES, "resolved")
 PRIVACY_NOTICE = """HydraulikDoc verarbeitet Ihre Entra-Kennung pseudonymisiert für Rollenprüfung,
@@ -230,7 +264,23 @@ def _render_privacy_notice(
         st.rerun()
 
 
-def _render_shell(principal: UserPrincipal, settings: AppSettings) -> None:
+def _render_shell(principal: UserPrincipal, settings: AppSettings, page: str) -> None:
+    release = html.escape(settings.release_state)
+    tenant = html.escape(principal.tenant_id)
+    role = html.escape(principal.role)
+    if page != "Leitstand":
+        # Working pages lead with the task; the context stays visible in one compact line.
+        st.markdown(
+            f"""
+            <div class="hd-context">
+              <span><strong>Mandant</strong> <code>{tenant}</code></span>
+              <span><strong>Rolle</strong> <code>{role}</code></span>
+              <span><strong>Releasezustand</strong> <code>{release}</code></span>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        return
     st.markdown(
         f"""
         <section class="hd-hero">
@@ -241,17 +291,18 @@ def _render_shell(principal: UserPrincipal, settings: AppSettings) -> None:
             Grenzwerte und Verantwortung an einem Ort brauchen.</p>
           </div>
           <div class="hd-proof">
-            <strong>Releasezustand</strong><br>
-            <code>{settings.release_state}</code><br><br>
-            <strong>Mandant</strong><br>
-            <code>{principal.tenant_id}</code><br><br>
-            <strong>Rolle</strong><br>
-            <code>{principal.role}</code>
+            <div><strong>Releasezustand</strong><code>{release}</code></div>
+            <div><strong>Mandant</strong><code>{tenant}</code></div>
+            <div><strong>Rolle</strong><code>{role}</code></div>
           </div>
         </section>
         """,
         unsafe_allow_html=True,
     )
+
+
+def _go_to(page: str) -> None:
+    st.session_state.nav = page
 
 
 def _sidebar(principal: UserPrincipal, settings: AppSettings) -> str:
@@ -262,17 +313,7 @@ def _sidebar(principal: UserPrincipal, settings: AppSettings) -> str:
         st.write(principal.display_name)
         st.caption(f"{principal.role} · {principal.authentication_method}")
         st.divider()
-        pages = [
-            "Leitstand",
-            "Assets",
-            "Wissensbasis",
-            "Condition Monitoring",
-            "Fluid",
-            "Incidents",
-            "Governance",
-            "System",
-        ]
-        selected = st.radio("Arbeitsbereich", pages, label_visibility="collapsed")
+        selected = st.radio("Arbeitsbereich", NAV_PAGES, key="nav", label_visibility="collapsed")
         st.divider()
         st.caption(f"KI: {'Azure konfiguriert' if settings.azure_ready else 'nicht konfiguriert'}")
         st.caption(f"Region: {settings.azure_region or 'nicht attestiert'}")
@@ -282,11 +323,15 @@ def _sidebar(principal: UserPrincipal, settings: AppSettings) -> str:
         return selected
 
 
+def _count_phrase(count: int, singular: str, plural: str) -> str:
+    return f"{count} {singular if count == 1 else plural}"
+
+
 def _overview(principal: UserPrincipal, repository: EnterpriseRepository, settings: AppSettings) -> None:
     documents = repository.list_documents(principal)
     assets = repository.list_assets(principal)
     incidents = repository.list_incidents(principal)
-    open_incidents = [item for item in incidents if item.status not in {"resolved", "closed"}]
+    open_incidents = [item for item in incidents if item.status in OPEN_INCIDENT_STATUSES]
     st.header("Leitstand")
     st.caption("Operativer Überblick ohne erfundene Verfügbarkeits- oder ROI-Kennzahlen.")
     st.markdown(
@@ -299,26 +344,113 @@ def _overview(principal: UserPrincipal, repository: EnterpriseRepository, settin
         """,
         unsafe_allow_html=True,
     )
-    left, right = st.columns([3, 2])
-    with left:
-        st.subheader("Arbeitsmodell")
-        st.markdown(
-            "1. Asset und Betriebsgrenzen festlegen\n"
-            "2. Herstellerunterlagen tenant-isoliert indexieren\n"
-            "3. Messdaten deterministisch gegen Grenzwerte prüfen\n"
-            "4. KI-Entwurf nur mit Seitenbelegen erzeugen\n"
-            "5. Fachprüfung dokumentieren und Incident nachverfolgen"
+    st.subheader("Handlungsbedarf")
+    critical = [item for item in open_incidents if item.severity in CRITICAL_SEVERITIES]
+    unacknowledged = [item for item in incidents if item.status == "new"]
+    awaiting_signoff = [item for item in incidents if item.status == "resolved"]
+    actions: list[tuple[str, str]] = []
+    if critical:
+        actions.append(
+            (
+                "hd-notice hd-blocked",
+                _count_phrase(len(critical), "kritischer Incident ist", "kritische Incidents sind")
+                + " offen. Abschalt-, Sicherheits- und LOTO-Bewertung dokumentieren.",
+            )
         )
-    with right:
-        st.subheader("Freigabegrenzen")
-        st.warning("Keine autonome Maschinensteuerung. Keine automatische Sicherheitsfreigabe.")
-        if settings.release_state != "configured":
-            st.info("Produktionsfreigabe bleibt offen, bis Deployment-Evidenz und Compliance-Gate bestätigt sind.")
+    if unacknowledged:
+        actions.append(
+            (
+                "hd-notice",
+                _count_phrase(len(unacknowledged), "neuer Incident ist", "neue Incidents sind")
+                + " noch nicht bestätigt.",
+            )
+        )
+    if awaiting_signoff:
+        responsible = (
+            "Ihre Abnahme" if principal.can(INCIDENT_CLOSE_PERMISSION) else "die Abnahme durch einen Supervisor"
+        )
+        actions.append(
+            (
+                "hd-notice",
+                _count_phrase(len(awaiting_signoff), "behobener Incident wartet", "behobene Incidents warten")
+                + f" auf {responsible}.",
+            )
+        )
+    if actions:
+        for css_class, text in actions:
+            st.markdown(f'<div class="{css_class}">{html.escape(text)}</div>', unsafe_allow_html=True)
+        st.button("Zum Incident Workflow", on_click=_go_to, args=("Incidents",), key="overview-incidents")
+    else:
+        st.success("Kein offener Handlungsbedarf im Incident Workflow.")
+    _render_setup_progress(principal, repository, settings, assets, documents)
+    st.subheader("Freigabegrenzen")
+    st.warning("Keine autonome Maschinensteuerung. Keine automatische Sicherheitsfreigabe.")
+    if settings.release_state != "configured":
+        st.info("Produktionsfreigabe bleibt offen, bis Deployment-Evidenz und Compliance-Gate bestätigt sind.")
+
+
+def _render_setup_progress(
+    principal: UserPrincipal,
+    repository: EnterpriseRepository,
+    settings: AppSettings,
+    assets: tuple[AssetRecord, ...],
+    documents: tuple[DocumentRecord, ...],
+) -> None:
+    st.subheader("Einrichtung")
+    linked = sum(1 for item in assets if item.functional_location or item.equipment_number)
+    ready_documents = sum(1 for item in documents if item.status == "ready")
+    steps = (
+        ("Assets erfasst", bool(assets), "Assets", _count_phrase(len(assets), "Anlagenobjekt", "Anlagenobjekte")),
+        (
+            "SAP-Referenz je Asset gepflegt",
+            bool(assets) and linked == len(assets),
+            "Assets",
+            f"{linked} von {len(assets)} mit Technischem Platz oder Equipment",
+        ),
+        (
+            "Herstellerunterlagen indexiert",
+            ready_documents > 0,
+            "Wissensbasis",
+            _count_phrase(ready_documents, "Dokument bereit", "Dokumente bereit"),
+        ),
+        (
+            "KI-Nutzerhinweis bestätigt",
+            _has_ai_acceptance(principal, repository, settings),
+            "Governance",
+            f"Version {settings.ai_notice_version}",
+        ),
+        (
+            "Datenschutzhinweis zur Kenntnis genommen",
+            repository.has_acceptance(principal, "privacy", settings.privacy_notice_version),
+            "Governance",
+            f"Version {settings.privacy_notice_version}",
+        ),
+    )
+    done = sum(1 for _, complete, _, _ in steps if complete)
+    st.caption(f"{done} von {len(steps)} Schritten erledigt")
+    items = "".join(
+        f"""<li><span class="hd-status hd-status-{"resolved" if complete else "open"}">"""
+        f"""{"Erledigt" if complete else "Offen"}</span>"""
+        f"<div><strong>{html.escape(label)}</strong><small>{html.escape(detail)}</small></div></li>"
+        for label, complete, _, detail in steps
+    )
+    st.markdown(f'<ul class="hd-checklist">{items}</ul>', unsafe_allow_html=True)
+    next_step = next(((label, page) for label, complete, page, _ in steps if not complete), None)
+    if next_step:
+        st.button(
+            f"Weiter: {next_step[0]}",
+            on_click=_go_to,
+            args=(next_step[1],),
+            key="overview-next-setup",
+            width="stretch",
+        )
 
 
 def _assets(principal: UserPrincipal, repository: EnterpriseRepository) -> None:
     st.header("Asset Register")
     st.caption("OEM-neutrale Anlagen- und Komponentenreferenz für Dokumente, Messwerte und Incidents.")
+    if notice := st.session_state.pop("asset_import_notice", None):
+        st.success(notice)
     assets = repository.list_assets(principal)
     if assets:
         st.dataframe(
@@ -329,16 +461,25 @@ def _assets(principal: UserPrincipal, repository: EnterpriseRepository) -> None:
                     "Standort": item.site,
                     "Hersteller": item.manufacturer,
                     "Modell": item.model,
-                    "Kritikalität": item.criticality,
-                    "Status": item.status,
+                    "Kritikalität": CRITICALITY_LABELS.get(item.criticality, item.criticality),
+                    "Status": ASSET_STATUS_LABELS.get(item.status, item.status),
+                    "Technischer Platz": item.functional_location,
+                    "Equipment": item.equipment_number,
                 }
                 for item in assets
             ],
             width="stretch",
             hide_index=True,
         )
+        unlinked = sum(1 for item in assets if not item.functional_location and not item.equipment_number)
+        if unlinked:
+            st.caption(
+                _count_phrase(unlinked, "Asset hat", "Assets haben")
+                + " noch keinen Technischen Platz oder Equipment. Ohne Referenz lassen sich Incidents"
+                " in SAP PM keinem Technischen Objekt zuordnen."
+            )
     else:
-        st.info("Noch keine Assets erfasst.")
+        st.info("Noch keine Assets erfasst. Einzelne Anlagen unten anlegen oder den Stammdatenimport nutzen.")
     if not principal.can("asset:write"):
         return
     with st.expander("Asset anlegen oder aktualisieren"):
@@ -348,13 +489,29 @@ def _assets(principal: UserPrincipal, repository: EnterpriseRepository) -> None:
             site = st.text_input("Standort", placeholder="Werk 1 · Halle 3")
             manufacturer = st.text_input("Hersteller")
             model = st.text_input("Modell / Baureihe")
-            criticality = st.selectbox("Kritikalität", ["low", "medium", "high", "safety_critical"], index=2)
+            criticality = st.selectbox(
+                "Kritikalität",
+                tuple(CRITICALITY_LABELS),
+                index=2,
+                format_func=lambda option: CRITICALITY_LABELS[option],
+            )
+            sap_left, sap_right = st.columns(2)
+            functional_location = sap_left.text_input(
+                "Technischer Platz (SAP TPLNR)", max_chars=40, placeholder="1000-W1-H3-P04"
+            )
+            equipment_number = sap_right.text_input("Equipment (SAP EQUNR)", max_chars=18, placeholder="10004711")
             submitted = st.form_submit_button("Asset speichern", type="primary")
         if submitted:
-            if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{1,119}", asset_id):
+            functional_location = functional_location.strip()
+            equipment_number = equipment_number.strip()
+            if not ASSET_ID_PATTERN.fullmatch(asset_id):
                 st.error("Asset-ID enthält unzulässige Zeichen oder ist zu kurz.")
             elif not name.strip() or not site.strip():
                 st.error("Bezeichnung und Standort sind erforderlich.")
+            elif functional_location and not FUNCTIONAL_LOCATION_PATTERN.fullmatch(functional_location):
+                st.error("Technischer Platz enthält unzulässige Zeichen.")
+            elif equipment_number and not EQUIPMENT_PATTERN.fullmatch(equipment_number):
+                st.error("Equipment darf nur Buchstaben und Ziffern enthalten (max. 18).")
             else:
                 repository.upsert_asset(
                     principal,
@@ -364,6 +521,8 @@ def _assets(principal: UserPrincipal, repository: EnterpriseRepository) -> None:
                     manufacturer=manufacturer.strip(),
                     model=model.strip(),
                     criticality=criticality,
+                    functional_location=functional_location,
+                    equipment_number=equipment_number,
                 )
                 repository.emit_audit(
                     principal,
@@ -371,6 +530,57 @@ def _assets(principal: UserPrincipal, repository: EnterpriseRepository) -> None:
                     outcome=AuditOutcome.SUCCESS,
                     resource_type="asset",
                     resource_id=asset_id,
+                )
+                st.rerun()
+    with st.expander("Stammdaten importieren (CSV, z. B. aus SAP PM)"):
+        st.caption(
+            "UTF-8-CSV mit Semikolon oder Komma. Pflichtspalten: asset_id, name, site, criticality "
+            "(niedrig, mittel, hoch, sicherheitskritisch). Optional: manufacturer, model, "
+            "functional_location (TPLNR), equipment_number (EQUNR). Der Import wird vollständig geprüft "
+            "und nur übernommen, wenn alle Zeilen gültig sind; bestehende Asset-IDs werden aktualisiert."
+        )
+        st.download_button(
+            "Importvorlage herunterladen",
+            asset_import_template(),
+            file_name="hydraulikdoc-asset-import-vorlage.csv",
+            mime="text/csv",
+            key="asset-import-template",
+        )
+        uploaded = st.file_uploader("Stammdaten-CSV", type=["csv"], key="asset-import-file")
+        if uploaded and st.button("Prüfen und importieren", type="primary", key="asset-import-submit"):
+            try:
+                rows = parse_asset_csv(uploaded.getvalue())
+            except ValueError as error:
+                repository.emit_audit(
+                    principal,
+                    action="asset.import.rejected",
+                    outcome=AuditOutcome.FAILURE,
+                    resource_type="asset",
+                    metadata={"reason_code": "VALIDATION_FAILED"},
+                )
+                st.error(str(error))
+            else:
+                for row in rows:
+                    repository.upsert_asset(
+                        principal,
+                        asset_id=row.asset_id,
+                        name=row.name,
+                        site=row.site,
+                        manufacturer=row.manufacturer,
+                        model=row.model,
+                        criticality=row.criticality,
+                        functional_location=row.functional_location,
+                        equipment_number=row.equipment_number,
+                    )
+                repository.emit_audit(
+                    principal,
+                    action="asset.import.completed",
+                    outcome=AuditOutcome.SUCCESS,
+                    resource_type="asset",
+                    metadata={"source_count": len(rows)},
+                )
+                st.session_state.asset_import_notice = _count_phrase(len(rows), "Asset wurde", "Assets wurden") + (
+                    " importiert."
                 )
                 st.rerun()
 
@@ -792,7 +1002,7 @@ def _transition_incident(
 def _incident_detail(principal: UserPrincipal, repository: EnterpriseRepository, incident: IncidentRecord) -> None:
     status_label = INCIDENT_STATUS_LABELS.get(incident.status, incident.status)
     severity_label = INCIDENT_SEVERITY_LABELS.get(incident.severity, incident.severity)
-    critical = incident.severity in {"critical", "p1"} and incident.status in OPEN_INCIDENT_STATUSES
+    critical = incident.severity in CRITICAL_SEVERITIES and incident.status in OPEN_INCIDENT_STATUSES
     st.markdown(
         f"""
         <div class="hd-incident{" hd-incident-critical" if critical else ""}">
@@ -839,6 +1049,48 @@ def _incident_detail(principal: UserPrincipal, repository: EnterpriseRepository,
             _transition_incident(principal, repository, incident, target)
         if not allowed:
             column.caption("Abnahme erfordert die Rolle Supervisor oder Admin.")
+
+
+def _render_sap_handover(
+    principal: UserPrincipal,
+    repository: EnterpriseRepository,
+    incidents: list[IncidentRecord],
+) -> None:
+    with st.expander("Übergabe an SAP PM (Instandhaltungsmeldung)"):
+        st.caption(
+            "Erzeugt eine CSV-Übergabedatei für die gefilterten Incidents mit den SAP-PM-Feldern QMART, QMTXT "
+            "(40 Zeichen), PRIOK, TPLNR und EQUNR sowie HydraulikDoc-Referenzen. Es besteht keine Live-Verbindung "
+            "zu SAP; Feldmapping und Prioritätsschema sind vor dem Upload durch Ihr SAP-Team zu validieren."
+        )
+        notification_type = (
+            st.text_input("Meldungsart (QMART)", value="M2", max_chars=2, key="sap-notification-type").strip().upper()
+        )
+        try:
+            export = build_sap_notifications(incidents, repository.list_assets(principal), notification_type)
+        except ValueError as error:
+            st.error(str(error))
+            return
+        if export.missing_reference:
+            st.warning(
+                _count_phrase(len(export.missing_reference), "Incident hat", "Incidents haben")
+                + " kein Asset mit Technischem Platz oder Equipment. Die Meldung ist dann keinem Technischen"
+                " Objekt zugeordnet; Referenz im Asset Register ergänzen."
+            )
+        exported = st.download_button(
+            _count_phrase(len(export.rows), "Meldung", "Meldungen") + " als SAP-PM-Übergabedatei herunterladen",
+            to_spreadsheet_csv(export.rows, SAP_NOTIFICATION_COLUMNS),
+            file_name=f"hydraulikdoc-sap-pm-meldungen-{datetime.now(UTC):%Y%m%d-%H%M}.csv",
+            mime="text/csv",
+            key="sap-export",
+        )
+        if exported:
+            repository.emit_audit(
+                principal,
+                action="incident.sap_export.generated",
+                outcome=AuditOutcome.SUCCESS,
+                resource_type="incident",
+                metadata={"source_count": len(export.rows), "failure_count": len(export.missing_reference)},
+            )
 
 
 def _incidents(principal: UserPrincipal, repository: EnterpriseRepository) -> None:
@@ -915,6 +1167,8 @@ def _incidents(principal: UserPrincipal, repository: EnterpriseRepository) -> No
         width="stretch",
         hide_index=True,
     )
+    if principal.can("incident:write"):
+        _render_sap_handover(principal, repository, visible)
     st.subheader("Incident bearbeiten")
     by_id = {item.incident_id: item for item in visible}
     selected_id = st.selectbox(
@@ -1097,8 +1351,8 @@ def run() -> None:
         st.error(f"Persistenz nicht verfügbar. Referenz {public_error_code(error)}")
         st.stop()
 
-    _render_shell(principal, settings)
     selected = _sidebar(principal, settings)
+    _render_shell(principal, settings, selected)
     try:
         if selected == "Leitstand":
             _overview(principal, repository, settings)

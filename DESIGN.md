@@ -84,7 +84,7 @@ Use the system sans-serif stack to avoid third-party font requests and reduce la
 
 ## Layout
 
-The working canvas is capped at 1440 px. The hero uses a two-column evidence layout on desktop and collapses to one column below 1100 px so that tablet layouts remain readable beside responsive navigation. Primary data tables remain horizontally scrollable instead of truncating safety-relevant fields. At 360 px, forms become single-column and retain 44 px controls. At 768, 1280 and 1440 px, hierarchy and navigation remain unchanged.
+The working canvas is capped at 1440 px. The hero appears only on the Leitstand; working pages show a one-line context bar (tenant, role, release state) so the task leads. The hero uses a two-column evidence layout on desktop and collapses to one column below 1100 px with a reduced display size, so that the worklist stays near the top on tablets. Primary data tables remain horizontally scrollable instead of truncating safety-relevant fields. At 360 px, forms become single-column and retain 44 px controls. At 768, 1280 and 1440 px, hierarchy and navigation remain unchanged.
 
 ## Elevation & Depth
 

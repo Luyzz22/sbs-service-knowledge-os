@@ -30,6 +30,85 @@
 
 [data-testid="stSidebar"] button {
   min-height: 44px;
+  background: transparent;
+  border: 1px solid rgba(238, 243, 246, 0.55);
+}
+
+[data-testid="stSidebar"] button:hover {
+  background: rgba(238, 243, 246, 0.12);
+  border-color: #eef3f6;
+}
+
+.hd-context {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.5rem;
+  margin-bottom: 1rem;
+  padding: 0.6rem 1rem;
+  background: var(--hd-surface);
+  border: 1px solid var(--hd-border);
+  border-left: 3px solid var(--hd-accent);
+  border-radius: 8px;
+  font-size: 0.85rem;
+}
+
+.hd-context strong {
+  color: var(--hd-muted);
+  font-weight: 600;
+}
+
+.hd-context code {
+  color: var(--hd-ink);
+  font-size: 0.78rem;
+}
+
+.hd-checklist {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr));
+  box-sizing: border-box;
+  max-width: 100%;
+  margin: 0.5rem 0 1rem;
+  padding: 0;
+  overflow: hidden;
+  list-style: none;
+  background: var(--hd-surface);
+  border: 1px solid var(--hd-border);
+  border-radius: 16px;
+}
+
+.hd-checklist li {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-start;
+  margin: 0 -1px -1px 0;
+  padding: 0.75rem 1rem;
+  border-right: 1px solid var(--hd-border);
+  border-bottom: 1px solid var(--hd-border);
+}
+
+.hd-checklist .hd-status {
+  flex: 0 0 auto;
+  min-width: 4.75rem;
+  text-align: center;
+}
+
+.hd-checklist div {
+  min-width: 0;
+  overflow-wrap: break-word;
+}
+
+.hd-checklist strong,
+.hd-checklist small {
+  display: block;
+}
+
+.hd-status-open {
+  background: var(--hd-canvas);
+  color: var(--hd-muted);
+}
+
+.hd-checklist small {
+  color: var(--hd-muted);
 }
 
 .hd-hero {
@@ -60,6 +139,16 @@
 .hd-proof {
   padding-left: 1rem;
   border-left: 3px solid var(--hd-accent);
+}
+
+.hd-proof {
+  display: grid;
+  gap: 1rem;
+}
+
+.hd-proof strong {
+  display: block;
+  margin-bottom: 0.2rem;
 }
 
 .hd-proof code {
@@ -187,27 +276,21 @@
 @media (max-width: 1100px) {
   .hd-hero {
     grid-template-columns: 1fr;
+    gap: 1rem;
     padding: 1.35rem;
   }
 
-  .hd-state {
-    grid-template-columns: 1fr;
+  /* Single-column hero must not push the worklist below the fold on tablets. */
+  .hd-hero h1 {
+    font-size: clamp(1.9rem, 4vw, 2.4rem);
+  }
+
+  .hd-proof {
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   }
 
   .hd-state > div {
-    border-right: 0;
-    border-bottom: 1px solid var(--hd-border);
-  }
-
-  /* Status counters stay on one row on tablets; declared after .hd-state to win the cascade. */
-  .hd-state-wide {
-    grid-template-columns: repeat(5, minmax(0, 1fr));
-  }
-
-  .hd-state-wide > div {
     padding: 0.75rem 0.6rem;
-    border-right: 1px solid var(--hd-border);
-    border-bottom: 0;
   }
 
   .hd-state-wide strong {
@@ -220,12 +303,13 @@
 }
 
 @media (max-width: 560px) {
+  .hd-state,
   .hd-state-wide,
   .hd-incident {
     grid-template-columns: 1fr;
   }
 
-  .hd-state-wide > div {
+  .hd-state > div {
     border-right: 0;
     border-bottom: 1px solid var(--hd-border);
   }
