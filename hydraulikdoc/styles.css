@@ -39,6 +39,23 @@
   border-color: #eef3f6;
 }
 
+.hd-demo {
+  margin-bottom: 0.75rem;
+  padding: 0.6rem 1rem;
+  background: #fffaf0;
+  border: 2px dashed #b7791f;
+  border-radius: 8px;
+  color: var(--hd-ink);
+  font-size: 0.9rem;
+}
+
+.hd-demo strong {
+  margin-right: 0.5rem;
+  color: #7a4f12;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
 .hd-context {
   display: flex;
   flex-wrap: wrap;

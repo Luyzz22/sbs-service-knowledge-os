@@ -32,6 +32,7 @@ from .condition_monitoring import (
     assess_condition,
 )
 from .config import AppSettings, AuthMode, ConfigurationError, get_settings
+from .demo import DemoRAGService, demo_seed_blockers, demo_sensor_csv, seed_demo_tenant, tenant_has_data
 from .governance import GroundedAnswer, ReviewStatus, UseCase, evaluate_use_case
 from .interop import (
     ASSET_ID_PATTERN,
@@ -101,6 +102,13 @@ ANALYSIS_HELP = {
     "root_cause": "Technische Ursache und, falls bekannt, warum sie nicht früher entdeckt wurde.",
     "corrective_action": "Dauerhafte Abstellung: Reparatur, Tausch, Einstellung, Prozessänderung.",
     "effectiveness_check": "Womit ist belegt, dass die Maßnahme wirkt? Messreihe, Folgeprobe, Zeitraum.",
+}
+DOCUMENT_STATUS_LABELS = {"processing": "wird verarbeitet", "ready": "bereit", "failed": "fehlgeschlagen"}
+REVIEW_STATUS_LABELS = {
+    "accepted": "Geprüft und akzeptiert",
+    "needs_expert": "Experte erforderlich",
+    "rejected": "Abgelehnt",
+    "draft": "Entwurf",
 }
 ROLE_LABELS = {"viewer": "Leser", "technician": "Techniker", "supervisor": "Supervisor", "admin": "Admin"}
 CRITICAL_SEVERITIES = frozenset({"critical", "p1"})
@@ -205,10 +213,10 @@ def _enforce_session(principal: UserPrincipal, settings: AppSettings) -> bool:
     return True
 
 
-def _rag(settings: AppSettings, repository: EnterpriseRepository) -> AzureRAGService:
+def _rag(settings: AppSettings, repository: EnterpriseRepository) -> AzureRAGService | DemoRAGService:
     existing = st.session_state.get("azure_rag")
     if existing is None:
-        existing = AzureRAGService(settings, repository)
+        existing = DemoRAGService(settings, repository) if settings.demo_mode else AzureRAGService(settings, repository)
         st.session_state.azure_rag = existing
     return existing
 
@@ -286,6 +294,13 @@ def _render_shell(principal: UserPrincipal, settings: AppSettings, page: str) ->
     release = html.escape(settings.release_state)
     tenant = html.escape(principal.tenant_id)
     role = html.escape(principal.role)
+    if settings.demo_mode:
+        st.markdown(
+            '<div class="hd-demo" role="status"><strong>Demo-Modus</strong> Alle Daten sind synthetisch. '
+            "Antworten werden ohne Sprachmodell aus Demodokumenten extrahiert. "
+            "Nicht für reale Instandhaltungsentscheidungen verwenden.</div>",
+            unsafe_allow_html=True,
+        )
     if page != "Leitstand":
         # Working pages lead with the task; the context stays visible in one compact line.
         st.markdown(
@@ -333,8 +348,14 @@ def _sidebar(principal: UserPrincipal, settings: AppSettings) -> str:
         st.divider()
         selected = st.radio("Arbeitsbereich", NAV_PAGES, key="nav", label_visibility="collapsed")
         st.divider()
-        st.caption(f"KI: {'Azure konfiguriert' if settings.azure_ready else 'nicht konfiguriert'}")
-        st.caption(f"Region: {settings.azure_region or 'nicht attestiert'}")
+        ai_state = (
+            "Demo, kein Modellaufruf"
+            if settings.demo_mode
+            else ("Azure konfiguriert" if settings.azure_ready else "nicht konfiguriert")
+        )
+        st.caption(f"KI: {ai_state}")
+        region = "lokal, keine Datenübertragung" if settings.demo_mode else settings.azure_region or "nicht attestiert"
+        st.caption(f"Region: {region}")
         if settings.auth_mode is AuthMode.LOCAL and st.button("Abmelden", width="stretch"):
             st.session_state.clear()
             st.rerun()
@@ -362,6 +383,8 @@ def _overview(principal: UserPrincipal, repository: EnterpriseRepository, settin
         """,
         unsafe_allow_html=True,
     )
+    if settings.demo_mode:
+        _render_demo_seed(principal, repository)
     st.subheader("Handlungsbedarf")
     critical = [item for item in open_incidents if item.severity in CRITICAL_SEVERITIES]
     unacknowledged = [item for item in incidents if item.status == "new"]
@@ -405,6 +428,28 @@ def _overview(principal: UserPrincipal, repository: EnterpriseRepository, settin
     st.warning("Keine autonome Maschinensteuerung. Keine automatische Sicherheitsfreigabe.")
     if settings.release_state != "configured":
         st.info("Produktionsfreigabe bleibt offen, bis Deployment-Evidenz und Compliance-Gate bestätigt sind.")
+
+
+def _render_demo_seed(principal: UserPrincipal, repository: EnterpriseRepository) -> None:
+    if notice := st.session_state.pop("demo_notice", None):
+        st.success(notice)
+    if tenant_has_data(principal, repository):
+        return
+    blockers = demo_seed_blockers(principal, repository)
+    st.subheader("Demo starten")
+    st.write(
+        "Lädt vier fiktive Anlagen mit SAP-Referenzen, zwei synthetische Handbücher und vier Incidents in "
+        "unterschiedlichen Workflow-Zuständen: kritisch und neu, 8D in Bearbeitung, wartet auf Abnahme, abgeschlossen."
+    )
+    if blockers:
+        st.caption(blockers[0])
+        return
+    if st.button("Demodaten laden", type="primary", key="demo-seed"):
+        result = seed_demo_tenant(principal, repository)
+        st.session_state.demo_notice = (
+            f"Demodaten geladen: {result.assets} Assets, {result.documents} Dokumente, {result.incidents} Incidents."
+        )
+        st.rerun()
 
 
 def _render_setup_progress(
@@ -688,7 +733,7 @@ def _render_answer(
             st.session_state[f"review:{answer.answer_id}"] = ReviewStatus.REJECTED.value
             st.rerun()
     if review:
-        st.info(f"Dokumentierter Reviewstatus: {review}")
+        st.info(f"Dokumentierter Reviewstatus: {REVIEW_STATUS_LABELS.get(review, review)}")
     persisted_review = repository.answer_review_status(principal, answer.answer_id)
     if persisted_review is ReviewStatus.ACCEPTED and principal.can("analysis:export"):
         payload = {
@@ -717,13 +762,18 @@ def _render_answer(
 
 def _knowledge(principal: UserPrincipal, repository: EnterpriseRepository, settings: AppSettings) -> None:
     st.header("Wissensbasis")
-    st.caption("Azure Document Intelligence, tenant-gefilterte Hybrid-Suche und quellengebundene Antworten.")
+    if settings.demo_mode:
+        st.caption("Demo-Modus: synthetische Handbücher und extraktive Antworten ohne Modellaufruf.")
+    else:
+        st.caption("Azure Document Intelligence, tenant-gefilterte Hybrid-Suche und quellengebundene Antworten.")
     documents = repository.list_documents(principal)
     if documents:
         for document in documents:
-            columns = st.columns([5, 2, 1])
+            columns = st.columns([5, 2, 2])
             columns[0].write(document.display_name)
-            columns[1].caption(f"{document.page_count} Seiten · {document.status}")
+            columns[1].caption(
+                f"{document.page_count} Seiten · {DOCUMENT_STATUS_LABELS.get(document.status, document.status)}"
+            )
             if principal.can("knowledge:write") and columns[2].button("Löschen", key=f"delete:{document.document_id}"):
                 try:
                     _rag(settings, repository).delete_document(principal, document.document_id)
@@ -746,7 +796,9 @@ def _knowledge(principal: UserPrincipal, repository: EnterpriseRepository, setti
                 st.error(str(error))
             except Exception as error:
                 st.error(f"Indexierung fehlgeschlagen. Referenz {public_error_code(error)}")
-        if not settings.azure_ready:
+        if settings.demo_mode:
+            st.caption("Upload ist im Demo-Modus gesperrt; es stehen nur synthetische Dokumente zur Verfügung.")
+        elif not settings.azure_ready:
             st.caption("Upload ist gesperrt, bis alle Azure-Endpunkte und Deployments konfiguriert sind.")
 
     st.divider()
@@ -771,7 +823,12 @@ def _knowledge(principal: UserPrincipal, repository: EnterpriseRepository, setti
         max_chars=settings.max_question_chars,
         placeholder="Welcher Betriebsdruck gilt für die konfigurierte Pumpenbaureihe und welche Prüfhinweise nennt das Handbuch?",
     )
-    disabled = not accepted or not settings.azure_ready or not decision.allowed
+    if settings.demo_mode:
+        st.caption(
+            "Beispielfragen: Welcher Betriebsdruck gilt für HA-250? · Wie hoch darf der Wassergehalt sein? · "
+            "Was ist bei hoher Partikelzahl zu tun?"
+        )
+    disabled = not accepted or not settings.ai_ready or not decision.allowed
     if st.button("KI-Entwurf erzeugen", type="primary", disabled=disabled):
         try:
             with st.spinner("Hybrid Retrieval und Evidenzprüfung laufen …"):
@@ -838,7 +895,7 @@ def _parse_sensor_csv(content: bytes) -> tuple[SensorReading, ...]:
     return tuple(sorted(readings, key=lambda item: item.timestamp))
 
 
-def _condition_monitoring(principal: UserPrincipal, repository: EnterpriseRepository) -> None:
+def _condition_monitoring(principal: UserPrincipal, repository: EnterpriseRepository, settings: AppSettings) -> None:
     st.header("Condition Monitoring")
     st.caption(
         "Deterministische Grenzwertprüfung für Druck, Temperatur, Volumenstrom und Fluidzustand. Grenzwerte sind anlagenbezogen zu bestätigen."
@@ -859,13 +916,18 @@ def _condition_monitoring(principal: UserPrincipal, repository: EnterpriseReposi
         type=["csv"],
         help="Spalten: timestamp, pressure_bar, temperature_c, flow_l_min, particle_count, water_content_pct",
     )
+    use_sample = settings.demo_mode and st.toggle(
+        "Synthetische Beispiel-Messreihe verwenden (48 h, steigender Druck und Temperatur)",
+        key="condition-demo-sample",
+    )
     limits_confirmed = st.checkbox(
         "Ich bestätige, dass diese Betriebsgrenzen für das ausgewählte Asset fachlich freigegeben sind.",
         key="condition-limits-confirmed",
     )
-    if uploaded and st.button("Messreihe prüfen", type="primary", disabled=not limits_confirmed):
+    if (uploaded or use_sample) and st.button("Messreihe prüfen", type="primary", disabled=not limits_confirmed):
         try:
-            readings = _parse_sensor_csv(uploaded.getvalue())
+            content = demo_sensor_csv() if use_sample or uploaded is None else uploaded.getvalue()
+            readings = _parse_sensor_csv(content)
             envelope = OperatingEnvelope(
                 pressure_warning_bar=pressure_warning,
                 pressure_critical_bar=pressure_critical,
@@ -893,7 +955,12 @@ def _condition_monitoring(principal: UserPrincipal, repository: EnterpriseReposi
     assessment: ConditionAssessment | None = st.session_state.get("condition_assessment")
     if not assessment:
         return
-    st.metric("Zustand", assessment.severity.value.upper(), f"{assessment.sample_count} Messpunkte")
+    st.metric(
+        "Zustand",
+        INCIDENT_SEVERITY_LABELS.get(assessment.severity.value, assessment.severity.value),
+        f"{assessment.sample_count} Messpunkte",
+        delta_color="off",
+    )
     if assessment.requires_shutdown_assessment:
         st.error("Kritische Prüfgrenze erreicht. Qualifizierte Abschalt- und Sicherheitsbewertung erforderlich.")
     if assessment.signals:
@@ -901,7 +968,7 @@ def _condition_monitoring(principal: UserPrincipal, repository: EnterpriseReposi
             [
                 {
                     "Code": signal.code,
-                    "Stufe": signal.severity.value,
+                    "Stufe": INCIDENT_SEVERITY_LABELS.get(signal.severity.value, signal.severity.value),
                     "Hinweis": signal.message,
                     "Wert": signal.value,
                     "Grenze": signal.threshold,
@@ -1320,8 +1387,12 @@ def _governance(principal: UserPrincipal, repository: EnterpriseRepository, sett
         ),
         (
             "KI-Pfad",
-            "konfiguriert" if settings.azure_ready else "gesperrt",
-            "Azure OpenAI, Document Intelligence, AI Search",
+            "Demo, kein Modellaufruf"
+            if settings.demo_mode
+            else ("konfiguriert" if settings.azure_ready else "gesperrt"),
+            "Extraktion aus synthetischen Demodokumenten"
+            if settings.demo_mode
+            else "Azure OpenAI, Document Intelligence, AI Search",
         ),
         (
             "Region",
@@ -1432,6 +1503,7 @@ def _system(principal: UserPrincipal, settings: AppSettings) -> None:
             "persistence": settings.persistence_backend.value,
             "ai_backend": settings.ai_backend.value,
             "azure_ready": settings.azure_ready,
+            "demo_mode": settings.demo_mode,
             "azure_region": settings.azure_region,
             "managed_identity": settings.azure_use_managed_identity,
             "search_semantic_ranker": settings.azure_search_semantic,
@@ -1481,7 +1553,7 @@ def run() -> None:
         elif selected == "Wissensbasis":
             _knowledge(principal, repository, settings)
         elif selected == "Condition Monitoring":
-            _condition_monitoring(principal, repository)
+            _condition_monitoring(principal, repository, settings)
         elif selected == "Fluid":
             _fluid(principal, repository)
         elif selected == "Incidents":

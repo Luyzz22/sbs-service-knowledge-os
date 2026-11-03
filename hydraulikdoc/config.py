@@ -30,6 +30,8 @@ class AuthMode(StrEnum):
 class AIBackend(StrEnum):
     DISABLED = "disabled"
     AZURE = "azure"
+    # Extractive answers over synthetic demo documents; no model call, never allowed in production.
+    DEMO = "demo"
 
 
 class PersistenceBackend(StrEnum):
@@ -173,7 +175,18 @@ class AppSettings:
         )
 
     @property
+    def demo_mode(self) -> bool:
+        return self.ai_backend is AIBackend.DEMO
+
+    @property
+    def ai_ready(self) -> bool:
+        """True when a question can be answered: by Azure, or by the extractive demo backend."""
+        return self.azure_ready or self.demo_mode
+
+    @property
     def release_state(self) -> str:
+        if self.demo_mode:
+            return "demo"
         if (
             self.is_production
             and self.compliance_release_approved
@@ -240,6 +253,11 @@ class AppSettings:
                 errors.append("production requires REQUIRE_HUMAN_REVIEW=true")
             if self.auto_migrate_database:
                 errors.append("production forbids AUTO_MIGRATE_DATABASE; use the privileged bootstrap job")
+
+        if self.demo_mode and self.is_production:
+            errors.append("AI_BACKEND=demo is not allowed in production")
+        if self.demo_mode and self.auth_mode is AuthMode.ENTRA_PROXY:
+            errors.append("AI_BACKEND=demo is limited to local authentication and must not reach Entra users")
 
         if self.ai_backend is AIBackend.AZURE:
             for name, value in (

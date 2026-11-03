@@ -31,7 +31,7 @@ Priorität: **P1** blockiert Pilot oder Security-Freigabe, **P2** senkt Akzeptan
 | U4 | Bedienung | Englische Rohwerte (`safety_critical`, `active`) in Fachtabellen | P2 | umgesetzt im Asset Register |
 | D1 | Werk | Incidents ohne Ursache, Sofort- und Abstellmaßnahme (8D/A3) | P2 | umgesetzt: 8D-light mit Pflichtfeldern vor „Behoben“ und Abnahme |
 | D2 | Werk | Statusverlauf je Incident nur im Auditlog, nicht in der Fachansicht | P2 | umgesetzt: append-only Verlauf je Incident mit Rolle statt Person |
-| M1 | Vertrieb | Ohne Azure ist der KI-Pfad gesperrt; es fehlt ein Demo-Mandant mit synthetischen Daten | P2 | Roadmap |
+| M1 | Vertrieb | Ohne Azure ist der KI-Pfad gesperrt; es fehlt ein Demo-Mandant mit synthetischen Daten | P2 | umgesetzt: `AI_BACKEND=demo` mit Seed, extraktiven Antworten und Beispiel-Messreihe |
 | U5 | Bedienung | Kein formaler Barrierefreiheitsnachweis (WCAG 2.2 AA / BITV 2.0) | P2 | externes Gate |
 | U6 | Bedienung | Nur Deutsch; internationale Werke benötigen DE/EN | P3 | Roadmap |
 | S4 | ERP | Kein Live-Connector (S/4HANA OData, SAP BTP Integration Suite) | P3 | Roadmap, benötigt Bedrohungsmodell und Datenvertrag je Kunde |
@@ -53,6 +53,13 @@ Priorität: **P1** blockiert Pilot oder Security-Freigabe, **P2** senkt Akzeptan
 - **Mitbestimmung:** Die Oberfläche weist darauf hin, Ursachen technisch zu beschreiben und keine Personennamen oder Schuldzuweisungen einzutragen. Ob Freitextfelder einer Betriebsvereinbarung bedürfen, bleibt eine instanzbezogene Bewertung.
 - **SAP-Übergabe:** Der Langtext der Meldung enthält die dokumentierten 8D-Inhalte.
 
+## Umgesetzt: Demo-Mandant
+
+- **Ein Klick zur vollständigen Geschichte:** Im leeren Mandanten lädt ein Supervisor vier fiktive Anlagen (eine bewusst ohne SAP-Referenz), zwei synthetische Handbücher und vier Incidents, die jeden Workflow-Zustand zeigen, inklusive gesperrter Abnahme mangels D7.
+- **Keine Scheinintelligenz:** Der Demo-Pfad erzeugt keinen Text, sondern zitiert Sätze unverändert mit Seitenbeleg. Die Auswahl deckt Teilfragen einzeln ab und verwirft schwache Stichworttreffer. Die Antwort sagt ausdrücklich „Demo-Antwort ohne Sprachmodell“, die Provenienz nennt keinen Modellanbieter.
+- **Gleiche Governance:** Verwendungszweck-Sperren, Zitatprüfung, KI-Nutzerhinweis, Review, Vier-Augen-Prinzip und Export laufen unverändert.
+- **Nicht verwechselbar:** Banner auf jeder Seite, Präfix `DEMO` in Titeln, Dokumenten und SAP-Kurztexten, Releasezustand `demo`, Region „lokal“. Die Konfiguration verweigert `demo` in Produktion und hinter Entra ID; Demodaten werden nie in einen Mandanten mit Daten gemischt.
+
 ## Bewusste Grenzen
 
 - Die SAP-Übergabe ist eine Datei, keine Schnittstelle. Feldnamen orientieren sich an den klassischen SAP-PM-Feldern der Meldung; Upload-Weg (z. B. LSMW, BTP-Flow), Meldungsart, Prioritätsschema und Pflichtfelder legt das SAP-Team des Kunden fest.
@@ -62,7 +69,7 @@ Priorität: **P1** blockiert Pilot oder Security-Freigabe, **P2** senkt Akzeptan
 ## Empfohlene nächste Schritte
 
 1. ~~8D-light im Incident~~ (D1, D2): umgesetzt.
-2. **Demo-Mandant** (M1): synthetische Assets, Messreihen, Dokumentauszüge und Incidents für Vertriebsdemos ohne Kundendaten und ohne Azure-Kosten, klar als Demo gekennzeichnet.
+2. ~~Demo-Mandant~~ (M1): umgesetzt.
 3. **Barrierefreiheitsprüfung** (U5): Tastatur- und Screenreader-Test der Kernabläufe, Kontrastmessung, Ergebnis als Evidenz in der Kontrollmatrix.
 4. **DE/EN** (U6): Textkatalog statt Inline-Strings, Sprachwahl je Benutzer.
 5. **Live-Connector-Pilot** (S4) erst nach Datenvertrag und Bedrohungsmodell mit einem konkreten Kunden.
