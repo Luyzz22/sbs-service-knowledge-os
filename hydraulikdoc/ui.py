@@ -510,7 +510,7 @@ def _render_setup_progress(
 
 
 def _assets(principal: UserPrincipal, repository: EnterpriseRepository) -> None:
-    st.header("Asset Register")
+    st.title("Asset Register")
     st.caption("OEM-neutrale Anlagen- und Komponentenreferenz für Dokumente, Messwerte und Incidents.")
     if notice := st.session_state.pop("asset_import_notice", None):
         st.success(notice)
@@ -761,7 +761,7 @@ def _render_answer(
 
 
 def _knowledge(principal: UserPrincipal, repository: EnterpriseRepository, settings: AppSettings) -> None:
-    st.header("Wissensbasis")
+    st.title("Wissensbasis")
     if settings.demo_mode:
         st.caption("Demo-Modus: synthetische Handbücher und extraktive Antworten ohne Modellaufruf.")
     else:
@@ -896,7 +896,7 @@ def _parse_sensor_csv(content: bytes) -> tuple[SensorReading, ...]:
 
 
 def _condition_monitoring(principal: UserPrincipal, repository: EnterpriseRepository, settings: AppSettings) -> None:
-    st.header("Condition Monitoring")
+    st.title("Condition Monitoring")
     st.caption(
         "Deterministische Grenzwertprüfung für Druck, Temperatur, Volumenstrom und Fluidzustand. Grenzwerte sind anlagenbezogen zu bestätigen."
     )
@@ -994,7 +994,7 @@ def _condition_monitoring(principal: UserPrincipal, repository: EnterpriseReposi
 
 
 def _fluid(principal: UserPrincipal, repository: EnterpriseRepository) -> None:
-    st.header("Fluid & Service Advisor")
+    st.title("Fluid & Service Advisor")
     st.caption("Regelbasierte Vorbewertung. ISO-/Herstellergrenzen müssen je Anlage freigegeben werden.")
     assets = repository.list_assets(principal)
     asset_id = (
@@ -1231,7 +1231,7 @@ def _incident_history(principal: UserPrincipal, repository: EnterpriseRepository
             text = "Analyse und Maßnahmen aktualisiert"
         actor = ROLE_LABELS.get(event.actor_role, event.actor_role) + (" (Sie)" if event.is_own else "")
         entries.append(
-            f"<li><time>{event.occurred_at:%d.%m.%Y %H:%M} UTC</time>"
+            f'<li><time datetime="{event.occurred_at.isoformat()}">{event.occurred_at:%d.%m.%Y %H:%M} UTC</time>'
             f"<span>{html.escape(text)}</span><small>{html.escape(actor)}</small></li>"
         )
     st.markdown(f'<ol class="hd-timeline">{"".join(entries)}</ol>', unsafe_allow_html=True)
@@ -1281,7 +1281,7 @@ def _render_sap_handover(
 
 
 def _incidents(principal: UserPrincipal, repository: EnterpriseRepository) -> None:
-    st.header("Incident Workflow")
+    st.title("Incident Workflow")
     st.caption(
         "Technische Auffälligkeiten werden nachvollziehbar erfasst; Meldepflichten bleiben organisatorisch zu bewerten."
     )
@@ -1368,7 +1368,7 @@ def _incidents(principal: UserPrincipal, repository: EnterpriseRepository) -> No
 
 
 def _governance(principal: UserPrincipal, repository: EnterpriseRepository, settings: AppSettings) -> None:
-    st.header("Governance & Trust")
+    st.title("Governance & Trust")
     st.caption("Technisch nachweisbare Kontrollen und klar benannte externe Freigaben.")
     _render_ai_acceptance(principal, repository, settings)
     _render_privacy_notice(principal, repository, settings)
@@ -1491,7 +1491,7 @@ def _governance(principal: UserPrincipal, repository: EnterpriseRepository, sett
 
 
 def _system(principal: UserPrincipal, settings: AppSettings) -> None:
-    st.header("System Evidence")
+    st.title("System Evidence")
     st.caption("Keine Secrets und keine Rohinhalte werden in dieser Ansicht ausgegeben.")
     policy = RetentionPolicy.from_environment()
     st.json(

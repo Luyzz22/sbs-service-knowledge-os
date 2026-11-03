@@ -32,7 +32,7 @@ Priorität: **P1** blockiert Pilot oder Security-Freigabe, **P2** senkt Akzeptan
 | D1 | Werk | Incidents ohne Ursache, Sofort- und Abstellmaßnahme (8D/A3) | P2 | umgesetzt: 8D-light mit Pflichtfeldern vor „Behoben“ und Abnahme |
 | D2 | Werk | Statusverlauf je Incident nur im Auditlog, nicht in der Fachansicht | P2 | umgesetzt: append-only Verlauf je Incident mit Rolle statt Person |
 | M1 | Vertrieb | Ohne Azure ist der KI-Pfad gesperrt; es fehlt ein Demo-Mandant mit synthetischen Daten | P2 | umgesetzt: `AI_BACKEND=demo` mit Seed, extraktiven Antworten und Beispiel-Messreihe |
-| U5 | Bedienung | Kein formaler Barrierefreiheitsnachweis (WCAG 2.2 AA / BITV 2.0) | P2 | externes Gate |
+| U5 | Bedienung | Kein formaler Barrierefreiheitsnachweis (WCAG 2.2 AA / BITV 2.0) | P2 | technischer Teil umgesetzt (Kontrast-, Struktur- und Sprachprüfung); manueller Prüfbericht bleibt externes Gate |
 | U6 | Bedienung | Nur Deutsch; internationale Werke benötigen DE/EN | P3 | Roadmap |
 | S4 | ERP | Kein Live-Connector (S/4HANA OData, SAP BTP Integration Suite) | P3 | Roadmap, benötigt Bedrohungsmodell und Datenvertrag je Kunde |
 | S5 | ERP | Keine automatische Benutzer-/Gruppenprovisionierung (SCIM aus Entra ID) | P3 | Roadmap |
@@ -70,6 +70,6 @@ Priorität: **P1** blockiert Pilot oder Security-Freigabe, **P2** senkt Akzeptan
 
 1. ~~8D-light im Incident~~ (D1, D2): umgesetzt.
 2. ~~Demo-Mandant~~ (M1): umgesetzt.
-3. **Barrierefreiheitsprüfung** (U5): Tastatur- und Screenreader-Test der Kernabläufe, Kontrastmessung, Ergebnis als Evidenz in der Kontrollmatrix.
+3. **Barrierefreiheit** (U5): automatisierte Prüfungen umgesetzt (siehe Kontrollmatrix); offen sind der manuelle Tastatur- und Screenreader-Test und ein Prüfbericht.
 4. **DE/EN** (U6): Textkatalog statt Inline-Strings, Sprachwahl je Benutzer.
 5. **Live-Connector-Pilot** (S4) erst nach Datenvertrag und Bedrohungsmodell mit einem konkreten Kunden.

@@ -63,6 +63,8 @@ set +a
 streamlit run app.py
 ```
 
+Das Container-Image setzt die Dokumentsprache auf Deutsch (WCAG 3.1.1). Lokal lässt sich das mit `python ops/scripts/set-document-language.py de` nachstellen.
+
 Der lokale Default hat `AI_BACKEND=disabled` und `PERSISTENCE_BACKEND=memory`. Er sendet keine Dokumente an externe KI-Dienste.
 
 ### Demo-Mandant für Vorführungen
