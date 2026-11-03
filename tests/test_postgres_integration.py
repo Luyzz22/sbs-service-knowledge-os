@@ -157,6 +157,35 @@ class PostgresSecurityIntegrationTests(unittest.TestCase):
                     ],
                 )
 
+    def test_runtime_role_writes_hash_chained_audit_events(self) -> None:
+        from compliance.audit import AuditOutcome
+        from hydraulikdoc.auth import ROLE_PERMISSIONS, UserPrincipal
+        from hydraulikdoc.config import AppSettings
+        from hydraulikdoc.repository import PostgresRepository
+
+        settings = AppSettings.from_environment(
+            {
+                "APP_ENV": "test",
+                "PERSISTENCE_BACKEND": "postgres",
+                "AUDIT_HMAC_KEY": "integration-audit-key-" + "x" * 16,
+                "DATABASE_URL": self.app_dsn,
+            }
+        )
+        repository = PostgresRepository(settings)
+        principal = UserPrincipal(
+            "auditor", f"{self.tenant_a}-audit", "Auditor", "supervisor", permissions=ROLE_PERMISSIONS["supervisor"]
+        )
+        for action in ("integration.audit.first", "integration.audit.second"):
+            repository.emit_audit(principal, action=action, outcome=AuditOutcome.SUCCESS)
+        with self.psycopg.connect(self.app_dsn) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT set_config('app.tenant_id', %s, true)", (principal.tenant_id,))
+                cursor.execute("SELECT previous_hash, event_hash FROM audit_events ORDER BY sequence_id")
+                rows = cursor.fetchall()
+        self.assertEqual(len(rows), 2)
+        self.assertIsNone(rows[0][0])
+        self.assertEqual(rows[1][0], rows[0][1])
+
 
 if __name__ == "__main__":
     unittest.main()

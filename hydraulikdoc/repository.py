@@ -259,6 +259,12 @@ def _audit_chain_key(secret: str) -> bytes:
     ).digest()
 
 
+def _audit_lock_key(tenant_id: str) -> int:
+    """Stable signed 64-bit advisory lock key for one tenant's audit chain."""
+    digest = hashlib.sha256(b"hydraulikdoc-audit-chain:" + tenant_id.encode("utf-8")).digest()
+    return int.from_bytes(digest[:8], "big", signed=True)
+
+
 def _event_hash(key: bytes, previous_hash: str | None, event: AuditEvent) -> str:
     material = {
         "previous_hash": previous_hash,
@@ -1232,7 +1238,9 @@ class PostgresRepository:
                     "INSERT INTO tenants (tenant_id, display_name) VALUES (%s,%s) ON CONFLICT DO NOTHING",
                     (principal.tenant_id, principal.tenant_id),
                 )
-                cursor.execute("SELECT tenant_id FROM tenants WHERE tenant_id=%s FOR UPDATE", (principal.tenant_id,))
+                # Serialise the per-tenant hash chain without a row lock: FOR UPDATE would need UPDATE rights on
+                # tenants, which the runtime and lifecycle roles deliberately do not have.
+                cursor.execute("SELECT pg_advisory_xact_lock(%s)", (_audit_lock_key(principal.tenant_id),))
                 cursor.execute("SELECT event_hash FROM audit_events ORDER BY sequence_id DESC LIMIT 1")
                 previous_row = cursor.fetchone()
                 previous = previous_row[0] if previous_row else None
