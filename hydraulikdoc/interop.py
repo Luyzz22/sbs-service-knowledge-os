@@ -12,6 +12,7 @@ import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 
+from .i18n import Message, msg
 from .repository import AssetRecord, IncidentRecord
 
 MAX_ASSET_IMPORT_BYTES = 2 * 1024 * 1024
@@ -94,24 +95,24 @@ def _delimiter(header_line: str) -> str:
 def parse_asset_csv(content: bytes) -> tuple[AssetImportRow, ...]:
     """Validate an asset master file completely; any invalid row rejects the whole import."""
     if len(content) > MAX_ASSET_IMPORT_BYTES:
-        raise ValueError("CSV überschreitet 2 MB")
+        raise ValueError(msg("CSV überschreitet 2 MB"))
     try:
         text = content.decode("utf-8-sig")
     except UnicodeDecodeError as error:
-        raise ValueError("CSV muss UTF-8-kodiert sein") from error
+        raise ValueError(msg("CSV muss UTF-8-kodiert sein")) from error
     first_line = text.splitlines()[0] if text else ""
     reader = csv.DictReader(io.StringIO(text), delimiter=_delimiter(first_line))
     fieldnames = {name.strip() for name in reader.fieldnames or ()}
     if not _REQUIRED_IMPORT_COLUMNS.issubset(fieldnames):
-        raise ValueError("CSV benötigt die Spalten asset_id, name, site und criticality")
+        raise ValueError(msg("CSV benötigt die Spalten asset_id, name, site und criticality"))
     if not fieldnames.issubset(ASSET_IMPORT_COLUMNS):
-        raise ValueError("CSV enthält nicht freigegebene Spalten")
+        raise ValueError(msg("CSV enthält nicht freigegebene Spalten"))
     rows: list[AssetImportRow] = []
     seen: set[str] = set()
-    errors: list[str] = []
+    errors: list[Message] = []
     for line_number, raw in enumerate(reader, start=2):
         if len(rows) + len(errors) >= MAX_ASSET_IMPORT_ROWS:
-            raise ValueError(f"CSV darf höchstens {MAX_ASSET_IMPORT_ROWS} Assets enthalten")
+            raise ValueError(msg("CSV darf höchstens {limit} Assets enthalten", limit=MAX_ASSET_IMPORT_ROWS))
         row = {(key or "").strip(): (value or "").strip() for key, value in raw.items() if key is not None}
         if not any(row.values()):
             continue
@@ -120,17 +121,19 @@ def parse_asset_csv(content: bytes) -> tuple[AssetImportRow, ...]:
         functional_location = row.get("functional_location", "")
         equipment_number = row.get("equipment_number", "")
         if not ASSET_ID_PATTERN.fullmatch(asset_id):
-            errors.append(f"Zeile {line_number}: asset_id ungültig")
+            errors.append(msg("Zeile {line}: asset_id ungültig", line=line_number))
         elif asset_id in seen:
-            errors.append(f"Zeile {line_number}: asset_id doppelt")
+            errors.append(msg("Zeile {line}: asset_id doppelt", line=line_number))
         elif not row.get("name") or not row.get("site"):
-            errors.append(f"Zeile {line_number}: name und site sind erforderlich")
+            errors.append(msg("Zeile {line}: name und site sind erforderlich", line=line_number))
         elif criticality is None:
-            errors.append(f"Zeile {line_number}: criticality unbekannt")
+            errors.append(msg("Zeile {line}: criticality unbekannt", line=line_number))
         elif functional_location and not FUNCTIONAL_LOCATION_PATTERN.fullmatch(functional_location):
-            errors.append(f"Zeile {line_number}: functional_location ungültig (max. 40 Zeichen)")
+            errors.append(msg("Zeile {line}: functional_location ungültig (max. 40 Zeichen)", line=line_number))
         elif equipment_number and not EQUIPMENT_PATTERN.fullmatch(equipment_number):
-            errors.append(f"Zeile {line_number}: equipment_number ungültig (max. 18 alphanumerische Zeichen)")
+            errors.append(
+                msg("Zeile {line}: equipment_number ungültig (max. 18 alphanumerische Zeichen)", line=line_number)
+            )
         else:
             seen.add(asset_id)
             rows.append(
@@ -146,11 +149,17 @@ def parse_asset_csv(content: bytes) -> tuple[AssetImportRow, ...]:
                 )
             )
     if errors:
-        shown = "; ".join(errors[:5])
-        more = f" (+{len(errors) - 5} weitere)" if len(errors) > 5 else ""
-        raise ValueError(f"Import abgebrochen, keine Daten übernommen: {shown}{more}")
+        if len(errors) > 5:
+            raise ValueError(
+                msg(
+                    "Import abgebrochen, keine Daten übernommen: {details} (+{more} weitere)",
+                    details=errors[:5],
+                    more=len(errors) - 5,
+                )
+            )
+        raise ValueError(msg("Import abgebrochen, keine Daten übernommen: {details}", details=errors))
     if not rows:
-        raise ValueError("CSV enthält keine Assets")
+        raise ValueError(msg("CSV enthält keine Assets"))
     return tuple(rows)
 
 
@@ -174,7 +183,7 @@ def build_sap_notifications(
     notification_type: str,
 ) -> SapNotificationExport:
     if not NOTIFICATION_TYPE_PATTERN.fullmatch(notification_type):
-        raise ValueError("Meldungsart muss aus zwei Großbuchstaben oder Ziffern bestehen")
+        raise ValueError(msg("Meldungsart muss aus zwei Großbuchstaben oder Ziffern bestehen"))
     by_id = {asset.asset_id: asset for asset in assets}
     rows: list[Mapping[str, str]] = []
     missing: list[str] = []

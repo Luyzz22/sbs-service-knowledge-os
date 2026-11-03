@@ -39,6 +39,7 @@ HydraulikDoc ist die evidenzorientierte Arbeitsoberfläche zwischen technischer 
 | Implementiert | Incident-Workflow mit Rollenprüfung, Abnahme durch Supervisor und Schutz vor veralteten Statuswechseln | `hydraulikdoc/repository.py`, `hydraulikdoc/ui.py` |
 | Implementiert | 8D-light mit schwereabhängigen Pflichtfeldern und append-only Incident-Verlauf | `hydraulikdoc/repository.py`, `incident_events` |
 | Implementiert | Demo-Mandant mit synthetischen Daten und extraktivem Antwortpfad ohne Modellaufruf; in Produktion gesperrt | `hydraulikdoc/demo.py`, `AI_BACKEND=demo` |
+| Implementiert | Oberfläche Deutsch/Englisch mit Vollständigkeitsprüfung, zweisprachige Pflichthinweise | `hydraulikdoc/i18n.py`, `hydraulikdoc/translations.py` |
 | Implementiert | SAP-PM-Referenzen je Asset, CSV-Stammdatenimport und dateibasierte Übergabe von Instandhaltungsmeldungen | `hydraulikdoc/interop.py`; Feldmapping ist kundenseitig zu validieren |
 | Implementiert in IaC | Auswahl deutscher Azure-Regionen, private PaaS-Endpunkte, WAF, Zonenredundanz | `infra/azure/main.bicep`; reale Konfiguration ist Deployment-Evidenz |
 | Externes Gate | AVV/DPA, Transferbewertung, DSFA, Rechtsgrundlagen, Betriebsrat | kundeninstanzbezogene Evidenz außerhalb des Codes |

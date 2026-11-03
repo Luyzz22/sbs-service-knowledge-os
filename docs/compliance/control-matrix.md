@@ -84,7 +84,7 @@ Maßstab ist WCAG 2.2 Stufe AA, wie sie EN 301 549 und BITV 2.0 referenzieren. O
 | --- | --- | --- | --- |
 | Kontrast Text und Status (SC 1.4.3, 1.4.11) | Implementiert | `tests/test_accessibility.py` liest die Farbwerte aus `styles.css` und prüft alle Text-/Hintergrundpaare auf 4,5:1 sowie den Fokusrahmen auf 3:1 | Kontrast der Streamlit-eigenen Komponenten im Zielbrowser messen |
 | Status nicht nur über Farbe (SC 1.4.1) | Implementiert | Statuspillen, Hinweise und Checkliste tragen immer Text | – |
-| Sprache der Seite (SC 3.1.1) | Implementiert | Image-Build setzt `<html lang="de">` und bricht bei geänderter Streamlit-Struktur ab | lokale Entwicklung ohne Build: Skript manuell ausführen |
+| Sprache der Seite (SC 3.1.1) | Teilimplementiert | Image-Build setzt `<html lang="de">` und bricht bei geänderter Streamlit-Struktur ab | in der englischen Oberfläche bleibt das Dokument technisch `de`, weil Streamlit die Sprache zur Laufzeit nicht ohne JavaScript umstellen lässt; Abhilfe: englischsprachige Instanz mit `set-document-language.py en` im Build |
 | Überschriftenstruktur (SC 1.3.1, 2.4.6) | Implementiert | genau eine h1 je Arbeitsbereich, per Test geprüft | – |
 | Fokus sichtbar, Bewegung reduzierbar (SC 2.4.7, 2.3.3) | Implementiert | globaler `:focus-visible`-Rahmen, `prefers-reduced-motion` | – |
 | Zielgröße (SC 2.5.8) | Implementiert | Buttons mindestens 44 px hoch | – |

@@ -8,14 +8,16 @@ import html
 import io
 import json
 import time
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import streamlit as st
 
 from compliance.audit import AuditOutcome
 from compliance.retention import RetentionPolicy
-from fluid_advisor import FluidLimits, FluidSample, assess_fluid
+from fluid_advisor import FLUID_STATUS_LABELS, FluidLimits, FluidSample, assess_fluid
 
 from .auth import (
     AuthenticationError,
@@ -34,6 +36,7 @@ from .condition_monitoring import (
 from .config import AppSettings, AuthMode, ConfigurationError, get_settings
 from .demo import DemoRAGService, demo_seed_blockers, demo_sensor_csv, seed_demo_tenant, tenant_has_data
 from .governance import GroundedAnswer, ReviewStatus, UseCase, evaluate_use_case
+from .i18n import DEFAULT_LANGUAGE, LANGUAGES, msg, preferred_language, translate, translate_plural
 from .interop import (
     ASSET_ID_PATTERN,
     EQUIPMENT_PATTERN,
@@ -63,66 +66,84 @@ from .repository import (
 from .security import InputRejected, public_error_code, validate_pdf_upload
 
 APP_VERSION = "5.0.0-enterprise"
-AI_LITERACY_NOTICE = """HydraulikDoc erzeugt quellengebundene KI-Entwürfe. Ergebnisse können
+# Notices are complete texts per language, not catalogue snippets: the acceptance record stores the
+# digest of exactly the wording that was shown.
+AI_LITERACY_NOTICE = {
+    "de": """HydraulikDoc erzeugt quellengebundene KI-Entwürfe. Ergebnisse können
 unvollständig oder falsch sein. Vor Wartung, Freigabe, Ersatzteilbestellung oder einer
 Maschinenhandlung muss eine qualifizierte Person die Originalquelle, Betriebsanweisung,
 Gefährdungsbeurteilung und anwendbare LOTO-Regeln prüfen. HydraulikDoc steuert keine Maschine
-und ersetzt weder Herstellerfreigaben noch Fachverantwortung."""
+und ersetzt weder Herstellerfreigaben noch Fachverantwortung.""",
+    "en": """HydraulikDoc produces source-bound AI drafts. Results may be incomplete or wrong.
+Before maintenance, release, spare-part orders or any machine action, a qualified person must
+check the original source, operating instructions, risk assessment and applicable LOTO rules.
+HydraulikDoc does not control any machine and replaces neither manufacturer approvals nor
+professional responsibility.""",
+}
 INCIDENT_STATUS_LABELS = {
-    "new": "Neu",
-    "acknowledged": "Bestätigt",
-    "in_progress": "In Bearbeitung",
-    "resolved": "Behoben",
-    "closed": "Abgeschlossen",
+    "new": msg("Neu"),
+    "acknowledged": msg("Bestätigt"),
+    "in_progress": msg("In Bearbeitung"),
+    "resolved": msg("Behoben"),
+    "closed": msg("Abgeschlossen"),
 }
 INCIDENT_ACTION_LABELS = {
-    "acknowledged": "Bestätigen",
-    "in_progress": "Bearbeitung starten",
-    "resolved": "Als behoben melden",
-    "closed": "Abnehmen und abschließen",
+    "acknowledged": msg("Bestätigen"),
+    "in_progress": msg("Bearbeitung starten"),
+    "resolved": msg("Als behoben melden"),
+    "closed": msg("Abnehmen und abschließen"),
 }
 INCIDENT_SEVERITY_LABELS = {
-    "ok": "OK",
-    "warning": "Warnung",
-    "critical": "Kritisch",
-    "p1": "P1 · kritisch",
-    "p2": "P2 · hoch",
-    "p3": "P3 · mittel",
-    "p4": "P4 · niedrig",
+    "ok": msg("OK"),
+    "warning": msg("Warnung"),
+    "critical": msg("Kritisch"),
+    "p1": msg("P1 · kritisch"),
+    "p2": msg("P2 · hoch"),
+    "p3": msg("P3 · mittel"),
+    "p4": msg("P4 · niedrig"),
 }
 OPEN_INCIDENT_STATUSES = ("new", "acknowledged", "in_progress")
 ANALYSIS_LABELS = {
-    "containment_action": "D3 Sofortmaßnahme",
-    "root_cause": "D4 Ursache",
-    "corrective_action": "D5/D6 Abstellmaßnahme",
-    "effectiveness_check": "D7 Wirksamkeitsprüfung",
+    "containment_action": msg("D3 Sofortmaßnahme"),
+    "root_cause": msg("D4 Ursache"),
+    "corrective_action": msg("D5/D6 Abstellmaßnahme"),
+    "effectiveness_check": msg("D7 Wirksamkeitsprüfung"),
 }
 ANALYSIS_HELP = {
-    "containment_action": "Wie wurde der Schaden begrenzt? Zum Beispiel Stillsetzung, Sperrung, Sortierung.",
-    "root_cause": "Technische Ursache und, falls bekannt, warum sie nicht früher entdeckt wurde.",
-    "corrective_action": "Dauerhafte Abstellung: Reparatur, Tausch, Einstellung, Prozessänderung.",
-    "effectiveness_check": "Womit ist belegt, dass die Maßnahme wirkt? Messreihe, Folgeprobe, Zeitraum.",
+    "containment_action": msg("Wie wurde der Schaden begrenzt? Zum Beispiel Stillsetzung, Sperrung, Sortierung."),
+    "root_cause": msg("Technische Ursache und, falls bekannt, warum sie nicht früher entdeckt wurde."),
+    "corrective_action": msg("Dauerhafte Abstellung: Reparatur, Tausch, Einstellung, Prozessänderung."),
+    "effectiveness_check": msg("Womit ist belegt, dass die Maßnahme wirkt? Messreihe, Folgeprobe, Zeitraum."),
 }
-DOCUMENT_STATUS_LABELS = {"processing": "wird verarbeitet", "ready": "bereit", "failed": "fehlgeschlagen"}
+DOCUMENT_STATUS_LABELS = {
+    "processing": msg("wird verarbeitet"),
+    "ready": msg("bereit"),
+    "failed": msg("fehlgeschlagen"),
+}
 REVIEW_STATUS_LABELS = {
-    "accepted": "Geprüft und akzeptiert",
-    "needs_expert": "Experte erforderlich",
-    "rejected": "Abgelehnt",
-    "draft": "Entwurf",
+    "accepted": msg("Geprüft und akzeptiert"),
+    "needs_expert": msg("Experte erforderlich"),
+    "rejected": msg("Abgelehnt"),
+    "draft": msg("Entwurf"),
 }
-ROLE_LABELS = {"viewer": "Leser", "technician": "Techniker", "supervisor": "Supervisor", "admin": "Admin"}
+ROLE_LABELS = {
+    "viewer": msg("Leser"),
+    "technician": msg("Techniker"),
+    "supervisor": msg("Supervisor"),
+    "admin": msg("Admin"),
+}
 CRITICAL_SEVERITIES = frozenset({"critical", "p1"})
 CRITICALITY_LABELS = {
-    "low": "Niedrig",
-    "medium": "Mittel",
-    "high": "Hoch",
-    "safety_critical": "Sicherheitskritisch",
+    "low": msg("Niedrig"),
+    "medium": msg("Mittel"),
+    "high": msg("Hoch"),
+    "safety_critical": msg("Sicherheitskritisch"),
 }
 ASSET_STATUS_LABELS = {
-    "active": "Aktiv",
-    "maintenance": "In Wartung",
-    "out_of_service": "Außer Betrieb",
-    "retired": "Stillgelegt",
+    "active": msg("Aktiv"),
+    "maintenance": msg("In Wartung"),
+    "out_of_service": msg("Außer Betrieb"),
+    "retired": msg("Stillgelegt"),
 }
 NAV_PAGES = (
     "Leitstand",
@@ -134,13 +155,69 @@ NAV_PAGES = (
     "Governance",
     "System",
 )
+NAV_LABELS = {
+    "Leitstand": msg("Leitstand"),
+    "Assets": msg("Assets"),
+    "Wissensbasis": msg("Wissensbasis"),
+    "Condition Monitoring": msg("Condition Monitoring"),
+    "Fluid": msg("Fluid"),
+    "Incidents": msg("Incidents"),
+    "Governance": msg("Governance"),
+    "System": msg("System"),
+}
 # Resolved incidents stay visible by default because they still await supervisor sign-off.
 DEFAULT_INCIDENT_FILTER = (*OPEN_INCIDENT_STATUSES, "resolved")
-PRIVACY_NOTICE = """HydraulikDoc verarbeitet Ihre Entra-Kennung pseudonymisiert für Rollenprüfung,
+PRIVACY_NOTICE = {
+    "de": """HydraulikDoc verarbeitet Ihre Entra-Kennung pseudonymisiert für Rollenprüfung,
 Auditnachweise, KI-Interaktionen und von Ihnen ausgelöste Incidents. Freitextfragen werden nicht
 protokolliert; in der Fachdatenbank wird nur ein Hash gespeichert. Die konkrete Rechtsgrundlage,
 Verantwortlichenkontaktdaten, Empfänger und genehmigten Löschfristen werden in der
-instanzbezogenen Datenschutzerklärung Ihres Unternehmens ausgewiesen."""
+instanzbezogenen Datenschutzerklärung Ihres Unternehmens ausgewiesen.""",
+    "en": """HydraulikDoc processes your Entra identifier in pseudonymised form for role checks,
+audit evidence, AI interactions and incidents you raise. Free-text questions are not logged; only
+a hash is stored in the business database. The specific legal basis, controller contact details,
+recipients and approved retention periods are stated in your company's instance-specific privacy
+notice.""",
+}
+
+
+def _language() -> str:
+    language = str(st.session_state.get("language", ""))
+    if language not in LANGUAGES:
+        # First visit: follow the browser preference; nothing about the person is stored.
+        try:
+            fallback = get_settings().default_language
+        except ConfigurationError:
+            fallback = DEFAULT_LANGUAGE
+        language = preferred_language(_header_value("Accept-Language"), fallback)
+        st.session_state.language = language
+    return language
+
+
+def tr(text: str, **params: object) -> str:
+    return translate(text, _language(), **params)
+
+
+def tr_plural(count: int, singular: str, plural: str, **params: object) -> str:
+    return translate_plural(count, singular, plural, _language(), **params)
+
+
+def label(table: Mapping[Any, str], key: Any) -> str:
+    return tr(table.get(key, key))
+
+
+def fmt_datetime(value: datetime) -> str:
+    # ISO order in English avoids the US/UK day-month ambiguity for international plants.
+    return value.strftime("%Y-%m-%d %H:%M" if _language() == "en" else "%d.%m.%Y %H:%M")
+
+
+def label_nav(page: str) -> str:
+    return label(NAV_LABELS, page)
+
+
+def tr_error(error: BaseException) -> str:
+    """Render an exception raised with a translatable message; other exceptions keep their text."""
+    return tr(error.args[0]) if error.args and isinstance(error.args[0], str) else str(error)
 
 
 def _inject_css() -> None:
@@ -159,31 +236,38 @@ def _header_value(name: str) -> str | None:
     return None
 
 
+def _language_selector() -> None:
+    _language()  # initialise from the browser preference before the widget reads its state
+    # Fixed bilingual label so the switch can be found in either language.
+    st.selectbox("Sprache · Language", tuple(LANGUAGES), format_func=LANGUAGES.__getitem__, key="language")
+
+
 def _local_login(settings: AppSettings) -> UserPrincipal | None:
     if st.session_state.get("principal"):
         return st.session_state.principal
     st.title("HydraulikDoc Enterprise")
+    _language_selector()
     st.caption(
-        "Lokale Entwicklungsanmeldung mit Argon2id. In Produktion ist ausschließlich Microsoft Entra ID zulässig."
+        tr("Lokale Entwicklungsanmeldung mit Argon2id. In Produktion ist ausschließlich Microsoft Entra ID zulässig.")
     )
     if not settings.local_users():
-        st.warning("Keine lokalen Benutzer konfiguriert. Hinterlegen Sie LOCAL_USERS_JSON mit Argon2id-Hashes.")
+        st.warning(tr("Keine lokalen Benutzer konfiguriert. Hinterlegen Sie LOCAL_USERS_JSON mit Argon2id-Hashes."))
         st.code(
             "python -c \"from argon2 import PasswordHasher; print(PasswordHasher().hash('change-me'))\"",
             language="bash",
         )
         return None
     with st.form("local-login", clear_on_submit=False):
-        username = st.text_input("Benutzerkennung", autocomplete="username")
-        password = st.text_input("Passwort", type="password", autocomplete="current-password")
-        submitted = st.form_submit_button("Anmelden", type="primary", width="stretch")
+        username = st.text_input(tr("Benutzerkennung"), autocomplete="username")
+        password = st.text_input(tr("Passwort"), type="password", autocomplete="current-password")
+        submitted = st.form_submit_button(tr("Anmelden"), type="primary", width="stretch")
     if submitted:
         principal = verify_local_user(username.strip(), password, settings)
         if principal:
             st.session_state.principal = principal
             st.session_state.last_activity = time.monotonic()
             st.rerun()
-        st.error("Anmeldung fehlgeschlagen.")
+        st.error(tr("Anmeldung fehlgeschlagen."))
     return None
 
 
@@ -191,12 +275,12 @@ def _principal(settings: AppSettings) -> UserPrincipal | None:
     if settings.auth_mode is AuthMode.ENTRA_PROXY:
         encoded = _header_value("X-MS-CLIENT-PRINCIPAL")
         if not encoded:
-            st.error("Zugriff verweigert: Es liegt kein verifizierter Entra-Prinzipal vor.")
+            st.error(tr("Zugriff verweigert: Es liegt kein verifizierter Entra-Prinzipal vor."))
             return None
         try:
             return principal_from_entra_header(encoded, settings.default_tenant_id)
         except AuthenticationError:
-            st.error("Zugriff verweigert: Identität oder App-Rolle ist unvollständig.")
+            st.error(tr("Zugriff verweigert: Identität oder App-Rolle ist unvollständig."))
             return None
     return _local_login(settings)
 
@@ -206,7 +290,7 @@ def _enforce_session(principal: UserPrincipal, settings: AppSettings) -> bool:
     previous = st.session_state.get("last_activity", now)
     if now - previous > settings.session_idle_minutes * 60:
         st.session_state.clear()
-        st.warning("Die Sitzung wurde wegen Inaktivität beendet.")
+        st.warning(tr("Die Sitzung wurde wegen Inaktivität beendet."))
         return False
     st.session_state.last_activity = now
     st.session_state.principal = principal
@@ -221,8 +305,8 @@ def _rag(settings: AppSettings, repository: EnterpriseRepository) -> AzureRAGSer
     return existing
 
 
-def _ai_notice_digest() -> str:
-    return hashlib.sha256(AI_LITERACY_NOTICE.encode("utf-8")).hexdigest()
+def _notice_digest(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def _has_ai_acceptance(
@@ -240,15 +324,16 @@ def _render_ai_acceptance(
 ) -> bool:
     accepted = _has_ai_acceptance(principal, repository, settings)
     if accepted:
-        st.success(f"KI-Nutzerhinweis {settings.ai_notice_version} bestätigt.")
+        st.success(tr("KI-Nutzerhinweis {version} bestätigt.", version=settings.ai_notice_version))
         return True
-    st.markdown(f'<div class="hd-notice">{AI_LITERACY_NOTICE}</div>', unsafe_allow_html=True)
+    notice = AI_LITERACY_NOTICE[_language()]
+    st.markdown(f'<div class="hd-notice">{notice}</div>', unsafe_allow_html=True)
     acknowledgement = st.checkbox(
-        "Ich verstehe die Grenzen und bestätige die Pflicht zur fachlichen Prüfung.",
+        tr("Ich verstehe die Grenzen und bestätige die Pflicht zur fachlichen Prüfung."),
         key="ai-literacy-check",
     )
     if st.button(
-        "Nutzerhinweis bestätigen",
+        tr("Nutzerhinweis bestätigen"),
         disabled=not acknowledgement,
         type="primary",
         key="ai-literacy-submit",
@@ -257,7 +342,7 @@ def _render_ai_acceptance(
             principal,
             "ai_literacy",
             settings.ai_notice_version,
-            _ai_notice_digest(),
+            _notice_digest(notice),
         )
         repository.emit_audit(
             principal,
@@ -274,13 +359,18 @@ def _render_privacy_notice(
     repository: EnterpriseRepository,
     settings: AppSettings,
 ) -> None:
-    digest = hashlib.sha256(PRIVACY_NOTICE.encode("utf-8")).hexdigest()
+    notice = PRIVACY_NOTICE[_language()]
     if repository.has_acceptance(principal, "privacy", settings.privacy_notice_version):
-        st.caption(f"Datenschutzhinweis {settings.privacy_notice_version} zur Kenntnis genommen.")
+        st.caption(
+            tr(
+                "Datenschutzhinweis {version} zur Kenntnis genommen.",
+                version=settings.privacy_notice_version,
+            )
+        )
         return
-    st.markdown(f'<div class="hd-notice">{PRIVACY_NOTICE}</div>', unsafe_allow_html=True)
-    if st.button("Datenschutzhinweis zur Kenntnis nehmen"):
-        repository.record_acceptance(principal, "privacy", settings.privacy_notice_version, digest)
+    st.markdown(f'<div class="hd-notice">{notice}</div>', unsafe_allow_html=True)
+    if st.button(tr("Datenschutzhinweis zur Kenntnis nehmen")):
+        repository.record_acceptance(principal, "privacy", settings.privacy_notice_version, _notice_digest(notice))
         repository.emit_audit(
             principal,
             action="privacy.notice.acknowledged",
@@ -294,11 +384,19 @@ def _render_shell(principal: UserPrincipal, settings: AppSettings, page: str) ->
     release = html.escape(settings.release_state)
     tenant = html.escape(principal.tenant_id)
     role = html.escape(principal.role)
+    tenant_label = html.escape(tr("Mandant"))
+    role_label = html.escape(tr("Rolle"))
+    release_label = html.escape(tr("Releasezustand"))
     if settings.demo_mode:
         st.markdown(
-            '<div class="hd-demo" role="status"><strong>Demo-Modus</strong> Alle Daten sind synthetisch. '
-            "Antworten werden ohne Sprachmodell aus Demodokumenten extrahiert. "
-            "Nicht für reale Instandhaltungsentscheidungen verwenden.</div>",
+            f'<div class="hd-demo" role="status"><strong>{html.escape(tr("Demo-Modus"))}</strong> '
+            + html.escape(
+                tr(
+                    "Alle Daten sind synthetisch. Antworten werden ohne Sprachmodell aus Demodokumenten extrahiert. "
+                    "Nicht für reale Instandhaltungsentscheidungen verwenden."
+                )
+            )
+            + "</div>",
             unsafe_allow_html=True,
         )
     if page != "Leitstand":
@@ -306,9 +404,9 @@ def _render_shell(principal: UserPrincipal, settings: AppSettings, page: str) ->
         st.markdown(
             f"""
             <div class="hd-context">
-              <span><strong>Mandant</strong> <code>{tenant}</code></span>
-              <span><strong>Rolle</strong> <code>{role}</code></span>
-              <span><strong>Releasezustand</strong> <code>{release}</code></span>
+              <span><strong>{tenant_label}</strong> <code>{tenant}</code></span>
+              <span><strong>{role_label}</strong> <code>{role}</code></span>
+              <span><strong>{release_label}</strong> <code>{release}</code></span>
             </div>
             """,
             unsafe_allow_html=True,
@@ -318,20 +416,24 @@ def _render_shell(principal: UserPrincipal, settings: AppSettings, page: str) ->
         f"""
         <section class="hd-hero">
           <div>
-            <h1>Servicewissen wird zur überprüfbaren Entscheidung.</h1>
-            <p>HydraulikDoc verbindet technische Dokumentation, Zustandsdaten und einen
-            menschlich freizugebenden KI-Entwurf. Für Instandhaltungsteams, die Quellen,
-            Grenzwerte und Verantwortung an einem Ort brauchen.</p>
+            <h1>{html.escape(tr("Servicewissen wird zur überprüfbaren Entscheidung."))}</h1>
+            <p>{html.escape(tr(HERO_TEXT))}</p>
           </div>
           <div class="hd-proof">
-            <div><strong>Releasezustand</strong><code>{release}</code></div>
-            <div><strong>Mandant</strong><code>{tenant}</code></div>
-            <div><strong>Rolle</strong><code>{role}</code></div>
+            <div><strong>{release_label}</strong><code>{release}</code></div>
+            <div><strong>{tenant_label}</strong><code>{tenant}</code></div>
+            <div><strong>{role_label}</strong><code>{role}</code></div>
           </div>
         </section>
         """,
         unsafe_allow_html=True,
     )
+
+
+HERO_TEXT = msg(
+    "HydraulikDoc verbindet technische Dokumentation, Zustandsdaten und einen menschlich freizugebenden "
+    "KI-Entwurf. Für Instandhaltungsteams, die Quellen, Grenzwerte und Verantwortung an einem Ort brauchen."
+)
 
 
 def _go_to(page: str) -> None:
@@ -342,28 +444,32 @@ def _sidebar(principal: UserPrincipal, settings: AppSettings) -> str:
     with st.sidebar:
         st.markdown("## HydraulikDoc")
         st.caption(f"Enterprise {APP_VERSION}")
+        _language_selector()
         st.divider()
         st.write(principal.display_name)
-        st.caption(f"{principal.role} · {principal.authentication_method}")
+        st.caption(f"{label(ROLE_LABELS, principal.role)} · {principal.authentication_method}")
         st.divider()
-        selected = st.radio("Arbeitsbereich", NAV_PAGES, key="nav", label_visibility="collapsed")
-        st.divider()
-        ai_state = (
-            "Demo, kein Modellaufruf"
-            if settings.demo_mode
-            else ("Azure konfiguriert" if settings.azure_ready else "nicht konfiguriert")
+        # Page keys stay German and stable; only their display follows the interface language.
+        selected = st.radio(
+            tr("Arbeitsbereich"), NAV_PAGES, key="nav", label_visibility="collapsed", format_func=label_nav
         )
-        st.caption(f"KI: {ai_state}")
-        region = "lokal, keine Datenübertragung" if settings.demo_mode else settings.azure_region or "nicht attestiert"
-        st.caption(f"Region: {region}")
-        if settings.auth_mode is AuthMode.LOCAL and st.button("Abmelden", width="stretch"):
+        st.divider()
+        if settings.demo_mode:
+            ai_state = tr("Demo, kein Modellaufruf")
+        elif settings.azure_ready:
+            ai_state = tr("Azure konfiguriert")
+        else:
+            ai_state = tr("nicht konfiguriert")
+        st.caption(tr("KI: {ai_state}", ai_state=ai_state))
+        if settings.demo_mode:
+            region = tr("lokal, keine Datenübertragung")
+        else:
+            region = settings.azure_region or tr("nicht attestiert")
+        st.caption(tr("Region: {region}", region=region))
+        if settings.auth_mode is AuthMode.LOCAL and st.button(tr("Abmelden"), width="stretch"):
             st.session_state.clear()
             st.rerun()
         return selected
-
-
-def _count_phrase(count: int, singular: str, plural: str) -> str:
-    return f"{count} {singular if count == 1 else plural}"
 
 
 def _overview(principal: UserPrincipal, repository: EnterpriseRepository, settings: AppSettings) -> None:
@@ -371,21 +477,22 @@ def _overview(principal: UserPrincipal, repository: EnterpriseRepository, settin
     assets = repository.list_assets(principal)
     incidents = repository.list_incidents(principal)
     open_incidents = [item for item in incidents if item.status in OPEN_INCIDENT_STATUSES]
-    st.header("Leitstand")
-    st.caption("Operativer Überblick ohne erfundene Verfügbarkeits- oder ROI-Kennzahlen.")
+    st.header(tr("Leitstand"))
+    st.caption(tr("Operativer Überblick ohne erfundene Verfügbarkeits- oder ROI-Kennzahlen."))
+    tiles = (
+        (tr("Dokumente"), tr("{n} aktive Dokumentdatensätze", n=len(documents))),
+        (tr("Assets"), tr("{n} aktive Anlagenobjekte", n=len(assets))),
+        (tr("Offene Incidents"), tr("{n} im Workflow", n=len(open_incidents))),
+    )
     st.markdown(
-        f"""
-        <div class="hd-state">
-          <div><strong>Dokumente</strong>{len(documents)} aktive Dokumentdatensätze</div>
-          <div><strong>Assets</strong>{len(assets)} aktive Anlagenobjekte</div>
-          <div><strong>Offene Incidents</strong>{len(open_incidents)} im Workflow</div>
-        </div>
-        """,
+        '<div class="hd-state">'
+        + "".join(f"<div><strong>{html.escape(title)}</strong>{html.escape(text)}</div>" for title, text in tiles)
+        + "</div>",
         unsafe_allow_html=True,
     )
     if settings.demo_mode:
         _render_demo_seed(principal, repository)
-    st.subheader("Handlungsbedarf")
+    st.subheader(tr("Handlungsbedarf"))
     critical = [item for item in open_incidents if item.severity in CRITICAL_SEVERITIES]
     unacknowledged = [item for item in incidents if item.status == "new"]
     awaiting_signoff = [item for item in incidents if item.status == "resolved"]
@@ -394,62 +501,84 @@ def _overview(principal: UserPrincipal, repository: EnterpriseRepository, settin
         actions.append(
             (
                 "hd-notice hd-blocked",
-                _count_phrase(len(critical), "kritischer Incident ist", "kritische Incidents sind")
-                + " offen. Abschalt-, Sicherheits- und LOTO-Bewertung dokumentieren.",
+                tr_plural(
+                    len(critical),
+                    "{n} kritischer Incident ist offen. Abschalt-, Sicherheits- und LOTO-Bewertung dokumentieren.",
+                    "{n} kritische Incidents sind offen. Abschalt-, Sicherheits- und LOTO-Bewertung dokumentieren.",
+                ),
             )
         )
     if unacknowledged:
         actions.append(
             (
                 "hd-notice",
-                _count_phrase(len(unacknowledged), "neuer Incident ist", "neue Incidents sind")
-                + " noch nicht bestätigt.",
+                tr_plural(
+                    len(unacknowledged),
+                    "{n} neuer Incident ist noch nicht bestätigt.",
+                    "{n} neue Incidents sind noch nicht bestätigt.",
+                ),
             )
         )
     if awaiting_signoff:
-        responsible = (
-            "Ihre Abnahme" if principal.can(INCIDENT_CLOSE_PERMISSION) else "die Abnahme durch einen Supervisor"
-        )
-        actions.append(
-            (
-                "hd-notice",
-                _count_phrase(len(awaiting_signoff), "behobener Incident wartet", "behobene Incidents warten")
-                + f" auf {responsible}.",
+        if principal.can(INCIDENT_CLOSE_PERMISSION):
+            text = tr_plural(
+                len(awaiting_signoff),
+                "{n} behobener Incident wartet auf Ihre Abnahme.",
+                "{n} behobene Incidents warten auf Ihre Abnahme.",
             )
-        )
+        else:
+            text = tr_plural(
+                len(awaiting_signoff),
+                "{n} behobener Incident wartet auf die Abnahme durch einen Supervisor.",
+                "{n} behobene Incidents warten auf die Abnahme durch einen Supervisor.",
+            )
+        actions.append(("hd-notice", text))
     if actions:
         for css_class, text in actions:
             st.markdown(f'<div class="{css_class}">{html.escape(text)}</div>', unsafe_allow_html=True)
-        st.button("Zum Incident Workflow", on_click=_go_to, args=("Incidents",), key="overview-incidents")
+        st.button(tr("Zum Incident Workflow"), on_click=_go_to, args=("Incidents",), key="overview-incidents")
     else:
-        st.success("Kein offener Handlungsbedarf im Incident Workflow.")
+        st.success(tr("Kein offener Handlungsbedarf im Incident Workflow."))
     _render_setup_progress(principal, repository, settings, assets, documents)
-    st.subheader("Freigabegrenzen")
-    st.warning("Keine autonome Maschinensteuerung. Keine automatische Sicherheitsfreigabe.")
+    st.subheader(tr("Freigabegrenzen"))
+    st.warning(tr("Keine autonome Maschinensteuerung. Keine automatische Sicherheitsfreigabe."))
     if settings.release_state != "configured":
-        st.info("Produktionsfreigabe bleibt offen, bis Deployment-Evidenz und Compliance-Gate bestätigt sind.")
+        st.info(tr("Produktionsfreigabe bleibt offen, bis Deployment-Evidenz und Compliance-Gate bestätigt sind."))
 
 
 def _render_demo_seed(principal: UserPrincipal, repository: EnterpriseRepository) -> None:
-    if notice := st.session_state.pop("demo_notice", None):
-        st.success(notice)
+    if counts := st.session_state.pop("demo_notice", None):
+        st.success(tr("Demodaten geladen: {assets} Assets, {documents} Dokumente, {incidents} Incidents.", **counts))
     if tenant_has_data(principal, repository):
         return
     blockers = demo_seed_blockers(principal, repository)
-    st.subheader("Demo starten")
+    st.subheader(tr("Demo starten"))
     st.write(
-        "Lädt vier fiktive Anlagen mit SAP-Referenzen, zwei synthetische Handbücher und vier Incidents in "
-        "unterschiedlichen Workflow-Zuständen: kritisch und neu, 8D in Bearbeitung, wartet auf Abnahme, abgeschlossen."
+        tr(
+            "Lädt vier fiktive Anlagen mit SAP-Referenzen, zwei synthetische Handbücher und vier Incidents in "
+            "unterschiedlichen Workflow-Zuständen: kritisch und neu, 8D in Bearbeitung, wartet auf Abnahme, abgeschlossen."
+        )
     )
     if blockers:
-        st.caption(blockers[0])
+        st.caption(tr(blockers[0]))
         return
-    if st.button("Demodaten laden", type="primary", key="demo-seed"):
+    if st.button(tr("Demodaten laden"), type="primary", key="demo-seed"):
         result = seed_demo_tenant(principal, repository)
-        st.session_state.demo_notice = (
-            f"Demodaten geladen: {result.assets} Assets, {result.documents} Dokumente, {result.incidents} Incidents."
-        )
+        st.session_state.demo_notice = {
+            "assets": result.assets,
+            "documents": result.documents,
+            "incidents": result.incidents,
+        }
         st.rerun()
+
+
+SETUP_STEPS = {
+    "assets": msg("Assets erfasst"),
+    "sap": msg("SAP-Referenz je Asset gepflegt"),
+    "documents": msg("Herstellerunterlagen indexiert"),
+    "ai_notice": msg("KI-Nutzerhinweis bestätigt"),
+    "privacy": msg("Datenschutzhinweis zur Kenntnis genommen"),
+}
 
 
 def _render_setup_progress(
@@ -459,49 +588,55 @@ def _render_setup_progress(
     assets: tuple[AssetRecord, ...],
     documents: tuple[DocumentRecord, ...],
 ) -> None:
-    st.subheader("Einrichtung")
+    st.subheader(tr("Einrichtung"))
     linked = sum(1 for item in assets if item.functional_location or item.equipment_number)
     ready_documents = sum(1 for item in documents if item.status == "ready")
     steps = (
-        ("Assets erfasst", bool(assets), "Assets", _count_phrase(len(assets), "Anlagenobjekt", "Anlagenobjekte")),
         (
-            "SAP-Referenz je Asset gepflegt",
+            "assets",
+            bool(assets),
+            "Assets",
+            tr_plural(len(assets), "{n} Anlagenobjekt", "{n} Anlagenobjekte"),
+        ),
+        (
+            "sap",
             bool(assets) and linked == len(assets),
             "Assets",
-            f"{linked} von {len(assets)} mit Technischem Platz oder Equipment",
+            tr("{linked} von {total} mit Technischem Platz oder Equipment", linked=linked, total=len(assets)),
         ),
         (
-            "Herstellerunterlagen indexiert",
+            "documents",
             ready_documents > 0,
             "Wissensbasis",
-            _count_phrase(ready_documents, "Dokument bereit", "Dokumente bereit"),
+            tr_plural(ready_documents, "{n} Dokument bereit", "{n} Dokumente bereit"),
         ),
         (
-            "KI-Nutzerhinweis bestätigt",
+            "ai_notice",
             _has_ai_acceptance(principal, repository, settings),
             "Governance",
-            f"Version {settings.ai_notice_version}",
+            tr("Version {version}", version=settings.ai_notice_version),
         ),
         (
-            "Datenschutzhinweis zur Kenntnis genommen",
+            "privacy",
             repository.has_acceptance(principal, "privacy", settings.privacy_notice_version),
             "Governance",
-            f"Version {settings.privacy_notice_version}",
+            tr("Version {version}", version=settings.privacy_notice_version),
         ),
     )
     done = sum(1 for _, complete, _, _ in steps if complete)
-    st.caption(f"{done} von {len(steps)} Schritten erledigt")
+    st.caption(tr("{done} von {total} Schritten erledigt", done=done, total=len(steps)))
+    done_label, open_label = html.escape(tr("Erledigt")), html.escape(tr("Offen"))
     items = "".join(
         f"""<li><span class="hd-status hd-status-{"resolved" if complete else "open"}">"""
-        f"""{"Erledigt" if complete else "Offen"}</span>"""
-        f"<div><strong>{html.escape(label)}</strong><small>{html.escape(detail)}</small></div></li>"
-        for label, complete, _, detail in steps
+        f"{done_label if complete else open_label}</span>"
+        f"<div><strong>{html.escape(label(SETUP_STEPS, step))}</strong><small>{html.escape(detail)}</small></div></li>"
+        for step, complete, _, detail in steps
     )
     st.markdown(f'<ul class="hd-checklist">{items}</ul>', unsafe_allow_html=True)
-    next_step = next(((label, page) for label, complete, page, _ in steps if not complete), None)
+    next_step = next(((step, page) for step, complete, page, _ in steps if not complete), None)
     if next_step:
         st.button(
-            f"Weiter: {next_step[0]}",
+            tr("Weiter: {step}", step=label(SETUP_STEPS, next_step[0])),
             on_click=_go_to,
             args=(next_step[1],),
             key="overview-next-setup",
@@ -510,24 +645,24 @@ def _render_setup_progress(
 
 
 def _assets(principal: UserPrincipal, repository: EnterpriseRepository) -> None:
-    st.title("Asset Register")
-    st.caption("OEM-neutrale Anlagen- und Komponentenreferenz für Dokumente, Messwerte und Incidents.")
-    if notice := st.session_state.pop("asset_import_notice", None):
-        st.success(notice)
+    st.title(tr("Asset Register"))
+    st.caption(tr("OEM-neutrale Anlagen- und Komponentenreferenz für Dokumente, Messwerte und Incidents."))
+    if imported := st.session_state.pop("asset_import_notice", None):
+        st.success(tr_plural(imported, "{n} Asset wurde importiert.", "{n} Assets wurden importiert."))
     assets = repository.list_assets(principal)
     if assets:
         st.dataframe(
             [
                 {
-                    "Asset-ID": item.asset_id,
-                    "Name": item.name,
-                    "Standort": item.site,
-                    "Hersteller": item.manufacturer,
-                    "Modell": item.model,
-                    "Kritikalität": CRITICALITY_LABELS.get(item.criticality, item.criticality),
-                    "Status": ASSET_STATUS_LABELS.get(item.status, item.status),
-                    "Technischer Platz": item.functional_location,
-                    "Equipment": item.equipment_number,
+                    tr("Asset-ID"): item.asset_id,
+                    tr("Name"): item.name,
+                    tr("Standort"): item.site,
+                    tr("Hersteller"): item.manufacturer,
+                    tr("Modell"): item.model,
+                    tr("Kritikalität"): label(CRITICALITY_LABELS, item.criticality),
+                    tr("Status"): label(ASSET_STATUS_LABELS, item.status),
+                    tr("Technischer Platz"): item.functional_location,
+                    tr("Equipment"): item.equipment_number,
                 }
                 for item in assets
             ],
@@ -537,44 +672,48 @@ def _assets(principal: UserPrincipal, repository: EnterpriseRepository) -> None:
         unlinked = sum(1 for item in assets if not item.functional_location and not item.equipment_number)
         if unlinked:
             st.caption(
-                _count_phrase(unlinked, "Asset hat", "Assets haben")
-                + " noch keinen Technischen Platz oder Equipment. Ohne Referenz lassen sich Incidents"
-                " in SAP PM keinem Technischen Objekt zuordnen."
+                tr_plural(
+                    unlinked,
+                    "{n} Asset hat noch keinen Technischen Platz oder Equipment. Ohne Referenz lassen sich "
+                    "Incidents in SAP PM keinem Technischen Objekt zuordnen.",
+                    "{n} Assets haben noch keinen Technischen Platz oder Equipment. Ohne Referenz lassen sich "
+                    "Incidents in SAP PM keinem Technischen Objekt zuordnen.",
+                )
             )
     else:
-        st.info("Noch keine Assets erfasst. Einzelne Anlagen unten anlegen oder den Stammdatenimport nutzen.")
+        st.info(tr("Noch keine Assets erfasst. Einzelne Anlagen unten anlegen oder den Stammdatenimport nutzen."))
     if not principal.can("asset:write"):
         return
-    with st.expander("Asset anlegen oder aktualisieren"):
+    with st.expander(tr("Asset anlegen oder aktualisieren")):
         with st.form("asset-form"):
-            asset_id = st.text_input("Asset-ID", placeholder="WERK1-PRESSE-04-HYD")
-            name = st.text_input("Bezeichnung", placeholder="Hydraulikaggregat Presse 04")
-            site = st.text_input("Standort", placeholder="Werk 1 · Halle 3")
-            manufacturer = st.text_input("Hersteller")
-            model = st.text_input("Modell / Baureihe")
+            asset_id = st.text_input(tr("Asset-ID"), placeholder="WERK1-PRESSE-04-HYD")
+            name = st.text_input(tr("Bezeichnung"), placeholder=tr("Hydraulikaggregat Presse 04"))
+            site = st.text_input(tr("Standort"), placeholder=tr("Werk 1 · Halle 3"))
+            manufacturer = st.text_input(tr("Hersteller"))
+            model = st.text_input(tr("Modell / Baureihe"))
             criticality = st.selectbox(
-                "Kritikalität",
+                tr("Kritikalität"),
                 tuple(CRITICALITY_LABELS),
                 index=2,
-                format_func=lambda option: CRITICALITY_LABELS[option],
+                format_func=lambda option: label(CRITICALITY_LABELS, option),
             )
             sap_left, sap_right = st.columns(2)
             functional_location = sap_left.text_input(
-                "Technischer Platz (SAP TPLNR)", max_chars=40, placeholder="1000-W1-H3-P04"
+                tr("Technischer Platz (SAP TPLNR)"), max_chars=40, placeholder="1000-W1-H3-P04"
             )
-            equipment_number = sap_right.text_input("Equipment (SAP EQUNR)", max_chars=18, placeholder="10004711")
-            submitted = st.form_submit_button("Asset speichern", type="primary")
+            equipment_number = sap_right.text_input(tr("Equipment (SAP EQUNR)"), max_chars=18, placeholder="10004711")
+            submitted = st.form_submit_button(tr("Asset speichern"), type="primary")
         if submitted:
             functional_location = functional_location.strip()
             equipment_number = equipment_number.strip()
             if not ASSET_ID_PATTERN.fullmatch(asset_id):
-                st.error("Asset-ID enthält unzulässige Zeichen oder ist zu kurz.")
+                st.error(tr("Asset-ID enthält unzulässige Zeichen oder ist zu kurz."))
             elif not name.strip() or not site.strip():
-                st.error("Bezeichnung und Standort sind erforderlich.")
+                st.error(tr("Bezeichnung und Standort sind erforderlich."))
             elif functional_location and not FUNCTIONAL_LOCATION_PATTERN.fullmatch(functional_location):
-                st.error("Technischer Platz enthält unzulässige Zeichen.")
+                st.error(tr("Technischer Platz enthält unzulässige Zeichen."))
             elif equipment_number and not EQUIPMENT_PATTERN.fullmatch(equipment_number):
-                st.error("Equipment darf nur Buchstaben und Ziffern enthalten (max. 18).")
+                st.error(tr("Equipment darf nur Buchstaben und Ziffern enthalten (max. 18)."))
             else:
                 repository.upsert_asset(
                     principal,
@@ -595,22 +734,24 @@ def _assets(principal: UserPrincipal, repository: EnterpriseRepository) -> None:
                     resource_id=asset_id,
                 )
                 st.rerun()
-    with st.expander("Stammdaten importieren (CSV, z. B. aus SAP PM)"):
+    with st.expander(tr("Stammdaten importieren (CSV, z. B. aus SAP PM)")):
         st.caption(
-            "UTF-8-CSV mit Semikolon oder Komma. Pflichtspalten: asset_id, name, site, criticality "
-            "(niedrig, mittel, hoch, sicherheitskritisch). Optional: manufacturer, model, "
-            "functional_location (TPLNR), equipment_number (EQUNR). Der Import wird vollständig geprüft "
-            "und nur übernommen, wenn alle Zeilen gültig sind; bestehende Asset-IDs werden aktualisiert."
+            tr(
+                "UTF-8-CSV mit Semikolon oder Komma. Pflichtspalten: asset_id, name, site, criticality "
+                "(niedrig, mittel, hoch, sicherheitskritisch). Optional: manufacturer, model, "
+                "functional_location (TPLNR), equipment_number (EQUNR). Der Import wird vollständig geprüft "
+                "und nur übernommen, wenn alle Zeilen gültig sind; bestehende Asset-IDs werden aktualisiert."
+            )
         )
         st.download_button(
-            "Importvorlage herunterladen",
+            tr("Importvorlage herunterladen"),
             asset_import_template(),
             file_name="hydraulikdoc-asset-import-vorlage.csv",
             mime="text/csv",
             key="asset-import-template",
         )
-        uploaded = st.file_uploader("Stammdaten-CSV", type=["csv"], key="asset-import-file")
-        if uploaded and st.button("Prüfen und importieren", type="primary", key="asset-import-submit"):
+        uploaded = st.file_uploader(tr("Stammdaten-CSV"), type=["csv"], key="asset-import-file")
+        if uploaded and st.button(tr("Prüfen und importieren"), type="primary", key="asset-import-submit"):
             try:
                 rows = parse_asset_csv(uploaded.getvalue())
             except ValueError as error:
@@ -621,7 +762,7 @@ def _assets(principal: UserPrincipal, repository: EnterpriseRepository) -> None:
                     resource_type="asset",
                     metadata={"reason_code": "VALIDATION_FAILED"},
                 )
-                st.error(str(error))
+                st.error(tr_error(error))
             else:
                 for row in rows:
                     repository.upsert_asset(
@@ -642,9 +783,7 @@ def _assets(principal: UserPrincipal, repository: EnterpriseRepository) -> None:
                     resource_type="asset",
                     metadata={"source_count": len(rows)},
                 )
-                st.session_state.asset_import_notice = _count_phrase(len(rows), "Asset wurde", "Assets wurden") + (
-                    " importiert."
-                )
+                st.session_state.asset_import_notice = len(rows)
                 st.rerun()
 
 
@@ -654,19 +793,26 @@ def _render_answer(
     repository: EnterpriseRepository,
 ) -> None:
     st.markdown(
-        '<div class="hd-notice"><strong>KI-Entwurf</strong><br>Vor jeder technischen Handlung fachlich prüfen.</div>',
+        f'<div class="hd-notice"><strong>{html.escape(tr("KI-Entwurf"))}</strong><br>'
+        f"{html.escape(tr('Vor jeder technischen Handlung fachlich prüfen.'))}</div>",
         unsafe_allow_html=True,
     )
     st.markdown(answer.text)
-    st.subheader("Evidenz")
+    st.subheader(tr("Evidenz"))
     if answer.citations:
         for index, citation in enumerate(answer.citations, start=1):
             st.markdown(
-                f"**S{index}** · {citation.display_name} · Seite {citation.page} · Chunk `{citation.chunk_id[:12]}`"
+                tr(
+                    "**S{index}** · {document} · Seite {page} · Chunk `{chunk}`",
+                    index=index,
+                    document=citation.display_name,
+                    page=citation.page,
+                    chunk=citation.chunk_id[:12],
+                )
             )
     else:
-        st.warning("Keine Dokumentevidenz gefunden.")
-    with st.expander("Provenienz und Grenzen"):
+        st.warning(tr("Keine Dokumentevidenz gefunden."))
+    with st.expander(tr("Provenienz und Grenzen")):
         st.json(
             {
                 "answer_id": answer.answer_id,
@@ -683,9 +829,9 @@ def _render_answer(
         )
     review = st.session_state.get(f"review:{answer.answer_id}")
     if principal.can("review:write") and not review:
-        st.write("Fachprüfung")
+        st.write(tr("Fachprüfung"))
         accept, expert, reject = st.columns(3)
-        if accept.button("Geprüft und akzeptiert", key=f"accept:{answer.answer_id}", width="stretch"):
+        if accept.button(tr("Geprüft und akzeptiert"), key=f"accept:{answer.answer_id}", width="stretch"):
             try:
                 repository.record_review(principal, answer.answer_id, ReviewStatus.ACCEPTED)
                 repository.emit_audit(
@@ -707,8 +853,8 @@ def _render_answer(
                     resource_id=answer.answer_id,
                     metadata={"reason_code": "FOUR_EYES_REVIEW_REQUIRED", "risk_class": answer.risk_class.value},
                 )
-                st.error("Für sicherheitsrelevante Analysen gilt das Vier-Augen-Prinzip.")
-        if expert.button("Experte erforderlich", key=f"expert:{answer.answer_id}", width="stretch"):
+                st.error(tr("Für sicherheitsrelevante Analysen gilt das Vier-Augen-Prinzip."))
+        if expert.button(tr("Experte erforderlich"), key=f"expert:{answer.answer_id}", width="stretch"):
             repository.record_review(principal, answer.answer_id, ReviewStatus.NEEDS_EXPERT, "EXPERT_REVIEW")
             repository.emit_audit(
                 principal,
@@ -720,7 +866,7 @@ def _render_answer(
             )
             st.session_state[f"review:{answer.answer_id}"] = ReviewStatus.NEEDS_EXPERT.value
             st.rerun()
-        if reject.button("Ablehnen", key=f"reject:{answer.answer_id}", width="stretch"):
+        if reject.button(tr("Ablehnen"), key=f"reject:{answer.answer_id}", width="stretch"):
             repository.record_review(principal, answer.answer_id, ReviewStatus.REJECTED, "TECHNICAL_REJECTION")
             repository.emit_audit(
                 principal,
@@ -733,7 +879,7 @@ def _render_answer(
             st.session_state[f"review:{answer.answer_id}"] = ReviewStatus.REJECTED.value
             st.rerun()
     if review:
-        st.info(f"Dokumentierter Reviewstatus: {REVIEW_STATUS_LABELS.get(review, review)}")
+        st.info(tr("Dokumentierter Reviewstatus: {status}", status=label(REVIEW_STATUS_LABELS, review)))
     persisted_review = repository.answer_review_status(principal, answer.answer_id)
     if persisted_review is ReviewStatus.ACCEPTED and principal.can("analysis:export"):
         payload = {
@@ -744,7 +890,7 @@ def _render_answer(
             "review_status": persisted_review.value,
         }
         exported = st.download_button(
-            "Geprüften Nachweis exportieren",
+            tr("Geprüften Nachweis exportieren"),
             json.dumps(payload, default=str, ensure_ascii=False, indent=2),
             file_name=f"hydraulikdoc-analysis-{answer.answer_id}.json",
             mime="application/json",
@@ -760,88 +906,106 @@ def _render_answer(
             )
 
 
+USE_CASE_LABELS = {
+    UseCase.MAINTENANCE_ASSISTANCE: msg("Instandhaltungsunterstützung"),
+    UseCase.SAFETY_RELEVANT_DIAGNOSIS: msg("Sicherheitsrelevante Diagnose mit Pflichtreview"),
+    UseCase.AUTOMATED_MACHINE_CONTROL: msg("Autonome Maschinensteuerung (gesperrt)"),
+    UseCase.EMPLOYEE_MONITORING: msg("Beschäftigtenüberwachung (gesperrt)"),
+    UseCase.OTHER: msg("Sonstige technische Recherche"),
+}
+
+
 def _knowledge(principal: UserPrincipal, repository: EnterpriseRepository, settings: AppSettings) -> None:
-    st.title("Wissensbasis")
+    st.title(tr("Wissensbasis"))
     if settings.demo_mode:
-        st.caption("Demo-Modus: synthetische Handbücher und extraktive Antworten ohne Modellaufruf.")
+        st.caption(tr("Demo-Modus: synthetische Handbücher und extraktive Antworten ohne Modellaufruf."))
     else:
-        st.caption("Azure Document Intelligence, tenant-gefilterte Hybrid-Suche und quellengebundene Antworten.")
+        st.caption(tr("Azure Document Intelligence, tenant-gefilterte Hybrid-Suche und quellengebundene Antworten."))
     documents = repository.list_documents(principal)
     if documents:
         for document in documents:
             columns = st.columns([5, 2, 2])
             columns[0].write(document.display_name)
             columns[1].caption(
-                f"{document.page_count} Seiten · {DOCUMENT_STATUS_LABELS.get(document.status, document.status)}"
+                tr(
+                    "{pages} Seiten · {status}",
+                    pages=document.page_count,
+                    status=label(DOCUMENT_STATUS_LABELS, document.status),
+                )
             )
-            if principal.can("knowledge:write") and columns[2].button("Löschen", key=f"delete:{document.document_id}"):
+            if principal.can("knowledge:write") and columns[2].button(
+                tr("Löschen"), key=f"delete:{document.document_id}"
+            ):
                 try:
                     _rag(settings, repository).delete_document(principal, document.document_id)
                     st.rerun()
                 except Exception as error:
-                    st.error(f"Löschung nicht abgeschlossen. Referenz {public_error_code(error)}")
+                    st.error(
+                        tr("Löschung nicht abgeschlossen. Referenz {reference}", reference=public_error_code(error))
+                    )
     else:
-        st.info("Für diesen Mandanten sind noch keine Dokumente indexiert.")
+        st.info(tr("Für diesen Mandanten sind noch keine Dokumente indexiert."))
 
     if principal.can("knowledge:write"):
-        uploaded = st.file_uploader("Technisches PDF hinzufügen", type=["pdf"], key="manual-upload")
-        if uploaded and st.button("Validieren und indexieren", type="primary", disabled=not settings.azure_ready):
+        uploaded = st.file_uploader(tr("Technisches PDF hinzufügen"), type=["pdf"], key="manual-upload")
+        if uploaded and st.button(tr("Validieren und indexieren"), type="primary", disabled=not settings.azure_ready):
             try:
                 validated = validate_pdf_upload(uploaded.name, uploaded.getvalue(), settings.max_upload_bytes)
-                with st.spinner("Dokument wird sicher gespeichert, strukturiert und indexiert …"):
+                with st.spinner(tr("Dokument wird sicher gespeichert, strukturiert und indexiert …")):
                     _rag(settings, repository).ingest(principal, validated)
-                st.success("Dokument wurde indexiert.")
+                st.success(tr("Dokument wurde indexiert."))
                 st.rerun()
             except (InputRejected, ValueError) as error:
-                st.error(str(error))
+                st.error(tr_error(error))
             except Exception as error:
-                st.error(f"Indexierung fehlgeschlagen. Referenz {public_error_code(error)}")
+                st.error(tr("Indexierung fehlgeschlagen. Referenz {reference}", reference=public_error_code(error)))
         if settings.demo_mode:
-            st.caption("Upload ist im Demo-Modus gesperrt; es stehen nur synthetische Dokumente zur Verfügung.")
+            st.caption(tr("Upload ist im Demo-Modus gesperrt; es stehen nur synthetische Dokumente zur Verfügung."))
         elif not settings.azure_ready:
-            st.caption("Upload ist gesperrt, bis alle Azure-Endpunkte und Deployments konfiguriert sind.")
+            st.caption(tr("Upload ist gesperrt, bis alle Azure-Endpunkte und Deployments konfiguriert sind."))
 
     st.divider()
-    st.subheader("Quellengebundene Abfrage")
+    st.subheader(tr("Quellengebundene Abfrage"))
     accepted = _has_ai_acceptance(principal, repository, settings)
-    labels = {
-        UseCase.MAINTENANCE_ASSISTANCE: "Instandhaltungsunterstützung",
-        UseCase.SAFETY_RELEVANT_DIAGNOSIS: "Sicherheitsrelevante Diagnose mit Pflichtreview",
-        UseCase.AUTOMATED_MACHINE_CONTROL: "Autonome Maschinensteuerung (gesperrt)",
-        UseCase.EMPLOYEE_MONITORING: "Beschäftigtenüberwachung (gesperrt)",
-        UseCase.OTHER: "Sonstige technische Recherche",
-    }
-    use_case = st.selectbox("Verwendungszweck", tuple(labels), format_func=lambda option: labels[option])
+    use_case = st.selectbox(
+        tr("Verwendungszweck"), tuple(USE_CASE_LABELS), format_func=lambda option: label(USE_CASE_LABELS, option)
+    )
     decision = evaluate_use_case(use_case)
     if not decision.allowed:
         st.markdown(
-            f'<div class="hd-notice hd-blocked">Dieser Zweck ist technisch gesperrt: {decision.reason_code}</div>',
+            '<div class="hd-notice hd-blocked">'
+            + html.escape(tr("Dieser Zweck ist technisch gesperrt: {reason}", reason=decision.reason_code))
+            + "</div>",
             unsafe_allow_html=True,
         )
     question = st.text_area(
-        "Technische Frage",
+        tr("Technische Frage"),
         max_chars=settings.max_question_chars,
-        placeholder="Welcher Betriebsdruck gilt für die konfigurierte Pumpenbaureihe und welche Prüfhinweise nennt das Handbuch?",
+        placeholder=tr(
+            "Welcher Betriebsdruck gilt für die konfigurierte Pumpenbaureihe und welche Prüfhinweise nennt das Handbuch?"
+        ),
     )
     if settings.demo_mode:
         st.caption(
-            "Beispielfragen: Welcher Betriebsdruck gilt für HA-250? · Wie hoch darf der Wassergehalt sein? · "
-            "Was ist bei hoher Partikelzahl zu tun?"
+            tr(
+                "Beispielfragen: Welcher Betriebsdruck gilt für HA-250? · Wie hoch darf der Wassergehalt sein? · "
+                "Was ist bei hoher Partikelzahl zu tun?"
+            )
         )
     disabled = not accepted or not settings.ai_ready or not decision.allowed
-    if st.button("KI-Entwurf erzeugen", type="primary", disabled=disabled):
+    if st.button(tr("KI-Entwurf erzeugen"), type="primary", disabled=disabled):
         try:
-            with st.spinner("Hybrid Retrieval und Evidenzprüfung laufen …"):
+            with st.spinner(tr("Hybrid Retrieval und Evidenzprüfung laufen …")):
                 st.session_state.current_answer = _rag(settings, repository).ask(principal, question, use_case)
         except (InputRejected, PermissionError, AuthenticationError) as error:
-            st.error(str(error))
+            st.error(tr_error(error))
         except Exception as error:
-            st.error(f"Abfrage fehlgeschlagen. Referenz {public_error_code(error)}")
+            st.error(tr("Abfrage fehlgeschlagen. Referenz {reference}", reference=public_error_code(error)))
     answer = st.session_state.get("current_answer")
     if answer:
         _render_answer(answer, principal, repository)
     if not accepted:
-        st.info("Der KI-Nutzerhinweis muss im Bereich Governance bestätigt werden.")
+        st.info(tr("Der KI-Nutzerhinweis muss im Bereich Governance bestätigt werden."))
 
 
 def _parse_optional_float(row: dict[str, str], key: str) -> float | None:
@@ -857,29 +1021,32 @@ def _parse_optional_float(row: dict[str, str], key: str) -> float | None:
         "water_content_pct": 100.0,
     }
     if not 0 <= parsed <= limits[key]:
-        raise ValueError(f"{key} liegt außerhalb des zulässigen technischen Wertebereichs")
+        raise ValueError(msg("{column} liegt außerhalb des zulässigen technischen Wertebereichs", column=key))
     return parsed
 
 
 def _parse_sensor_csv(content: bytes) -> tuple[SensorReading, ...]:
     if len(content) > 5 * 1024 * 1024:
-        raise ValueError("CSV überschreitet 5 MB")
+        raise ValueError(msg("CSV überschreitet 5 MB"))
     text = content.decode("utf-8-sig")
     reader = csv.DictReader(io.StringIO(text))
     required = {"timestamp"}
     if not reader.fieldnames or not required.issubset(reader.fieldnames):
-        raise ValueError("CSV benötigt mindestens die Spalte timestamp")
+        raise ValueError(msg("CSV benötigt mindestens die Spalte timestamp"))
     allowed = {"timestamp", "pressure_bar", "temperature_c", "flow_l_min", "particle_count", "water_content_pct"}
     if not set(reader.fieldnames).issubset(allowed):
-        raise ValueError("CSV enthält nicht freigegebene Spalten")
+        raise ValueError(msg("CSV enthält nicht freigegebene Spalten"))
     readings = []
     for index, row in enumerate(reader):
         if index >= 10_000:
-            raise ValueError("CSV darf höchstens 10.000 Messzeilen enthalten")
+            raise ValueError(msg("CSV darf höchstens 10.000 Messzeilen enthalten"))
         stamp = (row.get("timestamp") or "").replace("Z", "+00:00")
-        timestamp = datetime.fromisoformat(stamp)
+        try:
+            timestamp = datetime.fromisoformat(stamp)
+        except ValueError as error:
+            raise ValueError(msg("Ungültiger Zeitstempel in Zeile {line}", line=index + 2)) from error
         if timestamp.tzinfo is None:
-            raise ValueError("Zeitstempel müssen eine Zeitzone enthalten")
+            raise ValueError(msg("Zeitstempel müssen eine Zeitzone enthalten"))
         readings.append(
             SensorReading(
                 timestamp=timestamp,
@@ -891,40 +1058,42 @@ def _parse_sensor_csv(content: bytes) -> tuple[SensorReading, ...]:
             )
         )
     if not readings:
-        raise ValueError("CSV enthält keine Messwerte")
+        raise ValueError(msg("CSV enthält keine Messwerte"))
     return tuple(sorted(readings, key=lambda item: item.timestamp))
 
 
 def _condition_monitoring(principal: UserPrincipal, repository: EnterpriseRepository, settings: AppSettings) -> None:
-    st.title("Condition Monitoring")
+    st.title(tr("Condition Monitoring"))
     st.caption(
-        "Deterministische Grenzwertprüfung für Druck, Temperatur, Volumenstrom und Fluidzustand. Grenzwerte sind anlagenbezogen zu bestätigen."
+        tr(
+            "Deterministische Grenzwertprüfung für Druck, Temperatur, Volumenstrom und Fluidzustand. Grenzwerte sind anlagenbezogen zu bestätigen."
+        )
     )
     assets = repository.list_assets(principal)
     asset_ids = [item.asset_id for item in assets]
-    asset_id = st.selectbox("Asset", asset_ids) if asset_ids else st.text_input("Asset-ID")
-    with st.expander("Betriebsgrenzen", expanded=True):
+    asset_id = st.selectbox(tr("Asset"), asset_ids) if asset_ids else st.text_input(tr("Asset-ID"))
+    with st.expander(tr("Betriebsgrenzen"), expanded=True):
         c1, c2, c3 = st.columns(3)
-        pressure_warning = c1.number_input("Druckwarnung (bar)", min_value=0.0, value=250.0)
-        pressure_critical = c1.number_input("Druck-Prüfgrenze (bar)", min_value=0.0, value=300.0)
-        temperature_warning = c2.number_input("Temperaturwarnung (°C)", min_value=0.0, value=70.0)
-        temperature_critical = c2.number_input("Temperatur-Prüfgrenze (°C)", min_value=0.0, value=85.0)
-        minimum_flow = c3.number_input("Mindestvolumenstrom (l/min)", min_value=0.0, value=5.0)
-        particle_warning = c3.number_input("Partikelwarnung (#/ml)", min_value=0.0, value=1000.0)
+        pressure_warning = c1.number_input(tr("Druckwarnung (bar)"), min_value=0.0, value=250.0)
+        pressure_critical = c1.number_input(tr("Druck-Prüfgrenze (bar)"), min_value=0.0, value=300.0)
+        temperature_warning = c2.number_input(tr("Temperaturwarnung (°C)"), min_value=0.0, value=70.0)
+        temperature_critical = c2.number_input(tr("Temperatur-Prüfgrenze (°C)"), min_value=0.0, value=85.0)
+        minimum_flow = c3.number_input(tr("Mindestvolumenstrom (l/min)"), min_value=0.0, value=5.0)
+        particle_warning = c3.number_input(tr("Partikelwarnung (#/ml)"), min_value=0.0, value=1000.0)
     uploaded = st.file_uploader(
-        "Messdaten-CSV",
+        tr("Messdaten-CSV"),
         type=["csv"],
-        help="Spalten: timestamp, pressure_bar, temperature_c, flow_l_min, particle_count, water_content_pct",
+        help=tr("Spalten: timestamp, pressure_bar, temperature_c, flow_l_min, particle_count, water_content_pct"),
     )
     use_sample = settings.demo_mode and st.toggle(
-        "Synthetische Beispiel-Messreihe verwenden (48 h, steigender Druck und Temperatur)",
+        tr("Synthetische Beispiel-Messreihe verwenden (48 h, steigender Druck und Temperatur)"),
         key="condition-demo-sample",
     )
     limits_confirmed = st.checkbox(
-        "Ich bestätige, dass diese Betriebsgrenzen für das ausgewählte Asset fachlich freigegeben sind.",
+        tr("Ich bestätige, dass diese Betriebsgrenzen für das ausgewählte Asset fachlich freigegeben sind."),
         key="condition-limits-confirmed",
     )
-    if (uploaded or use_sample) and st.button("Messreihe prüfen", type="primary", disabled=not limits_confirmed):
+    if (uploaded or use_sample) and st.button(tr("Messreihe prüfen"), type="primary", disabled=not limits_confirmed):
         try:
             content = demo_sensor_csv() if use_sample or uploaded is None else uploaded.getvalue()
             readings = _parse_sensor_csv(content)
@@ -951,28 +1120,28 @@ def _condition_monitoring(principal: UserPrincipal, repository: EnterpriseReposi
                 },
             )
         except Exception as error:
-            st.error(str(error))
+            st.error(tr_error(error))
     assessment: ConditionAssessment | None = st.session_state.get("condition_assessment")
     if not assessment:
         return
     st.metric(
-        "Zustand",
-        INCIDENT_SEVERITY_LABELS.get(assessment.severity.value, assessment.severity.value),
-        f"{assessment.sample_count} Messpunkte",
+        tr("Zustand"),
+        label(INCIDENT_SEVERITY_LABELS, assessment.severity.value),
+        tr("{n} Messpunkte", n=assessment.sample_count),
         delta_color="off",
     )
     if assessment.requires_shutdown_assessment:
-        st.error("Kritische Prüfgrenze erreicht. Qualifizierte Abschalt- und Sicherheitsbewertung erforderlich.")
+        st.error(tr("Kritische Prüfgrenze erreicht. Qualifizierte Abschalt- und Sicherheitsbewertung erforderlich."))
     if assessment.signals:
         st.dataframe(
             [
                 {
-                    "Code": signal.code,
-                    "Stufe": INCIDENT_SEVERITY_LABELS.get(signal.severity.value, signal.severity.value),
-                    "Hinweis": signal.message,
-                    "Wert": signal.value,
-                    "Grenze": signal.threshold,
-                    "Einheit": signal.unit,
+                    tr("Code"): signal.code,
+                    tr("Stufe"): label(INCIDENT_SEVERITY_LABELS, signal.severity.value),
+                    tr("Hinweis"): tr(signal.message),
+                    tr("Wert"): signal.value,
+                    tr("Grenze"): signal.threshold,
+                    tr("Einheit"): signal.unit,
                 }
                 for signal in assessment.signals
             ],
@@ -980,9 +1149,9 @@ def _condition_monitoring(principal: UserPrincipal, repository: EnterpriseReposi
             hide_index=True,
         )
     else:
-        st.success("Keine konfigurierte Grenze wurde verletzt.")
+        st.success(tr("Keine konfigurierte Grenze wurde verletzt."))
     if principal.can("incident:write") and assessment.severity is not Severity.OK:
-        if st.button("Incident aus Bewertung anlegen"):
+        if st.button(tr("Incident aus Bewertung anlegen")):
             incident = repository.create_incident(
                 principal,
                 asset_id=st.session_state.get("condition_asset_id") or "unassigned",
@@ -990,30 +1159,30 @@ def _condition_monitoring(principal: UserPrincipal, repository: EnterpriseReposi
                 severity=assessment.severity.value,
                 details="\n".join(f"{signal.code}: {signal.message}" for signal in assessment.signals),
             )
-            st.success(f"Incident {incident.incident_id} wurde angelegt.")
+            st.success(tr("Incident {incident_id} wurde angelegt.", incident_id=incident.incident_id))
 
 
 def _fluid(principal: UserPrincipal, repository: EnterpriseRepository) -> None:
-    st.title("Fluid & Service Advisor")
-    st.caption("Regelbasierte Vorbewertung. ISO-/Herstellergrenzen müssen je Anlage freigegeben werden.")
+    st.title(tr("Fluid & Service Advisor"))
+    st.caption(tr("Regelbasierte Vorbewertung. ISO-/Herstellergrenzen müssen je Anlage freigegeben werden."))
     assets = repository.list_assets(principal)
     asset_id = (
-        st.selectbox("Asset", [item.asset_id for item in assets], key="fluid-asset")
+        st.selectbox(tr("Asset"), [item.asset_id for item in assets], key="fluid-asset")
         if assets
-        else st.text_input("Asset-ID", key="fluid-asset-text")
+        else st.text_input(tr("Asset-ID"), key="fluid-asset-text")
     )
     left, right = st.columns(2)
-    particle_count = left.number_input("Partikelzahl (#/ml)", min_value=0.0, value=0.0)
-    water_content = right.number_input("Wassergehalt (%)", min_value=0.0, max_value=100.0, value=0.0, step=0.01)
-    particle_warning = left.number_input("Freigegebene Partikelwarngrenze (#/ml)", min_value=0.0, value=1000.0)
+    particle_count = left.number_input(tr("Partikelzahl (#/ml)"), min_value=0.0, value=0.0)
+    water_content = right.number_input(tr("Wassergehalt (%)"), min_value=0.0, max_value=100.0, value=0.0, step=0.01)
+    particle_warning = left.number_input(tr("Freigegebene Partikelwarngrenze (#/ml)"), min_value=0.0, value=1000.0)
     water_critical = right.number_input(
-        "Freigegebene Wasser-Prüfgrenze (%)", min_value=0.0, max_value=100.0, value=0.1, step=0.01
+        tr("Freigegebene Wasser-Prüfgrenze (%)"), min_value=0.0, max_value=100.0, value=0.1, step=0.01
     )
     limits_confirmed = st.checkbox(
-        "Ich bestätige, dass die Fluidgrenzen für dieses Asset fachlich freigegeben sind.",
+        tr("Ich bestätige, dass die Fluidgrenzen für dieses Asset fachlich freigegeben sind."),
         key="fluid-limits-confirmed",
     )
-    if st.button("Fluidprobe bewerten", type="primary", disabled=not limits_confirmed):
+    if st.button(tr("Fluidprobe bewerten"), type="primary", disabled=not limits_confirmed):
         st.session_state.fluid_assessment = assess_fluid(
             FluidSample(
                 asset_id=asset_id or "unassigned",
@@ -1025,11 +1194,16 @@ def _fluid(principal: UserPrincipal, repository: EnterpriseRepository) -> None:
         )
     assessment = st.session_state.get("fluid_assessment")
     if assessment:
-        st.metric("Regelindikator (nicht normiert)", f"{assessment.score}/100", assessment.status)
-        st.write(assessment.summary)
+        st.metric(
+            tr("Regelindikator (nicht normiert)"),
+            f"{assessment.score}/100",
+            label(FLUID_STATUS_LABELS, assessment.status),
+            delta_color="off",
+        )
+        st.write(tr(assessment.summary))
         for recommendation in assessment.recommendations:
-            st.write(f"• {recommendation}")
-        if principal.can("incident:write") and assessment.status != "OK" and st.button("Fluid-Incident anlegen"):
+            st.write(f"• {tr(recommendation)}")
+        if principal.can("incident:write") and assessment.status != "OK" and st.button(tr("Fluid-Incident anlegen")):
             incident = repository.create_incident(
                 principal,
                 asset_id=assessment.asset_id,
@@ -1037,7 +1211,7 @@ def _fluid(principal: UserPrincipal, repository: EnterpriseRepository) -> None:
                 severity="critical" if assessment.status == "KRITISCH" else "warning",
                 details="\n".join(assessment.recommendations),
             )
-            st.success(f"Incident {incident.incident_id} wurde angelegt.")
+            st.success(tr("Incident {incident_id} wurde angelegt.", incident_id=incident.incident_id))
 
 
 def _incident_option_label(incident: IncidentRecord) -> str:
@@ -1066,8 +1240,11 @@ def _transition_incident(
             metadata={"reason_code": reason, "previous_status": incident.status, "incident_status": target},
         )
         st.error(
-            "Statuswechsel nicht durchgeführt. Der Incident wurde zwischenzeitlich geändert "
-            f"oder Ihre Rolle ist dafür nicht freigegeben. Referenz {reason}"
+            tr(
+                "Statuswechsel nicht durchgeführt. Der Incident wurde zwischenzeitlich geändert oder Ihre Rolle "
+                "ist dafür nicht freigegeben. Referenz {reason}",
+                reason=reason,
+            )
         )
         return
     repository.emit_audit(
@@ -1078,24 +1255,29 @@ def _transition_incident(
         resource_id=updated.incident_id,
         metadata={"previous_status": incident.status, "incident_status": updated.status, "role": principal.role},
     )
-    st.session_state.incident_notice = (
-        f"Incident {updated.incident_id[:8]} steht jetzt auf „{INCIDENT_STATUS_LABELS[updated.status]}“."
-    )
+    st.session_state.incident_notice = ("status", updated.incident_id[:8], updated.status)
     st.rerun()
 
 
 def _incident_detail(principal: UserPrincipal, repository: EnterpriseRepository, incident: IncidentRecord) -> None:
-    status_label = INCIDENT_STATUS_LABELS.get(incident.status, incident.status)
-    severity_label = INCIDENT_SEVERITY_LABELS.get(incident.severity, incident.severity)
+    status_label = label(INCIDENT_STATUS_LABELS, incident.status)
+    severity_label = label(INCIDENT_SEVERITY_LABELS, incident.severity)
     critical = incident.severity in CRITICAL_SEVERITIES and incident.status in OPEN_INCIDENT_STATUSES
+    fields = {
+        "status": html.escape(tr("Status")),
+        "severity": html.escape(tr("Schwere")),
+        "asset": html.escape(tr("Asset")),
+        "created": html.escape(tr("Erstellt")),
+        "updated": html.escape(tr("Letzte Änderung")),
+    }
     st.markdown(
         f"""
         <div class="hd-incident{" hd-incident-critical" if critical else ""}">
-          <div><strong>Status</strong><span class="hd-status hd-status-{html.escape(incident.status)}">{html.escape(status_label)}</span></div>
-          <div><strong>Schwere</strong>{html.escape(severity_label)}</div>
-          <div><strong>Asset</strong><code>{html.escape(incident.asset_id)}</code></div>
-          <div><strong>Erstellt</strong>{incident.created_at:%d.%m.%Y %H:%M} UTC</div>
-          <div><strong>Letzte Änderung</strong>{(incident.updated_at or incident.created_at):%d.%m.%Y %H:%M} UTC</div>
+          <div><strong>{fields["status"]}</strong><span class="hd-status hd-status-{html.escape(incident.status)}">{html.escape(status_label)}</span></div>
+          <div><strong>{fields["severity"]}</strong>{html.escape(severity_label)}</div>
+          <div><strong>{fields["asset"]}</strong><code>{html.escape(incident.asset_id)}</code></div>
+          <div><strong>{fields["created"]}</strong>{fmt_datetime(incident.created_at)} UTC</div>
+          <div><strong>{fields["updated"]}</strong>{fmt_datetime(incident.updated_at or incident.created_at)} UTC</div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -1104,10 +1286,12 @@ def _incident_detail(principal: UserPrincipal, repository: EnterpriseRepository,
     if incident.details:
         st.text(incident.details)
     else:
-        st.caption("Keine Befunddetails hinterlegt.")
+        st.caption(tr("Keine Befunddetails hinterlegt."))
     if critical:
         st.warning(
-            "Kritischer Befund: Abschalt-, Sicherheits- und LOTO-Bewertung durch eine qualifizierte Person dokumentieren."
+            tr(
+                "Kritischer Befund: Abschalt-, Sicherheits- und LOTO-Bewertung durch eine qualifizierte Person dokumentieren."
+            )
         )
     _incident_analysis(principal, repository, incident)
     _incident_actions(principal, repository, incident)
@@ -1115,45 +1299,52 @@ def _incident_detail(principal: UserPrincipal, repository: EnterpriseRepository,
 
 
 def _incident_analysis(principal: UserPrincipal, repository: EnterpriseRepository, incident: IncidentRecord) -> None:
-    st.markdown("#### Analyse und Maßnahmen (8D)")
+    st.markdown(f"#### {tr('Analyse und Maßnahmen (8D)')}")
     if incident.severity in EIGHT_D_SEVERITIES:
         st.caption(
-            "8D-pflichtig: D3, D4 und D5/D6 sind vor „Als behoben melden“ zu dokumentieren, D7 vor der Abnahme. "
-            f"Je Feld mindestens {INCIDENT_ANALYSIS_MIN_CHARS} Zeichen."
+            tr(
+                "8D-pflichtig: D3, D4 und D5/D6 sind vor „Als behoben melden“ zu dokumentieren, D7 vor der "
+                "Abnahme. Je Feld mindestens {min_chars} Zeichen.",
+                min_chars=INCIDENT_ANALYSIS_MIN_CHARS,
+            )
         )
     else:
         st.caption(
-            "Vor „Als behoben melden“ ist mindestens die Abstellmaßnahme (D5/D6) zu dokumentieren. "
-            "Die übrigen Felder sind empfohlen."
+            tr(
+                "Vor „Als behoben melden“ ist mindestens die Abstellmaßnahme (D5/D6) zu dokumentieren. "
+                "Die übrigen Felder sind empfohlen."
+            )
         )
     editable = principal.can("incident:write") and incident.status != "closed"
     if not editable:
         for field in INCIDENT_ANALYSIS_FIELDS:
-            st.markdown(f"**{ANALYSIS_LABELS[field]}**")
+            st.markdown(f"**{label(ANALYSIS_LABELS, field)}**")
             value = getattr(incident, field)
             if value:
                 st.text(value)
             else:
-                st.caption("Nicht dokumentiert.")
+                st.caption(tr("Nicht dokumentiert."))
         return
     st.caption(
-        "Ursachen technisch und prozessbezogen beschreiben. Keine Personennamen, Schuldzuweisungen oder "
-        "Leistungsbewertungen eintragen; HydraulikDoc ist kein Werkzeug zur Beschäftigtenbewertung."
+        tr(
+            "Ursachen technisch und prozessbezogen beschreiben. Keine Personennamen, Schuldzuweisungen oder "
+            "Leistungsbewertungen eintragen; HydraulikDoc ist kein Werkzeug zur Beschäftigtenbewertung."
+        )
     )
     version = (incident.updated_at or incident.created_at).timestamp()
     with st.form(f"incident-analysis:{incident.incident_id}"):
         values = {
             field: st.text_area(
-                ANALYSIS_LABELS[field],
+                label(ANALYSIS_LABELS, field),
                 value=getattr(incident, field),
                 max_chars=INCIDENT_ANALYSIS_MAX_CHARS,
                 height=90,
                 key=f"analysis:{incident.incident_id}:{field}:{version}",
-                help=ANALYSIS_HELP[field],
+                help=label(ANALYSIS_HELP, field),
             )
             for field in INCIDENT_ANALYSIS_FIELDS
         }
-        submitted = st.form_submit_button("Analyse speichern")
+        submitted = st.form_submit_button(tr("Analyse speichern"))
     if not submitted:
         return
     try:
@@ -1166,8 +1357,11 @@ def _incident_analysis(principal: UserPrincipal, repository: EnterpriseRepositor
     except (PermissionError, IncidentTransitionRejected, KeyError) as error:
         reason = error.args[0] if isinstance(error, (PermissionError, IncidentTransitionRejected)) else "NOT_FOUND"
         st.error(
-            "Analyse nicht gespeichert. Der Incident wurde zwischenzeitlich geändert oder ist abgeschlossen; "
-            f"bitte Ansicht neu laden. Referenz {reason}"
+            tr(
+                "Analyse nicht gespeichert. Der Incident wurde zwischenzeitlich geändert oder ist abgeschlossen; "
+                "bitte Ansicht neu laden. Referenz {reason}",
+                reason=reason,
+            )
         )
         return
     repository.emit_audit(
@@ -1178,29 +1372,29 @@ def _incident_analysis(principal: UserPrincipal, repository: EnterpriseRepositor
         resource_id=incident.incident_id,
         metadata={"incident_status": incident.status, "role": principal.role},
     )
-    st.session_state.incident_notice = f"Analyse für Incident {incident.incident_id[:8]} wurde gespeichert."
+    st.session_state.incident_notice = ("analysis", incident.incident_id[:8], incident.status)
     st.rerun()
 
 
 def _incident_actions(principal: UserPrincipal, repository: EnterpriseRepository, incident: IncidentRecord) -> None:
     next_statuses = INCIDENT_TRANSITIONS.get(incident.status, ())
     if not next_statuses:
-        st.caption("Abgeschlossen. Weitere Statuswechsel und Änderungen der Analyse sind nicht vorgesehen.")
+        st.caption(tr("Abgeschlossen. Weitere Statuswechsel und Änderungen der Analyse sind nicht vorgesehen."))
         return
     if not principal.can("incident:write"):
-        st.caption("Ihre Rolle darf Incidents einsehen, aber keinen Status ändern.")
+        st.caption(tr("Ihre Rolle darf Incidents einsehen, aber keinen Status ändern."))
         return
-    st.write("Nächster Schritt")
+    st.write(tr("Nächster Schritt"))
     columns = st.columns(len(next_statuses))
     for column, target in zip(columns, next_statuses, strict=True):
-        label = INCIDENT_ACTION_LABELS.get(target, INCIDENT_STATUS_LABELS[target])
+        action_label = label(INCIDENT_ACTION_LABELS, target)
         if target == "in_progress" and incident.status == "resolved":
-            label = "Wieder öffnen"
+            action_label = tr("Wieder öffnen")
         missing = missing_analysis_fields(incident, target)
         role_allowed = target != "closed" or principal.can(INCIDENT_CLOSE_PERMISSION)
         allowed = role_allowed and not missing
         if column.button(
-            label,
+            action_label,
             key=f"incident:{incident.incident_id}:{target}",
             type="primary" if target == next_statuses[0] and allowed else "secondary",
             disabled=not allowed,
@@ -1208,34 +1402,43 @@ def _incident_actions(principal: UserPrincipal, repository: EnterpriseRepository
         ):
             _transition_incident(principal, repository, incident, target)
         if not role_allowed:
-            column.caption("Abnahme erfordert die Rolle Supervisor oder Admin.")
+            column.caption(tr("Abnahme erfordert die Rolle Supervisor oder Admin."))
         elif missing:
-            column.caption("Zuerst dokumentieren: " + ", ".join(ANALYSIS_LABELS[field] for field in missing) + ".")
+            column.caption(
+                tr(
+                    "Zuerst dokumentieren: {fields}.",
+                    fields=", ".join(label(ANALYSIS_LABELS, field) for field in missing),
+                )
+            )
 
 
 def _incident_history(principal: UserPrincipal, repository: EnterpriseRepository, incident: IncidentRecord) -> None:
-    st.markdown("#### Verlauf")
+    st.markdown(f"#### {tr('Verlauf')}")
     events = repository.list_incident_events(principal, incident.incident_id)
     if not events:
-        st.caption("Für diesen Incident liegt kein Verlauf vor (vor Einführung der Verlaufserfassung angelegt).")
+        st.caption(tr("Für diesen Incident liegt kein Verlauf vor (vor Einführung der Verlaufserfassung angelegt)."))
         return
     entries = []
     for event in events:
         if event.event_type == "created":
-            text = "Angelegt"
+            text = tr("Angelegt")
         elif event.event_type == "status_changed":
-            previous = INCIDENT_STATUS_LABELS.get(event.previous_status or "", event.previous_status or "–")
-            current = INCIDENT_STATUS_LABELS.get(event.new_status or "", event.new_status or "–")
-            text = f"Status {previous} → {current}"
+            text = tr(
+                "Status {previous} → {current}",
+                previous=label(INCIDENT_STATUS_LABELS, event.previous_status or "–"),
+                current=label(INCIDENT_STATUS_LABELS, event.new_status or "–"),
+            )
         else:
-            text = "Analyse und Maßnahmen aktualisiert"
-        actor = ROLE_LABELS.get(event.actor_role, event.actor_role) + (" (Sie)" if event.is_own else "")
+            text = tr("Analyse und Maßnahmen aktualisiert")
+        actor = label(ROLE_LABELS, event.actor_role)
+        if event.is_own:
+            actor = tr("{role} (Sie)", role=actor)
         entries.append(
-            f'<li><time datetime="{event.occurred_at.isoformat()}">{event.occurred_at:%d.%m.%Y %H:%M} UTC</time>'
+            f'<li><time datetime="{event.occurred_at.isoformat()}">{fmt_datetime(event.occurred_at)} UTC</time>'
             f"<span>{html.escape(text)}</span><small>{html.escape(actor)}</small></li>"
         )
     st.markdown(f'<ol class="hd-timeline">{"".join(entries)}</ol>', unsafe_allow_html=True)
-    st.caption("Personen werden nur mit Rolle angezeigt; die pseudonymisierte Kennung bleibt im Auditnachweis.")
+    st.caption(tr("Personen werden nur mit Rolle angezeigt; die pseudonymisierte Kennung bleibt im Auditnachweis."))
 
 
 def _render_sap_handover(
@@ -1243,28 +1446,40 @@ def _render_sap_handover(
     repository: EnterpriseRepository,
     incidents: list[IncidentRecord],
 ) -> None:
-    with st.expander("Übergabe an SAP PM (Instandhaltungsmeldung)"):
+    with st.expander(tr("Übergabe an SAP PM (Instandhaltungsmeldung)")):
         st.caption(
-            "Erzeugt eine CSV-Übergabedatei für die gefilterten Incidents mit den SAP-PM-Feldern QMART, QMTXT "
-            "(40 Zeichen), PRIOK, TPLNR und EQUNR sowie HydraulikDoc-Referenzen. Es besteht keine Live-Verbindung "
-            "zu SAP; Feldmapping und Prioritätsschema sind vor dem Upload durch Ihr SAP-Team zu validieren."
+            tr(
+                "Erzeugt eine CSV-Übergabedatei für die gefilterten Incidents mit den SAP-PM-Feldern QMART, QMTXT "
+                "(40 Zeichen), PRIOK, TPLNR und EQUNR sowie HydraulikDoc-Referenzen. Es besteht keine Live-Verbindung "
+                "zu SAP; Feldmapping und Prioritätsschema sind vor dem Upload durch Ihr SAP-Team zu validieren."
+            )
         )
         notification_type = (
-            st.text_input("Meldungsart (QMART)", value="M2", max_chars=2, key="sap-notification-type").strip().upper()
+            st.text_input(tr("Meldungsart (QMART)"), value="M2", max_chars=2, key="sap-notification-type")
+            .strip()
+            .upper()
         )
         try:
             export = build_sap_notifications(incidents, repository.list_assets(principal), notification_type)
         except ValueError as error:
-            st.error(str(error))
+            st.error(tr_error(error))
             return
         if export.missing_reference:
             st.warning(
-                _count_phrase(len(export.missing_reference), "Incident hat", "Incidents haben")
-                + " kein Asset mit Technischem Platz oder Equipment. Die Meldung ist dann keinem Technischen"
-                " Objekt zugeordnet; Referenz im Asset Register ergänzen."
+                tr_plural(
+                    len(export.missing_reference),
+                    "{n} Incident hat kein Asset mit Technischem Platz oder Equipment. Die Meldung ist dann keinem "
+                    "Technischen Objekt zugeordnet; Referenz im Asset Register ergänzen.",
+                    "{n} Incidents haben kein Asset mit Technischem Platz oder Equipment. Die Meldung ist dann keinem "
+                    "Technischen Objekt zugeordnet; Referenz im Asset Register ergänzen.",
+                )
             )
         exported = st.download_button(
-            _count_phrase(len(export.rows), "Meldung", "Meldungen") + " als SAP-PM-Übergabedatei herunterladen",
+            tr_plural(
+                len(export.rows),
+                "{n} Meldung als SAP-PM-Übergabedatei herunterladen",
+                "{n} Meldungen als SAP-PM-Übergabedatei herunterladen",
+            ),
             to_spreadsheet_csv(export.rows, SAP_NOTIFICATION_COLUMNS),
             file_name=f"hydraulikdoc-sap-pm-meldungen-{datetime.now(UTC):%Y%m%d-%H%M}.csv",
             mime="text/csv",
@@ -1281,16 +1496,30 @@ def _render_sap_handover(
 
 
 def _incidents(principal: UserPrincipal, repository: EnterpriseRepository) -> None:
-    st.title("Incident Workflow")
+    st.title(tr("Incident Workflow"))
     st.caption(
-        "Technische Auffälligkeiten werden nachvollziehbar erfasst; Meldepflichten bleiben organisatorisch zu bewerten."
+        tr(
+            "Technische Auffälligkeiten werden nachvollziehbar erfasst; Meldepflichten bleiben organisatorisch zu bewerten."
+        )
     )
     if notice := st.session_state.pop("incident_notice", None):
-        st.success(notice)
+        kind, short_id, status = notice
+        if kind == "analysis":
+            st.success(tr("Analyse für Incident {id} wurde gespeichert.", id=short_id))
+        else:
+            st.success(
+                tr(
+                    "Incident {id} steht jetzt auf „{status}“.",
+                    id=short_id,
+                    status=label(INCIDENT_STATUS_LABELS, status),
+                )
+            )
     incidents = repository.list_incidents(principal)
     if not incidents:
         st.info(
-            "Keine Incidents vorhanden. Incidents entstehen aus einer Bewertung im Condition Monitoring oder im Fluid-Bereich."
+            tr(
+                "Keine Incidents vorhanden. Incidents entstehen aus einer Bewertung im Condition Monitoring oder im Fluid-Bereich."
+            )
         )
         return
 
@@ -1298,7 +1527,7 @@ def _incidents(principal: UserPrincipal, repository: EnterpriseRepository) -> No
     st.markdown(
         '<div class="hd-state hd-state-wide">'
         + "".join(
-            f"<div><strong>{INCIDENT_STATUS_LABELS[status]}</strong>{counts[status]}</div>"
+            f"<div><strong>{html.escape(label(INCIDENT_STATUS_LABELS, status))}</strong>{counts[status]}</div>"
             for status in INCIDENT_STATUSES
         )
         + "</div>",
@@ -1307,10 +1536,10 @@ def _incidents(principal: UserPrincipal, repository: EnterpriseRepository) -> No
 
     status_filter, severity_filter, asset_filter = st.columns(3)
     selected_statuses = status_filter.multiselect(
-        "Status",
+        tr("Status"),
         INCIDENT_STATUSES,
         default=DEFAULT_INCIDENT_FILTER,
-        format_func=lambda option: INCIDENT_STATUS_LABELS[option],
+        format_func=lambda option: label(INCIDENT_STATUS_LABELS, option),
         key="incident-status-filter",
     )
     severities = sorted(
@@ -1318,15 +1547,15 @@ def _incidents(principal: UserPrincipal, repository: EnterpriseRepository) -> No
         key=lambda option: tuple(INCIDENT_SEVERITY_LABELS).index(option) if option in INCIDENT_SEVERITY_LABELS else 99,
     )
     selected_severities = severity_filter.multiselect(
-        "Schwere",
+        tr("Schwere"),
         severities,
-        format_func=lambda option: INCIDENT_SEVERITY_LABELS.get(option, option),
-        placeholder="Alle",
+        format_func=lambda option: label(INCIDENT_SEVERITY_LABELS, option),
+        placeholder=tr("Alle"),
         key="incident-severity-filter",
     )
     asset_ids = sorted({item.asset_id for item in incidents})
     selected_asset = asset_filter.selectbox(
-        "Asset", ("", *asset_ids), format_func=lambda option: option or "Alle", key="incident-asset-filter"
+        tr("Asset"), ("", *asset_ids), format_func=lambda option: option or tr("Alle"), key="incident-asset-filter"
     )
     visible = [
         item
@@ -1336,18 +1565,18 @@ def _incidents(principal: UserPrincipal, repository: EnterpriseRepository) -> No
         and (not selected_asset or item.asset_id == selected_asset)
     ]
     if not visible:
-        st.info("Kein Incident entspricht den gewählten Filtern.")
+        st.info(tr("Kein Incident entspricht den gewählten Filtern."))
         return
     st.dataframe(
         [
             {
-                "ID": item.incident_id[:8],
-                "Asset": item.asset_id,
-                "Titel": item.title,
-                "Schwere": INCIDENT_SEVERITY_LABELS.get(item.severity, item.severity),
-                "Status": INCIDENT_STATUS_LABELS.get(item.status, item.status),
-                "Erstellt": item.created_at.strftime("%d.%m.%Y %H:%M"),
-                "Geändert": (item.updated_at or item.created_at).strftime("%d.%m.%Y %H:%M"),
+                tr("ID"): item.incident_id[:8],
+                tr("Asset"): item.asset_id,
+                tr("Titel"): item.title,
+                tr("Schwere"): label(INCIDENT_SEVERITY_LABELS, item.severity),
+                tr("Status"): label(INCIDENT_STATUS_LABELS, item.status),
+                tr("Erstellt"): fmt_datetime(item.created_at),
+                tr("Geändert"): fmt_datetime(item.updated_at or item.created_at),
             }
             for item in visible
         ],
@@ -1356,10 +1585,10 @@ def _incidents(principal: UserPrincipal, repository: EnterpriseRepository) -> No
     )
     if principal.can("incident:write"):
         _render_sap_handover(principal, repository, visible)
-    st.subheader("Incident bearbeiten")
+    st.subheader(tr("Incident bearbeiten"))
     by_id = {item.incident_id: item for item in visible}
     selected_id = st.selectbox(
-        "Incident",
+        tr("Incident"),
         tuple(by_id),
         format_func=lambda option: _incident_option_label(by_id[option]),
         key="incident-selected",
@@ -1367,70 +1596,91 @@ def _incidents(principal: UserPrincipal, repository: EnterpriseRepository) -> No
     _incident_detail(principal, repository, by_id[selected_id])
 
 
+PRIVACY_REQUEST_LABELS = {
+    "access": msg("Auskunft"),
+    "rectification": msg("Berichtigung"),
+    "restriction": msg("Einschränkung"),
+    "erasure": msg("Löschung"),
+    "objection": msg("Widerspruch"),
+}
+PRIVACY_REQUEST_STATUS_LABELS = {
+    "submitted": msg("eingereicht"),
+    "identity_verified": msg("Identität geprüft"),
+    "in_review": msg("in Prüfung"),
+    "completed": msg("abgeschlossen"),
+    "denied": msg("abgelehnt"),
+}
+
+
 def _governance(principal: UserPrincipal, repository: EnterpriseRepository, settings: AppSettings) -> None:
-    st.title("Governance & Trust")
-    st.caption("Technisch nachweisbare Kontrollen und klar benannte externe Freigaben.")
+    st.title(tr("Governance & Trust"))
+    st.caption(tr("Technisch nachweisbare Kontrollen und klar benannte externe Freigaben."))
     _render_ai_acceptance(principal, repository, settings)
     _render_privacy_notice(principal, repository, settings)
     st.divider()
-    st.subheader("Kontrollstatus")
+    st.subheader(tr("Kontrollstatus"))
+    if settings.demo_mode:
+        ai_status, ai_evidence = tr("Demo, kein Modellaufruf"), tr("Extraktion aus synthetischen Demodokumenten")
+    else:
+        ai_status = tr("konfiguriert") if settings.azure_ready else tr("gesperrt")
+        ai_evidence = tr("Azure OpenAI, Document Intelligence, AI Search")
     rows = [
         (
-            "Identität",
-            "verifiziert" if principal.authentication_method == "entra_proxy" else "lokale Entwicklung",
-            "Entra App-Rolle oder lokaler Argon2id-Adapter",
+            tr("Identität"),
+            tr("verifiziert") if principal.authentication_method == "entra_proxy" else tr("lokale Entwicklung"),
+            tr("Entra App-Rolle oder lokaler Argon2id-Adapter"),
         ),
         (
-            "Tenant-Isolation",
-            "aktiv" if settings.persistence_backend.value == "postgres" else "Entwicklungsmodus",
-            "PostgreSQL FORCE RLS und Azure Search Filter",
+            tr("Tenant-Isolation"),
+            tr("aktiv") if settings.persistence_backend.value == "postgres" else tr("Entwicklungsmodus"),
+            tr("PostgreSQL FORCE RLS und Azure Search Filter"),
+        ),
+        (tr("KI-Pfad"), ai_status, ai_evidence),
+        (
+            tr("Region"),
+            tr("konfiguriert") if settings.azure_region else tr("offen"),
+            settings.azure_region or tr("Deployment-Nachweis fehlt"),
         ),
         (
-            "KI-Pfad",
-            "Demo, kein Modellaufruf"
-            if settings.demo_mode
-            else ("konfiguriert" if settings.azure_ready else "gesperrt"),
-            "Extraktion aus synthetischen Demodokumenten"
-            if settings.demo_mode
-            else "Azure OpenAI, Document Intelligence, AI Search",
+            tr("Deployment-Evidenz"),
+            tr("verknüpft") if settings.deployment_evidence_id else tr("offen"),
+            settings.deployment_evidence_id or tr("Kein Evidence-ID gesetzt"),
         ),
         (
-            "Region",
-            "konfiguriert" if settings.azure_region else "offen",
-            settings.azure_region or "Deployment-Nachweis fehlt",
+            tr("AI-Evaluation"),
+            tr("verknüpft") if settings.ai_evaluation_evidence_id else tr("offen"),
+            settings.ai_evaluation_evidence_id or tr("Kein freigegebener Eval-Report"),
         ),
         (
-            "Deployment-Evidenz",
-            "verknüpft" if settings.deployment_evidence_id else "offen",
-            settings.deployment_evidence_id or "Kein Evidence-ID gesetzt",
+            tr("Löschkonzept"),
+            tr("freigegeben") if settings.retention_policy_approved else tr("gesperrt"),
+            settings.retention_policy_id or tr("Kein genehmigter Policy-Nachweis"),
         ),
-        (
-            "AI-Evaluation",
-            "verknüpft" if settings.ai_evaluation_evidence_id else "offen",
-            settings.ai_evaluation_evidence_id or "Kein freigegebener Eval-Report",
-        ),
-        (
-            "Löschkonzept",
-            "freigegeben" if settings.retention_policy_approved else "gesperrt",
-            settings.retention_policy_id or "Kein genehmigter Policy-Nachweis",
-        ),
-        ("Produktionsfreigabe", settings.release_state, "Technisches Gate, keine rechtliche Zertifizierung"),
+        (tr("Produktionsfreigabe"), settings.release_state, tr("Technisches Gate, keine rechtliche Zertifizierung")),
     ]
-    st.dataframe([{"Kontrolle": a, "Status": b, "Evidenz": c} for a, b, c in rows], width="stretch", hide_index=True)
-    st.subheader("Technische Nutzungsgrenzen")
-    st.write("• Autonome Maschinensteuerung ist gesperrt.")
-    st.write("• Beschäftigtenüberwachung ist gesperrt.")
-    st.write("• Sicherheitsrelevante Diagnose erfordert qualifizierten Review.")
-    st.write("• Nur akzeptierte Reviews können als Nachweis exportiert werden.")
+    st.dataframe(
+        [{tr("Kontrolle"): a, tr("Status"): b, tr("Evidenz"): c} for a, b, c in rows], width="stretch", hide_index=True
+    )
+    st.subheader(tr("Technische Nutzungsgrenzen"))
+    st.write(tr("• Autonome Maschinensteuerung ist gesperrt."))
+    st.write(tr("• Beschäftigtenüberwachung ist gesperrt."))
+    st.write(tr("• Sicherheitsrelevante Diagnose erfordert qualifizierten Review."))
+    st.write(tr("• Nur akzeptierte Reviews können als Nachweis exportiert werden."))
     st.info(
-        "DPA/AVV, DSFA/TIA, Betriebsrat, Rechtsgrundlagen, Löschfristen und regulatorische Einordnung müssen instanzbezogen freigegeben und regelmäßig revalidiert werden."
+        tr(
+            "DPA/AVV, DSFA/TIA, Betriebsrat, Rechtsgrundlagen, Löschfristen und regulatorische Einordnung müssen "
+            "instanzbezogen freigegeben und regelmäßig revalidiert werden."
+        )
     )
     st.divider()
-    st.subheader("Datenschutz-Self-Service")
+    st.subheader(tr("Datenschutz-Self-Service"))
     st.caption(
-        "Der Export enthält nur Datensätze, die dem aktuell verifizierten Entra-Subjekt zugeordnet sind. Lösch- und Korrekturanträge werden zur Identitäts- und Ausnahmeprüfung eingereiht."
+        tr(
+            "Der Export enthält nur Datensätze, die dem aktuell verifizierten Entra-Subjekt zugeordnet sind. "
+            "Lösch- und Korrekturanträge werden zur Identitäts- und Ausnahmeprüfung eingereiht."
+        )
     )
-    if st.button("Meine Daten für Export zusammenstellen"):
+    if st.button(tr("Meine Daten für Export zusammenstellen")):
         st.session_state.subject_export = repository.subject_export(principal)
         repository.emit_audit(
             principal,
@@ -1440,25 +1690,18 @@ def _governance(principal: UserPrincipal, repository: EnterpriseRepository, sett
         )
     if export := st.session_state.get("subject_export"):
         st.download_button(
-            "Personenbezogenen Export herunterladen",
+            tr("Personenbezogenen Export herunterladen"),
             json.dumps(export, default=str, ensure_ascii=False, indent=2),
             file_name="hydraulikdoc-meine-daten.json",
             mime="application/json",
         )
-    request_labels = {
-        "access": "Auskunft",
-        "rectification": "Berichtigung",
-        "restriction": "Einschränkung",
-        "erasure": "Löschung",
-        "objection": "Widerspruch",
-    }
     request_type = st.selectbox(
-        "Antragstyp",
-        tuple(request_labels),
-        format_func=lambda option: request_labels[option],
+        tr("Antragstyp"),
+        tuple(PRIVACY_REQUEST_LABELS),
+        format_func=lambda option: label(PRIVACY_REQUEST_LABELS, option),
         key="privacy-request-type",
     )
-    if st.button("Datenschutzantrag einreichen"):
+    if st.button(tr("Datenschutzantrag einreichen")):
         try:
             request = repository.create_privacy_request(principal, request_type)
             repository.emit_audit(
@@ -1469,19 +1712,19 @@ def _governance(principal: UserPrincipal, repository: EnterpriseRepository, sett
                 resource_id=request.request_id,
                 metadata={"request_type": request.request_type},
             )
-            st.success(f"Antrag {request.request_id} wurde nachweisbar eingereiht.")
+            st.success(tr("Antrag {id} wurde nachweisbar eingereiht.", id=request.request_id))
         except Exception:
-            st.error("Ein gleichartiger offener Antrag besteht bereits oder konnte nicht angelegt werden.")
+            st.error(tr("Ein gleichartiger offener Antrag besteht bereits oder konnte nicht angelegt werden."))
     requests = repository.list_privacy_requests(principal)
     if requests:
         st.dataframe(
             [
                 {
-                    "ID": item.request_id,
-                    "Typ": request_labels.get(item.request_type, item.request_type),
-                    "Status": item.status,
-                    "Eingang": item.requested_at.isoformat(),
-                    "Interne Zielfrist": item.due_at.isoformat(),
+                    tr("ID"): item.request_id,
+                    tr("Typ"): label(PRIVACY_REQUEST_LABELS, item.request_type),
+                    tr("Status"): label(PRIVACY_REQUEST_STATUS_LABELS, item.status),
+                    tr("Eingang"): fmt_datetime(item.requested_at),
+                    tr("Interne Zielfrist"): fmt_datetime(item.due_at),
                 }
                 for item in requests
             ],
@@ -1491,8 +1734,8 @@ def _governance(principal: UserPrincipal, repository: EnterpriseRepository, sett
 
 
 def _system(principal: UserPrincipal, settings: AppSettings) -> None:
-    st.title("System Evidence")
-    st.caption("Keine Secrets und keine Rohinhalte werden in dieser Ansicht ausgegeben.")
+    st.title(tr("System Evidence"))
+    st.caption(tr("Keine Secrets und keine Rohinhalte werden in dieser Ansicht ausgegeben."))
     policy = RetentionPolicy.from_environment()
     st.json(
         {
@@ -1531,7 +1774,7 @@ def run() -> None:
     try:
         settings = get_settings()
     except ConfigurationError as error:
-        st.error("Der Runtime-Start wurde wegen einer unsicheren Konfiguration blockiert.")
+        st.error(tr("Der Runtime-Start wurde wegen einer unsicheren Konfiguration blockiert."))
         st.code(str(error))
         st.stop()
     principal = _principal(settings)
@@ -1540,7 +1783,7 @@ def run() -> None:
     try:
         repository = get_repository(settings)
     except Exception as error:
-        st.error(f"Persistenz nicht verfügbar. Referenz {public_error_code(error)}")
+        st.error(tr("Persistenz nicht verfügbar. Referenz {reference}", reference=public_error_code(error)))
         st.stop()
 
     selected = _sidebar(principal, settings)
@@ -1563,6 +1806,6 @@ def run() -> None:
         else:
             _system(principal, settings)
     except AuthenticationError:
-        st.error("Diese Funktion ist für Ihre App-Rolle nicht freigegeben.")
+        st.error(tr("Diese Funktion ist für Ihre App-Rolle nicht freigegeben."))
     except Exception as error:
-        st.error(f"Vorgang abgebrochen. Referenz {public_error_code(error)}")
+        st.error(tr("Vorgang abgebrochen. Referenz {reference}", reference=public_error_code(error)))

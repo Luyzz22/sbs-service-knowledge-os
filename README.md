@@ -67,6 +67,12 @@ Das Container-Image setzt die Dokumentsprache auf Deutsch (WCAG 3.1.1). Lokal l�
 
 Der lokale Default hat `AI_BACKEND=disabled` und `PERSISTENCE_BACKEND=memory`. Er sendet keine Dokumente an externe KI-Dienste.
 
+### Sprache
+
+Die Oberfläche ist auf Deutsch und Englisch verfügbar. Beim ersten Aufruf folgt sie der Browser-Einstellung (`Accept-Language`), sonst gilt `DEFAULT_LANGUAGE` (`de` oder `en`). Umschalten lässt sich jederzeit über „Sprache · Language“ in der Seitenleiste oder auf der Anmeldeseite; die Wahl gilt für die Sitzung und wird nicht personenbezogen gespeichert. Gespeicherte Fachdaten (Incident-Titel, 8D-Texte, Dokumente) bleiben in der Sprache, in der sie erfasst wurden. Der KI-Nutzerhinweis und der Datenschutzhinweis liegen in beiden Sprachen vor; die Bestätigung speichert den Hash genau der angezeigten Fassung.
+
+Neue Oberflächentexte werden auf Deutsch mit `tr()` oder `msg()` geschrieben und in `hydraulikdoc/translations.py` übersetzt. `tests/test_i18n.py` schlägt fehl, wenn eine Übersetzung fehlt, Platzhalter abweichen oder Einträge verwaist sind.
+
 ### Demo-Mandant für Vorführungen
 
 Für Vertriebs- und Schulungsdemos ohne Azure und ohne Kundendaten zusätzlich `AI_BACKEND=demo` setzen:

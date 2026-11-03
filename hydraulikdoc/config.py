@@ -157,6 +157,7 @@ class AppSettings:
     auto_migrate_database: bool = False
     privacy_notice_version: str = "2026-08-14"
     ai_notice_version: str = "2026-08-14"
+    default_language: str = "de"
 
     @property
     def is_production(self) -> bool:
@@ -215,6 +216,8 @@ class AppSettings:
             errors.append("DEFAULT_TENANT_ID must contain 1 to 80 characters")
         if self.azure_embedding_dimensions not in {1536, 3072}:
             errors.append("AZURE_EMBEDDING_DIMENSIONS must be 1536 or 3072")
+        if self.default_language not in {"de", "en"}:
+            errors.append("DEFAULT_LANGUAGE must be de or en")
         if not 30 <= self.malware_scan_timeout_seconds <= 1800:
             errors.append("MALWARE_SCAN_TIMEOUT_SECONDS must be between 30 and 1800")
 
@@ -356,6 +359,7 @@ class AppSettings:
             auto_migrate_database=_bool("AUTO_MIGRATE_DATABASE", values, not production),
             privacy_notice_version=values.get("PRIVACY_NOTICE_VERSION", "2026-08-14"),
             ai_notice_version=values.get("AI_NOTICE_VERSION", "2026-08-14"),
+            default_language=values.get("DEFAULT_LANGUAGE", "de").strip().lower(),
         )
         return settings.validate()
 

@@ -9,6 +9,8 @@ from enum import StrEnum
 from math import isfinite
 from statistics import fmean
 
+from .i18n import msg
+
 
 class Severity(StrEnum):
     OK = "ok"
@@ -116,7 +118,7 @@ def assess_condition(
                     ConditionSignal(
                         "PRESSURE_CRITICAL",
                         Severity.CRITICAL,
-                        "Druck überschreitet die Abschaltprüfgrenze.",
+                        msg("Druck überschreitet die Abschaltprüfgrenze."),
                         reading.pressure_bar,
                         envelope.pressure_critical_bar,
                         "bar",
@@ -127,7 +129,7 @@ def assess_condition(
                     ConditionSignal(
                         "PRESSURE_WARNING",
                         Severity.WARNING,
-                        "Druck überschreitet die Warngrenze.",
+                        msg("Druck überschreitet die Warngrenze."),
                         reading.pressure_bar,
                         envelope.pressure_warning_bar,
                         "bar",
@@ -139,7 +141,7 @@ def assess_condition(
                     ConditionSignal(
                         "TEMPERATURE_CRITICAL",
                         Severity.CRITICAL,
-                        "Temperatur überschreitet die Abschaltprüfgrenze.",
+                        msg("Temperatur überschreitet die Abschaltprüfgrenze."),
                         reading.temperature_c,
                         envelope.temperature_critical_c,
                         "°C",
@@ -150,7 +152,7 @@ def assess_condition(
                     ConditionSignal(
                         "TEMPERATURE_WARNING",
                         Severity.WARNING,
-                        "Temperatur überschreitet die Warngrenze.",
+                        msg("Temperatur überschreitet die Warngrenze."),
                         reading.temperature_c,
                         envelope.temperature_warning_c,
                         "°C",
@@ -160,7 +162,7 @@ def assess_condition(
             signal = ConditionSignal(
                 "FLOW_LOW",
                 Severity.WARNING,
-                "Volumenstrom unterschreitet die konfigurierte Mindestgrenze.",
+                msg("Volumenstrom unterschreitet die konfigurierte Mindestgrenze."),
                 reading.flow_l_min,
                 envelope.minimum_flow_l_min,
                 "l/min",
@@ -173,7 +175,7 @@ def assess_condition(
                 ConditionSignal(
                     "PARTICLE_WARNING",
                     Severity.WARNING,
-                    "Partikelbelastung überschreitet die Warngrenze.",
+                    msg("Partikelbelastung überschreitet die Warngrenze."),
                     reading.particle_count,
                     envelope.particle_warning,
                     "#/ml",
@@ -184,7 +186,7 @@ def assess_condition(
                 ConditionSignal(
                     "WATER_WARNING",
                     Severity.WARNING,
-                    "Wassergehalt überschreitet die Warngrenze.",
+                    msg("Wassergehalt überschreitet die Warngrenze."),
                     reading.water_content_pct,
                     envelope.water_warning_pct,
                     "%",

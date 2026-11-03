@@ -23,6 +23,7 @@ from compliance.audit import AuditOutcome
 from .auth import UserPrincipal, require_permission
 from .config import AppSettings
 from .governance import AIProvenance, GroundedAnswer, SourceCitation, UseCase, evaluate_use_case
+from .i18n import msg
 from .repository import (
     INCIDENT_ANALYSIS_FIELDS,
     INCIDENT_CLOSE_PERMISSION,
@@ -190,9 +191,11 @@ def demo_seed_blockers(principal: UserPrincipal, repository: EnterpriseRepositor
     """Reasons why the demo data cannot be loaded for this tenant; empty when seeding is allowed."""
     blockers = []
     if not (principal.can("asset:write") and principal.can(INCIDENT_CLOSE_PERMISSION)):
-        blockers.append("Demodaten können nur Supervisor oder Admin laden.")
+        blockers.append(msg("Demodaten können nur Supervisor oder Admin laden."))
     if tenant_has_data(principal, repository):
-        blockers.append("Demodaten werden nur in einen leeren Mandanten geladen, damit sie keine echten Daten mischen.")
+        blockers.append(
+            msg("Demodaten werden nur in einen leeren Mandanten geladen, damit sie keine echten Daten mischen.")
+        )
     return tuple(blockers)
 
 
