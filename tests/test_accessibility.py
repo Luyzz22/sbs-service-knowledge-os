@@ -68,6 +68,11 @@ class ContrastTests(unittest.TestCase):
                 self._colour('[data-testid="stSidebar"]', "background"),
             ),
             (
+                "Auswahlfeld in der Navigation",
+                self._colour('[data-testid="stSidebar"] [data-testid="stSelectbox"] [role="group"] *', "color"),
+                self._colour('[data-testid="stSidebar"] [data-testid="stSelectbox"] [role="group"]', "background"),
+            ),
+            (
                 "Primärbutton",
                 STREAMLIT_PRIMARY_LABEL,
                 self._colour('.stButton > button[kind="primary"]', "background"),

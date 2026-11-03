@@ -28,6 +28,16 @@
   color: #eef3f6;
 }
 
+/* Select fields keep their light surface in the navy sidebar, so their text must stay dark.
+   Streamlit 1.66 renders selectboxes as React Aria comboboxes; select by test id and role. */
+[data-testid="stSidebar"] [data-testid="stSelectbox"] [role="group"] {
+  background: var(--hd-surface);
+}
+
+[data-testid="stSidebar"] [data-testid="stSelectbox"] [role="group"] * {
+  color: var(--hd-ink);
+}
+
 [data-testid="stSidebar"] button {
   min-height: 44px;
   background: transparent;
