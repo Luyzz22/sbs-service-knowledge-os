@@ -93,6 +93,8 @@ jobs:
           docker run --rm --entrypoint python hydraulikdoc:${GITHUB_SHA}
           -c "import openai, psycopg, streamlit; import hydraulikdoc.ui; print('runtime-imports-ok')"
 
+      # With SARIF output trivy-action drops the severity filter unless limit-severities-for-sarif is set,
+      # so the full report and the HIGH/CRITICAL gate run as separate steps.
       - name: Scan image filesystem
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
@@ -100,15 +102,25 @@ jobs:
           version: v0.70.0
           format: sarif
           output: trivy-results.sarif
-          severity: HIGH,CRITICAL
           ignore-unfixed: true
-          exit-code: "1"
+          exit-code: "0"
 
       - name: Upload scan result
         if: always() && hashFiles('trivy-results.sarif') != ''
         uses: github/codeql-action/upload-sarif@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4
         with:
           sarif_file: trivy-results.sarif
+
+      - name: Gate on fixable HIGH/CRITICAL findings
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: hydraulikdoc:${{ github.sha }}
+          version: v0.70.0
+          skip-setup-trivy: true
+          format: table
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
 
   postgres-security:
     runs-on: ubuntu-latest
