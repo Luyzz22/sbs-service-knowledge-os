@@ -9,7 +9,7 @@ import io
 import json
 import time
 from collections.abc import Mapping
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -46,6 +46,15 @@ from .interop import (
     build_sap_notifications,
     parse_asset_csv,
     to_spreadsheet_csv,
+)
+from .maintenance_kpis import (
+    KPI_EXPORT_COLUMNS,
+    KPI_INCIDENT_LIMIT,
+    KPI_WINDOW_DAYS,
+    REPEAT_FAILURE_SPAN,
+    MaintenanceKpis,
+    kpi_export_rows,
+    maintenance_kpis,
 )
 from .repository import (
     EIGHT_D_SEVERITIES,
@@ -152,6 +161,7 @@ NAV_PAGES = (
     "Condition Monitoring",
     "Fluid",
     "Incidents",
+    "Kennzahlen",
     "Governance",
     "System",
 )
@@ -162,9 +172,11 @@ NAV_LABELS = {
     "Condition Monitoring": msg("Condition Monitoring"),
     "Fluid": msg("Fluid"),
     "Incidents": msg("Incidents"),
+    "Kennzahlen": msg("Kennzahlen"),
     "Governance": msg("Governance"),
     "System": msg("System"),
 }
+OVERVIEW_KPI_DAYS = 90
 # Resolved incidents stay visible by default because they still await supervisor sign-off.
 DEFAULT_INCIDENT_FILTER = (*OPEN_INCIDENT_STATUSES, "resolved")
 PRIVACY_NOTICE = {
@@ -533,10 +545,32 @@ def _overview(principal: UserPrincipal, repository: EnterpriseRepository, settin
                 "{n} behobene Incidents warten auf die Abnahme durch einen Supervisor.",
             )
         actions.append(("hd-notice", text))
-    if actions:
+    now = datetime.now(UTC)
+    since = now - timedelta(days=OVERVIEW_KPI_DAYS)
+    repeat = maintenance_kpis(
+        repository.list_incident_lifecycles(principal, since=since, limit=KPI_INCIDENT_LIMIT),
+        assets,
+        window_start=since,
+        now=now,
+    ).repeat_failure_assets
+    if actions or repeat:
         for css_class, text in actions:
             st.markdown(f'<div class="{css_class}">{html.escape(text)}</div>', unsafe_allow_html=True)
-        st.button(tr("Zum Incident Workflow"), on_click=_go_to, args=("Incidents",), key="overview-incidents")
+        if repeat:
+            text = tr_plural(
+                len(repeat),
+                "An {n} Anlage traten in den letzten {days} Tagen Wiederholungsfehler auf. Ursache prüfen.",
+                "An {n} Anlagen traten in den letzten {days} Tagen Wiederholungsfehler auf. Ursache prüfen.",
+                days=OVERVIEW_KPI_DAYS,
+            )
+            st.markdown(f'<div class="hd-notice">{html.escape(text)}</div>', unsafe_allow_html=True)
+        incidents_column, kpis_column = st.columns(2)
+        if actions:
+            incidents_column.button(
+                tr("Zum Incident Workflow"), on_click=_go_to, args=("Incidents",), key="overview-incidents"
+            )
+        if repeat:
+            kpis_column.button(tr("Zu den Kennzahlen"), on_click=_go_to, args=("Kennzahlen",), key="overview-kpis")
     else:
         st.success(tr("Kein offener Handlungsbedarf im Incident Workflow."))
     _render_setup_progress(principal, repository, settings, assets, documents)
@@ -1596,6 +1630,181 @@ def _incidents(principal: UserPrincipal, repository: EnterpriseRepository) -> No
     _incident_detail(principal, repository, by_id[selected_id])
 
 
+def _format_duration(value: timedelta | None) -> str:
+    if value is None:
+        return "–"
+    hours = value / timedelta(hours=1)
+    if hours < 1:
+        text, unit = str(round(value / timedelta(minutes=1))), "min"
+    elif hours < 48:
+        text, unit = f"{hours:.1f}", "h"
+    else:
+        text, unit = f"{hours / 24:.1f}", "d"
+    return f"{text.replace('.', ',') if _language() == 'de' else text} {unit}"
+
+
+def _format_share(value: float | None) -> str:
+    if value is None:
+        return "–"
+    return f"{round(value * 100)} %" if _language() == "de" else f"{round(value * 100)}%"
+
+
+def _kpi_window() -> tuple[int, datetime, datetime]:
+    days = st.radio(
+        tr("Zeitraum"),
+        KPI_WINDOW_DAYS,
+        index=KPI_WINDOW_DAYS.index(90),
+        format_func=lambda option: tr("Letzte {n} Tage", n=option),
+        horizontal=True,
+        key="kpi-window",
+    )
+    now = datetime.now(UTC)
+    return days, now - timedelta(days=days), now
+
+
+def _render_kpi_tiles(kpis: MaintenanceKpis) -> None:
+    tiles = (
+        (tr("Incidents"), tr("{n} erfasst, {open} offen", n=kpis.incidents, open=kpis.open_incidents)),
+        (
+            tr("Reaktionszeit (MTTA)"),
+            tr(
+                "Ø {mean} · Median {median}",
+                mean=_format_duration(kpis.mean_response),
+                median=_format_duration(kpis.median_response),
+            ),
+        ),
+        (
+            tr("Behebungszeit (MTTR)"),
+            tr(
+                "Ø {mean} · Median {median}",
+                mean=_format_duration(kpis.mean_restoration),
+                median=_format_duration(kpis.median_restoration),
+            ),
+        ),
+        (
+            tr("Ohne Wiedereröffnung behoben"),
+            tr(
+                "{share} von {n} behobenen",
+                share=_format_share(kpis.first_time_fix_rate),
+                n=kpis.restored_incidents,
+            ),
+        ),
+        (tr("Ältester offener Incident"), _format_duration(kpis.oldest_open)),
+    )
+    st.markdown(
+        '<div class="hd-state hd-state-wide">'
+        + "".join(f"<div><strong>{html.escape(title)}</strong>{html.escape(text)}</div>" for title, text in tiles)
+        + "</div>",
+        unsafe_allow_html=True,
+    )
+
+
+def _kpis(principal: UserPrincipal, repository: EnterpriseRepository) -> None:
+    st.title(tr("Instandhaltungskennzahlen"))
+    st.caption(
+        tr(
+            "Reaktions- und Behebungszeiten je Anlage aus dem dokumentierten Incident-Verlauf. Kennzahlen werden nur "
+            "je Anlage gebildet, nie je Person; eine Leistungs- oder Verhaltenskontrolle ist nicht vorgesehen."
+        )
+    )
+    days, window_start, now = _kpi_window()
+    lifecycles = repository.list_incident_lifecycles(principal, since=window_start, limit=KPI_INCIDENT_LIMIT + 1)
+    if len(lifecycles) > KPI_INCIDENT_LIMIT:
+        st.warning(
+            tr(
+                "Im Zeitraum liegen mehr als {limit} Incidents. Ausgewertet werden die {limit} jüngsten; "
+                "für einen vollständigen Überblick einen kürzeren Zeitraum wählen.",
+                limit=KPI_INCIDENT_LIMIT,
+            )
+        )
+        lifecycles = lifecycles[:KPI_INCIDENT_LIMIT]
+    kpis = maintenance_kpis(lifecycles, repository.list_assets(principal), window_start=window_start, now=now)
+    if not kpis.incidents:
+        st.info(tr("Im gewählten Zeitraum wurden keine Incidents erfasst."))
+        return
+    _render_kpi_tiles(kpis)
+    if repeat := kpis.repeat_failure_assets:
+        st.markdown(
+            '<div class="hd-notice hd-blocked">'
+            + html.escape(
+                tr_plural(
+                    len(repeat),
+                    "{n} Anlage mit Wiederholungsfehler (zwei Incidents innerhalb von {days} Tagen): {assets}. "
+                    "Ursachenanalyse und Instandhaltungsstrategie prüfen.",
+                    "{n} Anlagen mit Wiederholungsfehler (zwei Incidents innerhalb von {days} Tagen): {assets}. "
+                    "Ursachenanalyse und Instandhaltungsstrategie prüfen.",
+                    days=REPEAT_FAILURE_SPAN.days,
+                    assets=", ".join(f"{item.name} ({item.asset_id})" for item in repeat),
+                )
+            )
+            + "</div>",
+            unsafe_allow_html=True,
+        )
+    st.subheader(tr("Je Anlage"))
+    st.dataframe(
+        [
+            {
+                tr("Asset"): item.asset_id,
+                tr("Bezeichnung"): item.name,
+                tr("Standort"): item.site,
+                tr("Technischer Platz"): item.functional_location or "–",
+                tr("Incidents"): item.incidents,
+                tr("davon 8D"): item.eight_d_incidents,
+                tr("Offen"): item.open_incidents,
+                tr("Ø Reaktion"): _format_duration(item.mean_response),
+                tr("Ø Behebung"): _format_duration(item.mean_restoration),
+                tr("Wiedereröffnet"): item.reopened,
+                tr("Ø Störungsabstand"): _format_duration(item.mean_interval),
+                tr("Wiederholungsfehler"): tr("ja") if item.repeat_failure else "–",
+                tr("Letzter Incident"): fmt_datetime(item.last_incident),
+            }
+            for item in kpis.assets
+        ],
+        width="stretch",
+        hide_index=True,
+    )
+    if kpis.without_history:
+        st.caption(
+            tr_plural(
+                kpis.without_history,
+                "{n} Incident ohne Verlauf (vor Einführung der Verlaufserfassung angelegt) zählt mit, "
+                "aber ohne Reaktions- und Behebungszeit.",
+                "{n} Incidents ohne Verlauf (vor Einführung der Verlaufserfassung angelegt) zählen mit, "
+                "aber ohne Reaktions- und Behebungszeit.",
+            )
+        )
+    with st.expander(tr("Berechnungsgrundlage")):
+        st.markdown(
+            tr(
+                "- **Reaktionszeit:** Anlage des Incidents bis zum ersten Bearbeitungsschritt (bestätigt oder in "
+                "Bearbeitung).\n"
+                "- **Behebungszeit:** Anlage bis zur letzten Meldung „Behoben“; ein wiedereröffneter Incident zählt "
+                "erst mit der endgültigen Behebung.\n"
+                "- **Störungsabstand:** mittlerer Abstand zwischen zwei Incidents derselben Anlage in Kalenderzeit, "
+                "nicht in Betriebsstunden; daher kein MTBF im Sinne der Zuverlässigkeitstechnik.\n"
+                "- **Grundlage** sind die Zeitpunkte der Dokumentation in HydraulikDoc, keine Maschinen- oder "
+                "SAP-Daten. Gezählt werden Incidents, die im gewählten Zeitraum angelegt wurden."
+            )
+        )
+    if principal.can("analysis:export"):
+        rows = kpi_export_rows(kpis)
+        exported = st.download_button(
+            tr("Kennzahlen je Anlage als CSV herunterladen"),
+            to_spreadsheet_csv(rows, KPI_EXPORT_COLUMNS),
+            file_name=f"hydraulikdoc-kennzahlen-{days}d-{now:%Y%m%d-%H%M}.csv",
+            mime="text/csv",
+            key="kpi-export",
+        )
+        if exported:
+            repository.emit_audit(
+                principal,
+                action="incident.kpi_export.generated",
+                outcome=AuditOutcome.SUCCESS,
+                resource_type="incident",
+                metadata={"source_count": len(rows), "window_days": days},
+            )
+
+
 PRIVACY_REQUEST_LABELS = {
     "access": msg("Auskunft"),
     "rectification": msg("Berichtigung"),
@@ -1801,6 +2010,8 @@ def run() -> None:
             _fluid(principal, repository)
         elif selected == "Incidents":
             _incidents(principal, repository)
+        elif selected == "Kennzahlen":
+            _kpis(principal, repository)
         elif selected == "Governance":
             _governance(principal, repository, settings)
         else:

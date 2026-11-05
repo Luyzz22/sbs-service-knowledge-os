@@ -64,6 +64,25 @@ class IncidentEventRecord:
     is_own: bool
 
 
+@dataclass(frozen=True)
+class StatusChange:
+    previous_status: str | None
+    new_status: str
+    occurred_at: datetime
+
+
+@dataclass(frozen=True)
+class IncidentLifecycle:
+    """Workflow timeline of one incident for asset-level figures; deliberately carries no actor data."""
+
+    incident_id: str
+    asset_id: str
+    severity: str
+    status: str
+    created_at: datetime
+    changes: tuple[StatusChange, ...]
+
+
 INCIDENT_STATUSES = ("new", "acknowledged", "in_progress", "resolved", "closed")
 INCIDENT_TRANSITIONS: Mapping[str, tuple[str, ...]] = {
     "new": ("acknowledged", "in_progress"),
@@ -224,6 +243,10 @@ class EnterpriseRepository(Protocol):
     ) -> IncidentRecord: ...
 
     def list_incident_events(self, principal: UserPrincipal, incident_id: str) -> tuple[IncidentEventRecord, ...]: ...
+
+    def list_incident_lifecycles(
+        self, principal: UserPrincipal, *, since: datetime, limit: int
+    ) -> tuple[IncidentLifecycle, ...]: ...
 
     def record_acceptance(self, principal: UserPrincipal, notice_type: str, version: str, digest: str) -> None: ...
 
@@ -509,6 +532,37 @@ class InMemoryRepository:
                 if tenant == principal.tenant_id and event.incident_id == incident_id
             )
 
+    def list_incident_lifecycles(
+        self, principal: UserPrincipal, *, since: datetime, limit: int
+    ) -> tuple[IncidentLifecycle, ...]:
+        with self._lock:
+            incidents = sorted(
+                (
+                    item
+                    for (tenant, _), item in self._incidents.items()
+                    if tenant == principal.tenant_id and item.created_at >= since
+                ),
+                key=lambda item: item.created_at,
+                reverse=True,
+            )[:limit]
+            changes: dict[str, list[StatusChange]] = {item.incident_id: [] for item in incidents}
+            for tenant, _, event in self._incident_events:
+                if tenant == principal.tenant_id and event.incident_id in changes and event.new_status:
+                    changes[event.incident_id].append(
+                        StatusChange(event.previous_status, event.new_status, event.occurred_at)
+                    )
+            return tuple(
+                IncidentLifecycle(
+                    item.incident_id,
+                    item.asset_id,
+                    item.severity,
+                    item.status,
+                    item.created_at,
+                    tuple(sorted(changes[item.incident_id], key=lambda change: change.occurred_at)),
+                )
+                for item in incidents
+            )
+
     def record_acceptance(self, principal: UserPrincipal, notice_type: str, version: str, digest: str) -> None:
         subject = _principal_token(self._pseudonymizer, principal)
         with self._lock:
@@ -614,6 +668,11 @@ _SELECT_INCIDENTS_SQL = """SELECT incident_id::text, tenant_id, asset_id, title,
 _LOCK_INCIDENT_SQL = """SELECT incident_id::text, tenant_id, asset_id, title, severity, status, created_at, details, updated_at,
     containment_action, root_cause, corrective_action, effectiveness_check
     FROM incidents WHERE incident_id=%s FOR UPDATE"""
+_SELECT_LIFECYCLE_INCIDENTS_SQL = """SELECT incident_id::text, asset_id, severity, status, created_at
+    FROM incidents WHERE created_at >= %s ORDER BY created_at DESC LIMIT %s"""
+_SELECT_LIFECYCLE_CHANGES_SQL = """SELECT incident_id::text, previous_status, new_status, occurred_at
+    FROM incident_events WHERE incident_id = ANY(%s::uuid[]) AND new_status IS NOT NULL
+    ORDER BY occurred_at, event_id"""
 _UPDATE_INCIDENT_STATUS_SQL = """UPDATE incidents SET status=%s, updated_at=now() WHERE incident_id=%s
     RETURNING incident_id::text, tenant_id, asset_id, title, severity, status, created_at, details, updated_at,
     containment_action, root_cause, corrective_action, effectiveness_check"""
@@ -1054,6 +1113,24 @@ class PostgresRepository:
                     (subject, incident_id),
                 )
                 return tuple(IncidentEventRecord(*row) for row in cursor.fetchall())
+
+    def list_incident_lifecycles(
+        self, principal: UserPrincipal, *, since: datetime, limit: int
+    ) -> tuple[IncidentLifecycle, ...]:
+        with self._connect() as connection:
+            with connection.cursor() as cursor:
+                self._tenant(cursor, principal.tenant_id)
+                cursor.execute(_SELECT_LIFECYCLE_INCIDENTS_SQL, (since, limit))
+                incidents = cursor.fetchall()
+                changes: dict[str, list[StatusChange]] = {row[0]: [] for row in incidents}
+                if changes:
+                    cursor.execute(_SELECT_LIFECYCLE_CHANGES_SQL, (list(changes),))
+                    for incident_id, previous_status, new_status, occurred_at in cursor.fetchall():
+                        changes[incident_id].append(StatusChange(previous_status, new_status, occurred_at))
+                return tuple(
+                    IncidentLifecycle(incident_id, asset_id, severity, status, created_at, tuple(changes[incident_id]))
+                    for incident_id, asset_id, severity, status, created_at in incidents
+                )
 
     def record_acceptance(self, principal: UserPrincipal, notice_type: str, version: str, digest: str) -> None:
         actor = _principal_token(self._pseudonymizer, principal)

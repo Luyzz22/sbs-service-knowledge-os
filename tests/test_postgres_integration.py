@@ -186,6 +186,48 @@ class PostgresSecurityIntegrationTests(unittest.TestCase):
         self.assertIsNone(rows[0][0])
         self.assertEqual(rows[1][0], rows[0][1])
 
+    def test_runtime_role_reads_incident_lifecycles_per_tenant(self) -> None:
+        from datetime import UTC, datetime, timedelta
+
+        from hydraulikdoc.auth import ROLE_PERMISSIONS, UserPrincipal
+        from hydraulikdoc.config import AppSettings
+        from hydraulikdoc.repository import PostgresRepository
+
+        settings = AppSettings.from_environment(
+            {
+                "APP_ENV": "test",
+                "PERSISTENCE_BACKEND": "postgres",
+                "AUDIT_HMAC_KEY": "integration-audit-key-" + "x" * 16,
+                "DATABASE_URL": self.app_dsn,
+            }
+        )
+        repository = PostgresRepository(settings)
+        own = UserPrincipal(
+            "planner", f"{self.tenant_a}-kpi", "Planner", "supervisor", permissions=ROLE_PERMISSIONS["supervisor"]
+        )
+        other = UserPrincipal(
+            "planner", f"{self.tenant_b}-kpi", "Planner", "supervisor", permissions=ROLE_PERMISSIONS["supervisor"]
+        )
+        with self.psycopg.connect(self.app_dsn) as connection:
+            with connection.cursor() as cursor:
+                for principal in (own, other):
+                    cursor.execute("SELECT set_config('app.tenant_id', %s, true)", (principal.tenant_id,))
+                    cursor.execute(
+                        "INSERT INTO tenants (tenant_id, display_name) VALUES (%s,'KPI')", (principal.tenant_id,)
+                    )
+        incident = repository.create_incident(own, asset_id="PU-1", title="Druckabfall", severity="p3", details="")
+        repository.transition_incident(own, incident.incident_id, expected="new", target="acknowledged")
+        repository.create_incident(other, asset_id="PU-9", title="Fremd", severity="p3", details="")
+
+        since = datetime.now(UTC) - timedelta(days=1)
+        lifecycles = repository.list_incident_lifecycles(own, since=since, limit=100)
+        self.assertEqual([item.incident_id for item in lifecycles], [incident.incident_id])
+        self.assertEqual(
+            [(change.previous_status, change.new_status) for change in lifecycles[0].changes],
+            [(None, "new"), ("new", "acknowledged")],
+        )
+        self.assertEqual(repository.list_incident_lifecycles(own, since=datetime.now(UTC), limit=100), ())
+
 
 if __name__ == "__main__":
     unittest.main()
