@@ -46,6 +46,7 @@ _ALLOWED_METADATA_KEYS = frozenset(
         "status_code",
         "tenant_count",
         "tenant_mode",
+        "window_days",
     }
 )
 
