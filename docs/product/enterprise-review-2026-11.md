@@ -56,7 +56,7 @@ Priorität: **P1** blockiert Pilot oder Security-Freigabe, **P2** senkt Akzeptan
 
 ## Umgesetzt: Demo-Mandant
 
-- **Ein Klick zur vollständigen Geschichte:** Im leeren Mandanten lädt ein Supervisor vier fiktive Anlagen (eine bewusst ohne SAP-Referenz), zwei synthetische Handbücher und vier Incidents, die jeden Workflow-Zustand zeigen, inklusive gesperrter Abnahme mangels D7.
+- **Ein Klick zur vollständigen Geschichte:** Im leeren Mandanten lädt ein Supervisor vier fiktive Anlagen (eine bewusst ohne SAP-Referenz), zwei synthetische Handbücher und fünf Incidents, die jeden Workflow-Zustand zeigen, inklusive gesperrter Abnahme mangels D7. Der Verlauf ist über vier Wochen gestaffelt (Wiederholungsfehler an Presse 05, eine Wiedereröffnung), damit die Kennzahlen aussagekräftig sind. Rückdatieren kann nur das Entwicklungs-Repository; in PostgreSQL gelten immer Serverzeiten.
 - **Keine Scheinintelligenz:** Der Demo-Pfad erzeugt keinen Text, sondern zitiert Sätze unverändert mit Seitenbeleg. Die Auswahl deckt Teilfragen einzeln ab und verwirft schwache Stichworttreffer. Die Antwort sagt ausdrücklich „Demo-Antwort ohne Sprachmodell“, die Provenienz nennt keinen Modellanbieter.
 - **Gleiche Governance:** Verwendungszweck-Sperren, Zitatprüfung, KI-Nutzerhinweis, Review, Vier-Augen-Prinzip und Export laufen unverändert.
 - **Nicht verwechselbar:** Banner auf jeder Seite, Präfix `DEMO` in Titeln, Dokumenten und SAP-Kurztexten, Releasezustand `demo`, Region „lokal“. Die Konfiguration verweigert `demo` in Produktion und hinter Entra ID; Demodaten werden nie in einen Mandanten mit Daten gemischt.
@@ -81,5 +81,5 @@ Priorität: **P1** blockiert Pilot oder Security-Freigabe, **P2** senkt Akzeptan
 2. ~~Demo-Mandant~~ (M1): umgesetzt.
 3. **Barrierefreiheit** (U5): automatisierte Prüfungen umgesetzt (siehe Kontrollmatrix); offen sind der manuelle Tastatur- und Screenreader-Test und ein Prüfbericht.
 4. ~~DE/EN~~ (U6): umgesetzt. Offen: Sprachwahl dauerhaft je Benutzer speichern, KI-Antworten in der Sprache der Oberfläche.
-5. ~~Instandhaltungskennzahlen~~ (D6): umgesetzt. Offen: Demo-Mandant mit zeitlich gestaffeltem Verlauf, damit die Kennzahlen in Vorführungen aussagekräftig sind.
+5. ~~Instandhaltungskennzahlen~~ (D6): umgesetzt, einschließlich gestaffeltem Demo-Verlauf.
 6. **Live-Connector-Pilot** (S4) erst nach Datenvertrag und Bedrohungsmodell mit einem konkreten Kunden.

@@ -1,4 +1,5 @@
 import unittest
+from datetime import UTC, datetime, timedelta
 
 from hydraulikdoc.auth import ROLE_PERMISSIONS, UserPrincipal
 from hydraulikdoc.azure_ai import has_valid_source_citations
@@ -14,6 +15,7 @@ from hydraulikdoc.demo import (
 )
 from hydraulikdoc.governance import ReviewStatus, UseCase
 from hydraulikdoc.interop import build_sap_notifications
+from hydraulikdoc.maintenance_kpis import maintenance_kpis
 from hydraulikdoc.repository import InMemoryRepository, missing_analysis_fields
 from hydraulikdoc.security import InputRejected
 from hydraulikdoc.ui import _parse_sensor_csv
@@ -49,9 +51,11 @@ class DemoTenantTests(unittest.TestCase):
 
     def test_seed_covers_every_workflow_state_with_labelled_data(self) -> None:
         result = seed_demo_tenant(self.supervisor, self.repository)
-        self.assertEqual((result.assets, result.documents, result.incidents), (4, 2, 4))
+        self.assertEqual((result.assets, result.documents, result.incidents), (4, 2, 5))
         incidents = self.repository.list_incidents(self.supervisor)
-        self.assertEqual(sorted(item.status for item in incidents), ["closed", "in_progress", "new", "resolved"])
+        self.assertEqual(
+            sorted(item.status for item in incidents), ["closed", "closed", "in_progress", "new", "resolved"]
+        )
         self.assertTrue(all(item.title.startswith("DEMO · ") for item in incidents))
         self.assertTrue(
             all(item.display_name.startswith("DEMO · ") for item in self.repository.list_documents(self.supervisor))
@@ -59,6 +63,27 @@ class DemoTenantTests(unittest.TestCase):
         self.assertTrue(all("(Demo)" in item.name for item in self.repository.list_assets(self.supervisor)))
         awaiting = next(item for item in incidents if item.status == "resolved")
         self.assertEqual(missing_analysis_fields(awaiting, "closed"), ("effectiveness_check",))
+
+    def test_seed_stages_a_history_that_gives_the_kpis_a_story(self) -> None:
+        seed_demo_tenant(self.supervisor, self.repository)
+        now = datetime.now(UTC)
+        since = now - timedelta(days=90)
+        lifecycles = self.repository.list_incident_lifecycles(self.supervisor, since=since, limit=100)
+        kpis = maintenance_kpis(lifecycles, self.repository.list_assets(self.supervisor), window_start=since, now=now)
+        self.assertEqual([item.asset_id for item in kpis.repeat_failure_assets], ["DEMO-W1-PRESSE-05"])
+        self.assertAlmostEqual(kpis.first_time_fix_rate or 0, 2 / 3)
+        self.assertEqual(kpis.mean_restoration, timedelta(hours=30))
+        self.assertEqual(kpis.median_response, timedelta(minutes=37, seconds=30))
+        # Every recorded step lies in the past and in workflow order.
+        for lifecycle in lifecycles:
+            times = [change.occurred_at for change in lifecycle.changes]
+            self.assertEqual(times, sorted(times))
+            self.assertLessEqual(times[-1], now)
+        # Only the seed is staged; later work in the tenant is recorded at the real time again.
+        incident = self.repository.create_incident(
+            self.supervisor, asset_id="DEMO-W2-SGM-01", title="Live", severity="p4", details=""
+        )
+        self.assertGreaterEqual(incident.created_at, now)
 
     def test_seed_refuses_non_empty_tenant_and_insufficient_role(self) -> None:
         self.assertTrue(demo_seed_blockers(_principal("technician"), self.repository))

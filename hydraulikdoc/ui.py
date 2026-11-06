@@ -589,8 +589,9 @@ def _render_demo_seed(principal: UserPrincipal, repository: EnterpriseRepository
     st.subheader(tr("Demo starten"))
     st.write(
         tr(
-            "Lädt vier fiktive Anlagen mit SAP-Referenzen, zwei synthetische Handbücher und vier Incidents in "
-            "unterschiedlichen Workflow-Zuständen: kritisch und neu, 8D in Bearbeitung, wartet auf Abnahme, abgeschlossen."
+            "Lädt vier fiktive Anlagen mit SAP-Referenzen, zwei synthetische Handbücher und fünf Incidents der "
+            "letzten vier Wochen in allen Workflow-Zuständen, darunter ein Wiederholungsfehler und ein "
+            "wiedereröffneter Incident für die Kennzahlen."
         )
     )
     if blockers:

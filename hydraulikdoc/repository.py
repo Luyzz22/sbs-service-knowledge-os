@@ -6,7 +6,8 @@ import hashlib
 import hmac
 import json
 import uuid
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from functools import lru_cache
@@ -314,7 +315,26 @@ class InMemoryRepository:
         self._acceptances: set[tuple[str, str, str, str]] = set()
         self._privacy_requests: dict[tuple[str, str], tuple[str, PrivacyRequestRecord]] = {}
         self._audit: list[tuple[AuditEvent, str]] = []
+        self._scripted_times: dict[str, datetime] = {}
         self._lock = RLock()
+
+    @contextmanager
+    def scripted_time(self, principal: UserPrincipal, at: datetime) -> Iterator[None]:
+        """Record this tenant's incident workflow at ``at`` instead of now.
+
+        Only the demo seed uses this to stage a realistic history. It exists solely on the development
+        backend: workflow times in PostgreSQL are always server time and cannot be backdated.
+        """
+        with self._lock:
+            self._scripted_times[principal.tenant_id] = at
+        try:
+            yield
+        finally:
+            with self._lock:
+                self._scripted_times.pop(principal.tenant_id, None)
+
+    def _incident_time(self, principal: UserPrincipal) -> datetime:
+        return self._scripted_times.get(principal.tenant_id) or _now()
 
     def upsert_asset(
         self,
@@ -439,7 +459,7 @@ class InMemoryRepository:
         severity: str,
         details: str,
     ) -> IncidentRecord:
-        created = _now()
+        created = self._incident_time(principal)
         record = IncidentRecord(
             incident_id=str(uuid.uuid4()),
             tenant_id=principal.tenant_id,
@@ -466,7 +486,14 @@ class InMemoryRepository:
     ) -> None:
         actor = _principal_token(self._pseudonymizer, principal)
         event = IncidentEventRecord(
-            str(uuid.uuid4()), incident_id, event_type, previous_status, new_status, principal.role, _now(), False
+            str(uuid.uuid4()),
+            incident_id,
+            event_type,
+            previous_status,
+            new_status,
+            principal.role,
+            self._incident_time(principal),
+            False,
         )
         self._incident_events.append((principal.tenant_id, actor, event))
 
@@ -489,7 +516,7 @@ class InMemoryRepository:
             if current is None:
                 raise KeyError(incident_id)
             check_incident_transition(principal, current, expected, target)
-            updated = replace(current, status=target, updated_at=_now())
+            updated = replace(current, status=target, updated_at=self._incident_time(principal))
             self._incidents[key] = updated
             self._record_incident_event(principal, incident_id, "status_changed", current.status, target)
             return updated
@@ -513,7 +540,7 @@ class InMemoryRepository:
                 return current
             updated = replace(
                 current,
-                updated_at=_now(),
+                updated_at=self._incident_time(principal),
                 containment_action=values["containment_action"],
                 root_cause=values["root_cause"],
                 corrective_action=values["corrective_action"],

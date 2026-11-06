@@ -180,6 +180,19 @@ class LifecycleRepositoryTests(unittest.TestCase):
         )
         self.assertEqual(lifecycles[0].status, "in_progress")
 
+    def test_scripted_time_is_scoped_to_one_tenant_and_released(self) -> None:
+        foreign = UserPrincipal("x", "tenant-b", "X", "admin", permissions=ROLE_PERMISSIONS["admin"])
+        staged = datetime(2026, 10, 1, 8, 0, tzinfo=UTC)
+        with self.repository.scripted_time(self.technician, staged):
+            own = self.repository.create_incident(
+                self.technician, asset_id="PU-1", title="T", severity="p4", details=""
+            )
+            other = self.repository.create_incident(foreign, asset_id="PU-9", title="T", severity="p4", details="")
+        later = self.repository.create_incident(self.technician, asset_id="PU-1", title="T", severity="p4", details="")
+        self.assertEqual(own.created_at, staged)
+        self.assertGreater(other.created_at, staged + timedelta(days=30))
+        self.assertGreater(later.created_at, staged + timedelta(days=30))
+
     def test_window_and_limit(self) -> None:
         for index in range(3):
             self.repository.create_incident(

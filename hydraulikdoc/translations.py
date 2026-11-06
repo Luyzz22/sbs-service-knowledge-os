@@ -224,7 +224,7 @@ ENGLISH: dict[str, str] = {
     "Letzte Änderung": "Last change",
     "Letzter Incident": "Last incident",
     "Lokale Entwicklungsanmeldung mit Argon2id. In Produktion ist ausschließlich Microsoft Entra ID zulässig.": "Local development sign-in with Argon2id. Production only allows Microsoft Entra ID.",
-    "Lädt vier fiktive Anlagen mit SAP-Referenzen, zwei synthetische Handbücher und vier Incidents in unterschiedlichen Workflow-Zuständen: kritisch und neu, 8D in Bearbeitung, wartet auf Abnahme, abgeschlossen.": "Loads four fictitious assets with SAP references, two synthetic manuals and four incidents in different workflow states: critical and new, 8D in progress, awaiting sign-off, closed.",
+    "Lädt vier fiktive Anlagen mit SAP-Referenzen, zwei synthetische Handbücher und fünf Incidents der letzten vier Wochen in allen Workflow-Zuständen, darunter ein Wiederholungsfehler und ein wiedereröffneter Incident für die Kennzahlen.": "Loads four fictitious assets with SAP references, two synthetic manuals and five incidents from the last four weeks in every workflow state, including a repeat failure and a reopened incident for the KPIs.",
     "Löschen": "Delete",
     "Löschkonzept": "Retention policy",
     "Löschung": "Erasure",
