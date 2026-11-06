@@ -1031,7 +1031,9 @@ def _knowledge(principal: UserPrincipal, repository: EnterpriseRepository, setti
     if st.button(tr("KI-Entwurf erzeugen"), type="primary", disabled=disabled):
         try:
             with st.spinner(tr("Hybrid Retrieval und Evidenzprüfung laufen …")):
-                st.session_state.current_answer = _rag(settings, repository).ask(principal, question, use_case)
+                st.session_state.current_answer = _rag(settings, repository).ask(
+                    principal, question, use_case, language=_language()
+                )
         except (InputRejected, PermissionError, AuthenticationError) as error:
             st.error(tr_error(error))
         except Exception as error:

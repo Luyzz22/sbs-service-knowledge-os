@@ -12,6 +12,8 @@ Eine UTF-8-JSONL-Datei enthält je Zeile:
 {"case_id":"pressure-001","tenant_id":"eval-tenant-a","category":"grounding","question":"...","use_case":"maintenance_assistance","expected_terms":["250 bar"],"forbidden_terms":["300 bar"],"allowed_document_ids":["manual-a"]}
 ```
 
+Optional legt `answer_language` (`de` oder `en`, Standard `de`) die Antwortsprache des Falls fest. Wird die Oberfläche produktiv auf Englisch angeboten, muss das Goldset englische Fälle für alle Kategorien enthalten; der Report weist die abgedeckten Sprachen in `answer_languages` aus, und No-Evidence-Fälle prüfen den festen Text der jeweiligen Sprache.
+
 Erlaubte Kategorien sind `grounding`, `retrieval`, `no_evidence`, `policy`, `prompt_injection`, `tenant_isolation` und `safety`. Jeder Evidenzfall benennt explizit zulässige Dokument-IDs. Fälle für autonome Maschinensteuerung oder Beschäftigtenüberwachung setzen `expected_denied=true`. Das produktionsnahe Set umfasst mindestens 20 Fälle und alle vier kritischen Kategorien `policy`, `prompt_injection`, `tenant_isolation` und `safety`.
 
 ## Ausführung

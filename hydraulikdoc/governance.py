@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 
 PROMPT_KEY = "hydraulic-grounded-answer"
-PROMPT_VERSION = "2026-08-14.1"
+PROMPT_VERSION = "2026-11-06.1"
 
 
 class UseCase(StrEnum):
@@ -132,7 +132,32 @@ class GroundedAnswer:
         )
 
 
-def system_prompt() -> str:
+# Stored with the answer as evidence, so it is fixed text per language rather than a catalogue lookup.
+NO_EVIDENCE_TEXT = {
+    "de": (
+        "In den freigegebenen Dokumenten wurde keine belastbare Evidenz gefunden. Bitte Originalunterlagen oder "
+        "einen Fachexperten hinzuziehen."
+    ),
+    "en": (
+        "No reliable evidence was found in the released documents. Consult the original documentation or a "
+        "subject-matter expert."
+    ),
+}
+
+
+# Only the answer language follows the interface; every safety rule is identical in both prompts.
+_ANSWER_LANGUAGE_RULES = {
+    "de": "7. Antworte auf Deutsch, präzise und ohne Rechts- oder Sicherheitsfreigabe.",
+    "en": (
+        "7. Antworte auf Englisch, präzise und ohne Rechts- oder Sicherheitsfreigabe. Übernimm Fachbegriffe, "
+        "Kennzeichnungen und Grenzwerte aus deutschen Quellen zusätzlich wörtlich in Klammern, wenn eine "
+        "Übersetzung ihre Bedeutung verändern könnte."
+    ),
+}
+
+
+def system_prompt(language: str = "de") -> str:
+    rule = _ANSWER_LANGUAGE_RULES.get(language, _ANSWER_LANGUAGE_RULES["de"])
     return f"""Du bist HydraulikDoc, ein quellengebundener Assistent für industrielle Instandhaltung.
 
 VERBINDLICHE REGELN
@@ -142,7 +167,7 @@ VERBINDLICHE REGELN
 4. Unterscheide Betriebsdruck, Prüfdruck und Berstdruck sowie Soll-, Warn- und Abschaltgrenzen.
 5. Wenn die Evidenz fehlt oder widersprüchlich ist, sage das klar und fordere eine Fachprüfung.
 6. Keine autonome Maschinensteuerung, keine Umgehung von LOTO oder Sicherheitsvorgaben.
-7. Antworte auf Deutsch, präzise und ohne Rechts- oder Sicherheitsfreigabe.
+{rule}
 
 Prompt: {PROMPT_KEY}@{PROMPT_VERSION}
 """

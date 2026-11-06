@@ -17,6 +17,7 @@ from compliance.audit import AuditOutcome
 from .auth import UserPrincipal, require_permission
 from .config import AppSettings
 from .governance import (
+    NO_EVIDENCE_TEXT,
     AIProvenance,
     GroundedAnswer,
     SourceCitation,
@@ -24,6 +25,7 @@ from .governance import (
     evaluate_use_case,
     system_prompt,
 )
+from .i18n import DEFAULT_LANGUAGE
 from .repository import DocumentRecord, EnterpriseRepository
 from .security import (
     ValidatedUpload,
@@ -222,7 +224,7 @@ class AzureOpenAIModels:
             vectors.extend(tuple(item.embedding) for item in ordered)
         return tuple(vectors)
 
-    def answer(self, question: str, context: str) -> str:
+    def answer(self, question: str, context: str, language: str) -> str:
         deployment = self._settings.azure_chat_deployment
         if not deployment:
             raise AzureServiceError("Chat deployment is not configured")
@@ -231,7 +233,7 @@ class AzureOpenAIModels:
             temperature=0.0,
             max_tokens=1400,
             messages=[
-                {"role": "system", "content": system_prompt()},
+                {"role": "system", "content": system_prompt(language)},
                 {
                     "role": "user",
                     "content": f"EVIDENZ\n{context}\n\nFRAGE\n{question}",
@@ -609,7 +611,9 @@ class AzureRAGService:
             )
             raise
 
-    def ask(self, principal: UserPrincipal, question: str, use_case: UseCase) -> GroundedAnswer:
+    def ask(
+        self, principal: UserPrincipal, question: str, use_case: UseCase, language: str = DEFAULT_LANGUAGE
+    ) -> GroundedAnswer:
         require_permission(principal, "knowledge:read")
         decision = evaluate_use_case(use_case)
         if not decision.allowed:
@@ -625,14 +629,14 @@ class AzureRAGService:
         vector = self._models.embeddings([cleaned])[0]
         hits = self._search.query(principal.tenant_id, cleaned, vector)
         if not hits:
-            text = "In den freigegebenen Dokumenten wurde keine belastbare Evidenz gefunden. Bitte Originalunterlagen oder einen Fachexperten hinzuziehen."
+            text = NO_EVIDENCE_TEXT.get(language, NO_EVIDENCE_TEXT[DEFAULT_LANGUAGE])
         else:
             context = "\n\n".join(
                 f'<source id="S{index}" document="{hit.document_id}" page="{hit.page}">\n'
                 f"{bounded_untrusted_text(hit.content)}\n</source>"
                 for index, hit in enumerate(hits, start=1)
             )
-            text = self._models.answer(cleaned, context)
+            text = self._models.answer(cleaned, context, language)
             if not has_valid_source_citations(text, len(hits)):
                 raise AzureServiceError("Model output did not pass citation validation")
         citations = tuple(
@@ -663,6 +667,7 @@ class AzureRAGService:
                 "deployment": answer.provenance.deployment,
                 "model": answer.provenance.model_snapshot,
                 "prompt_version": answer.provenance.prompt_version,
+                "answer_language": language,
                 "risk_class": answer.risk_class.value,
                 "review_status": answer.review_status.value,
                 "region": answer.provenance.region,
