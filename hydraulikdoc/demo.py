@@ -24,7 +24,7 @@ from compliance.audit import AuditOutcome
 from .auth import UserPrincipal, require_permission
 from .config import AppSettings
 from .governance import AIProvenance, GroundedAnswer, SourceCitation, UseCase, evaluate_use_case
-from .i18n import msg
+from .i18n import DEFAULT_LANGUAGE, msg
 from .repository import (
     INCIDENT_ANALYSIS_FIELDS,
     INCIDENT_CLOSE_PERMISSION,
@@ -38,6 +38,31 @@ from .security import InputRejected, ValidatedUpload, validate_question
 DEMO_LABEL = "DEMO"
 DEMO_PROVIDER = "HydraulikDoc Demo (kein Modellaufruf)"
 DEMO_LIMITATION = "Demo-Modus: synthetische Dokumente, extrahierte Sätze statt KI-Generierung."
+# Sentences are quoted verbatim, so in English only the frame is translated and the quotes stay German.
+_DEMO_ANSWER_TEXTS = {
+    "de": {
+        "answer": (
+            "**Demo-Antwort ohne Sprachmodell.** Die folgenden Sätze stammen unverändert aus synthetischen "
+            "Demodokumenten:\n\n{lines}\n\nVor jeder Handlung Originalunterlage, Betriebsanweisung und "
+            "Gefährdungsbeurteilung prüfen."
+        ),
+        "no_evidence": (
+            "In den Demodokumenten wurde keine passende Evidenz gefunden. Im Demo-Modus stehen nur die "
+            "synthetischen Unterlagen zu HA-250 und SGM-80 zur Verfügung."
+        ),
+    },
+    "en": {
+        "answer": (
+            "**Demo answer without a language model.** The following sentences are quoted verbatim, in their "
+            "original German, from synthetic demo documents:\n\n{lines}\n\nCheck the original documentation, "
+            "operating instructions and risk assessment before any action."
+        ),
+        "no_evidence": (
+            "No matching evidence was found in the demo documents. Demo mode only contains the synthetic "
+            "documentation for HA-250 and SGM-80."
+        ),
+    },
+}
 
 # Synthetic manuals of fictitious products. Page numbers are part of the citation evidence.
 DEMO_DOCUMENTS: Mapping[str, Mapping[int, str]] = {
@@ -455,7 +480,9 @@ class DemoRAGService:
                 break
         return tuple(selected)
 
-    def ask(self, principal: UserPrincipal, question: str, use_case: UseCase) -> GroundedAnswer:
+    def ask(
+        self, principal: UserPrincipal, question: str, use_case: UseCase, language: str = DEFAULT_LANGUAGE
+    ) -> GroundedAnswer:
         require_permission(principal, "knowledge:read")
         decision = evaluate_use_case(use_case)
         if not decision.allowed:
@@ -469,18 +496,12 @@ class DemoRAGService:
         cleaned = validate_question(question, self._settings.max_question_chars)
         started = time.monotonic()
         hits = self._retrieve(principal, cleaned)
+        texts = _DEMO_ANSWER_TEXTS.get(language, _DEMO_ANSWER_TEXTS[DEFAULT_LANGUAGE])
         if hits:
             lines = "\n".join(f"- {hit.sentence} [S{index}]" for index, hit in enumerate(hits, start=1))
-            text = (
-                "**Demo-Antwort ohne Sprachmodell.** Die folgenden Sätze stammen unverändert aus synthetischen "
-                f"Demodokumenten:\n\n{lines}\n\nVor jeder Handlung Originalunterlage, Betriebsanweisung und "
-                "Gefährdungsbeurteilung prüfen."
-            )
+            text = texts["answer"].format(lines=lines)
         else:
-            text = (
-                "In den Demodokumenten wurde keine passende Evidenz gefunden. Im Demo-Modus stehen nur die "
-                "synthetischen Unterlagen zu HA-250 und SGM-80 zur Verfügung."
-            )
+            text = texts["no_evidence"]
         citations = tuple(
             SourceCitation(
                 hit.document.document_id,
@@ -511,6 +532,7 @@ class DemoRAGService:
                 "duration_ms": int((time.monotonic() - started) * 1000),
                 "source_count": len(citations),
                 "provider": "demo",
+                "answer_language": language,
                 "risk_class": answer.risk_class.value,
                 "review_status": answer.review_status.value,
             },

@@ -1,10 +1,12 @@
 # AI System Card: HydraulikDoc Grounded Maintenance Assistant
 
-Version: `hydraulic-grounded-answer@2026-08-14.1`
+Version: `hydraulic-grounded-answer@2026-11-06.1`
 
 ## Intended Purpose
 
-Das System erstellt deutschsprachige, quellengebundene Rechercheentwürfe aus tenant-eigenen technischen PDF-Dokumenten für qualifizierte industrielle Instandhaltungsteams.
+Das System erstellt deutsch- oder englischsprachige, quellengebundene Rechercheentwürfe aus tenant-eigenen technischen PDF-Dokumenten für qualifizierte industrielle Instandhaltungsteams.
+
+Die Antwortsprache folgt der Oberflächensprache der Person. Seit Prompt-Version `2026-11-06.1` unterscheiden sich die Prompts nur in Regel 7 (Antwortsprache): Englische Antworten übernehmen Fachbegriffe, Kennzeichnungen und Grenzwerte aus deutschen Quellen zusätzlich wörtlich in Klammern, damit beim Übersetzen keine Bedeutung verloren geht. Quellenpflicht, Untrusted-Data-Regel, Druck- und Grenzwertunterscheidung sowie LOTO-Sperre sind identisch und per Test abgesichert.
 
 ## Nicht zugelassene Zwecke
 
@@ -21,7 +23,7 @@ Die ersten beiden Zwecke werden vor Retrieval und Modellaufruf technisch gesperr
 - Azure OpenAI Embedding-Deployment für Vektoren;
 - Azure AI Search für Keyword-, Vector- und optional Semantic Ranking mit verpflichtendem Tenantfilter;
 - regionales Azure OpenAI Chat-Deployment mit Temperature 0;
-- Prompt `hydraulic-grounded-answer@2026-08-14.1`;
+- Prompt `hydraulic-grounded-answer@2026-11-06.1`;
 - serverseitige Quellenmarkerprüfung;
 - PostgreSQL-Provenienz und Human Review.
 

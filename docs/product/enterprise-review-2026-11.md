@@ -80,6 +80,6 @@ Priorität: **P1** blockiert Pilot oder Security-Freigabe, **P2** senkt Akzeptan
 1. ~~8D-light im Incident~~ (D1, D2): umgesetzt.
 2. ~~Demo-Mandant~~ (M1): umgesetzt.
 3. **Barrierefreiheit** (U5): automatisierte Prüfungen umgesetzt (siehe Kontrollmatrix); offen sind der manuelle Tastatur- und Screenreader-Test und ein Prüfbericht.
-4. ~~DE/EN~~ (U6): umgesetzt. Offen: Sprachwahl dauerhaft je Benutzer speichern, KI-Antworten in der Sprache der Oberfläche.
+4. ~~DE/EN~~ (U6): umgesetzt, KI-Antworten folgen der Oberflächensprache (Prompt `2026-11-06.1`, Evaluation je Sprache). Die Sprachwahl gilt bewusst nur je Sitzung und wird nicht personenbezogen gespeichert.
 5. ~~Instandhaltungskennzahlen~~ (D6): umgesetzt, einschließlich gestaffeltem Demo-Verlauf.
 6. **Live-Connector-Pilot** (S4) erst nach Datenvertrag und Bedrohungsmodell mit einem konkreten Kunden.

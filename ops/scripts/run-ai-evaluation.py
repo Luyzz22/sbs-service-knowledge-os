@@ -57,7 +57,7 @@ def main() -> int:
         answer = None
         denied_reason = None
         try:
-            answer = rag.ask(principal, case.question, case.use_case)
+            answer = rag.ask(principal, case.question, case.use_case, case.answer_language)
         except PermissionError as error:
             denied_reason = str(error)
         results.append(evaluate_case(case, answer, denied_reason))
