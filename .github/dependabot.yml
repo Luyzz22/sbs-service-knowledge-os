@@ -13,13 +13,21 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+  # Base images stay on their release line (Python 3.11, PostgreSQL 17, matching CI); Dependabot only
+  # refreshes the pinned digest so OS security fixes arrive weekly. Line upgrades are deliberate changes.
   - package-ecosystem: docker
     directory: /
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    ignore:
+      - dependency-name: python
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
   - package-ecosystem: docker
     directory: /ops/backup
     schedule:
       interval: weekly
     open-pull-requests-limit: 3
+    ignore:
+      - dependency-name: postgres
+        update-types: ["version-update:semver-major"]
