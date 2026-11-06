@@ -2,6 +2,11 @@ from dataclasses import dataclass
 from datetime import datetime
 from math import isfinite
 
+from hydraulikdoc.i18n import msg
+
+# Status codes stay stable ("OK", "BEOBACHTEN", "KRITISCH") for logic and storage; only their display is translated.
+FLUID_STATUS_LABELS = {"OK": msg("OK"), "BEOBACHTEN": msg("BEOBACHTEN"), "KRITISCH": msg("KRITISCH")}
+
 
 @dataclass(frozen=True)
 class FluidSample:
@@ -59,23 +64,23 @@ def assess_fluid(sample: FluidSample, limits: FluidLimits | None = None) -> Flui
     if sample.particle_count is not None and sample.particle_count > limits.particle_warning:
         score -= 30
         status = "BEOBACHTEN"
-        reasons.append("Erhöhte Partikelzahl – Filtration prüfen.")
+        reasons.append(msg("Erhöhte Partikelzahl – Filtration prüfen."))
 
     if sample.water_content is not None and sample.water_content > limits.water_critical_pct:
         score -= 30
         status = "KRITISCH"
-        reasons.append("Erhöhter Wassergehalt – Gefahr von Korrosion und Kavitation.")
+        reasons.append(msg("Erhöhter Wassergehalt – Gefahr von Korrosion und Kavitation."))
 
     if score < 50:
         status = "KRITISCH"
 
     if not reasons:
-        reasons.append("Fluidzustand unauffällig im Rahmen der verfügbaren Daten.")
+        reasons.append(msg("Fluidzustand unauffällig im Rahmen der verfügbaren Daten."))
 
-    summary = f"FluidScore {score}/100 – Status: {status}"
-    recommendations: list[str] = ["Regelmäßige Kontrollmessung beibehalten."]
+    summary = msg("FluidScore {score}/100 – Status: {status}", score=score, status=FLUID_STATUS_LABELS[status])
+    recommendations: list[str] = [msg("Regelmäßige Kontrollmessung beibehalten.")]
     if status != "OK":
-        recommendations.append("Zeitnahe Analyse durch Fluidservice einplanen.")
+        recommendations.append(msg("Zeitnahe Analyse durch Fluidservice einplanen."))
 
     return FluidAssessment(
         asset_id=sample.asset_id,

@@ -63,7 +63,31 @@ set +a
 streamlit run app.py
 ```
 
+Das Container-Image setzt die Dokumentsprache auf Deutsch (WCAG 3.1.1). Lokal lässt sich das mit `python ops/scripts/set-document-language.py de` nachstellen.
+
 Der lokale Default hat `AI_BACKEND=disabled` und `PERSISTENCE_BACKEND=memory`. Er sendet keine Dokumente an externe KI-Dienste.
+
+### Sprache
+
+Die Oberfläche ist auf Deutsch und Englisch verfügbar. Beim ersten Aufruf folgt sie der Browser-Einstellung (`Accept-Language`), sonst gilt `DEFAULT_LANGUAGE` (`de` oder `en`). Umschalten lässt sich jederzeit über „Sprache · Language“ in der Seitenleiste oder auf der Anmeldeseite; die Wahl gilt für die Sitzung und wird nicht personenbezogen gespeichert. Gespeicherte Fachdaten (Incident-Titel, 8D-Texte, Dokumente) bleiben in der Sprache, in der sie erfasst wurden. Der KI-Nutzerhinweis und der Datenschutzhinweis liegen in beiden Sprachen vor; die Bestätigung speichert den Hash genau der angezeigten Fassung.
+
+Neue Oberflächentexte werden auf Deutsch mit `tr()` oder `msg()` geschrieben und in `hydraulikdoc/translations.py` übersetzt. `tests/test_i18n.py` schlägt fehl, wenn eine Übersetzung fehlt, Platzhalter abweichen oder Einträge verwaist sind.
+
+### Demo-Mandant für Vorführungen
+
+Für Vertriebs- und Schulungsdemos ohne Azure und ohne Kundendaten zusätzlich `AI_BACKEND=demo` setzen:
+
+```bash
+AI_BACKEND=demo streamlit run app.py
+```
+
+Als Supervisor oder Admin anmelden und im Leitstand **Demodaten laden** wählen. Geladen werden vier fiktive Anlagen mit SAP-Referenzen, zwei synthetische Handbücher und vier Incidents in den Zuständen „neu und kritisch“, „8D in Bearbeitung“, „wartet auf Abnahme“ und „abgeschlossen“. Condition Monitoring bietet eine synthetische 48-h-Messreihe ohne Upload.
+
+Der Demo-Pfad ruft kein Sprachmodell auf: Antworten bestehen aus unverändert extrahierten Sätzen der synthetischen Handbücher mit Seitenbeleg und durchlaufen dieselben Sperren, Reviews und Auditereignisse wie der Azure-Pfad. Ein Banner kennzeichnet jede Seite, alle Daten tragen das Präfix `DEMO`. `AI_BACKEND=demo` ist in Produktion und hinter Entra ID technisch gesperrt; die Demodaten werden nur in einen leeren Mandanten geladen. Empfohlene Fragen für die Vorführung:
+
+- Welcher Betriebsdruck gilt für HA-250 und wann ist das Aggregat stillzusetzen?
+- Wie hoch darf der Wassergehalt sein?
+- Was ist bei hoher Partikelzahl zu tun?
 
 ## Qualitätssicherung
 
@@ -93,6 +117,7 @@ Zusätzlich ist eine nicht-leere `AI_EVALUATION_EVIDENCE_ID` aus der [fachlichen
 ## Dokumentation
 
 - [Produktdefinition](PRODUCT.md)
+- [Enterprise-Review DACH und Roadmap](docs/product/enterprise-review-2026-11.md)
 - [Designsystem](DESIGN.md)
 - [Security Policy](SECURITY.md)
 - [AI System Card](docs/compliance/ai-system-card.md)

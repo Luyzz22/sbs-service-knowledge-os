@@ -8,6 +8,8 @@ import unicodedata
 import uuid
 from dataclasses import dataclass
 
+from .i18n import msg
+
 
 class InputRejected(ValueError):
     """Raised when untrusted input violates a security policy."""
@@ -46,14 +48,16 @@ def normalise_filename(filename: str) -> str:
 
 def validate_pdf_upload(filename: str, content: bytes, max_bytes: int) -> ValidatedUpload:
     if not content:
-        raise InputRejected("Die Datei ist leer.")
+        raise InputRejected(msg("Die Datei ist leer."))
     if len(content) > max_bytes:
-        raise InputRejected(f"Die PDF-Datei überschreitet das Limit von {max_bytes // 1024 // 1024} MB.")
+        raise InputRejected(
+            msg("Die PDF-Datei überschreitet das Limit von {limit} MB.", limit=max_bytes // 1024 // 1024)
+        )
     if not content.startswith(b"%PDF-"):
-        raise InputRejected("Dateiinhalt und PDF-Dateityp stimmen nicht überein.")
+        raise InputRejected(msg("Dateiinhalt und PDF-Dateityp stimmen nicht überein."))
     head = content[: min(len(content), 2 * 1024 * 1024)]
     if any(marker in head for marker in _ACTIVE_PDF_MARKERS):
-        raise InputRejected("Aktive oder eingebettete PDF-Inhalte sind nicht zugelassen.")
+        raise InputRejected(msg("Aktive oder eingebettete PDF-Inhalte sind nicht zugelassen."))
     return ValidatedUpload(
         document_id=str(uuid.uuid4()),
         display_name=normalise_filename(filename),
@@ -65,11 +69,11 @@ def validate_pdf_upload(filename: str, content: bytes, max_bytes: int) -> Valida
 def validate_question(question: str, max_chars: int) -> str:
     cleaned = question.strip()
     if not cleaned:
-        raise InputRejected("Bitte geben Sie eine technische Frage ein.")
+        raise InputRejected(msg("Bitte geben Sie eine technische Frage ein."))
     if len(cleaned) > max_chars:
-        raise InputRejected(f"Die Frage darf höchstens {max_chars} Zeichen enthalten.")
+        raise InputRejected(msg("Die Frage darf höchstens {limit} Zeichen enthalten.", limit=max_chars))
     if any(ord(character) < 32 and character not in "\n\t" for character in cleaned):
-        raise InputRejected("Die Frage enthält unzulässige Steuerzeichen.")
+        raise InputRejected(msg("Die Frage enthält unzulässige Steuerzeichen."))
     return cleaned
 
 

@@ -65,6 +65,31 @@ class PostgresSecurityIntegrationTests(unittest.TestCase):
                 )
                 self.assertEqual(cursor.fetchone(), (True, False, False, False))
                 cursor.execute(
+                    """SELECT
+                    has_column_privilege(current_user, 'incidents', 'status', 'UPDATE'),
+                    has_column_privilege(current_user, 'incidents', 'details', 'UPDATE'),
+                    has_column_privilege(current_user, 'incidents', 'tenant_id', 'UPDATE'),
+                    has_column_privilege(current_user, 'incidents', 'root_cause', 'UPDATE'),
+                    has_table_privilege(current_user, 'incident_events', 'INSERT'),
+                    has_table_privilege(current_user, 'incident_events', 'UPDATE'),
+                    has_table_privilege(current_user, 'incident_events', 'DELETE')"""
+                )
+                self.assertEqual(cursor.fetchone(), (True, False, False, True, True, False, False))
+                incident_id = str(uuid.uuid4())
+                cursor.execute(
+                    """INSERT INTO incidents
+                    (incident_id, tenant_id, asset_id, title, details, severity, status, created_by_token,
+                     retention_until)
+                    VALUES (%s,%s,'a1','Expired','','warning','closed','token',now() - interval '1 day')""",
+                    (incident_id, self.tenant_a),
+                )
+                cursor.execute(
+                    """INSERT INTO incident_events
+                    (event_id, tenant_id, incident_id, event_type, new_status, actor_role, actor_token)
+                    VALUES (%s,%s,%s,'created','new','technician','token')""",
+                    (str(uuid.uuid4()), self.tenant_a, incident_id),
+                )
+                cursor.execute(
                     """INSERT INTO audit_events
                     (event_id, tenant_id, action, outcome, occurred_at, retention_until, event_hash)
                     VALUES (%s,%s,'integration.expired','success',now(),now() - interval '1 day',%s)""",
@@ -76,7 +101,12 @@ class PostgresSecurityIntegrationTests(unittest.TestCase):
                 with connection.cursor() as cursor:
                     cursor.execute("SELECT purge_expired_tenant_data(%s)", (self.tenant_a,))
 
-        for statement in ("CREATE TABLE runtime_must_not_create(id int)", "DELETE FROM audit_events"):
+        for statement in (
+            "CREATE TABLE runtime_must_not_create(id int)",
+            "DELETE FROM audit_events",
+            "DELETE FROM incident_events",
+            "UPDATE incident_events SET actor_role='admin'",
+        ):
             with self.assertRaises(InsufficientPrivilege):
                 with self.psycopg.connect(self.app_dsn) as connection:
                     with connection.cursor() as cursor:
@@ -92,7 +122,9 @@ class PostgresSecurityIntegrationTests(unittest.TestCase):
                 self.assertEqual(cursor.fetchall(), [(self.tenant_a,), (self.tenant_b,)])
                 cursor.execute("SELECT set_config('app.tenant_id', %s, true)", (self.tenant_a,))
                 cursor.execute("SELECT purge_expired_tenant_data(%s)", (self.tenant_a,))
-                self.assertEqual(cursor.fetchone()[0]["audit_events"], 1)
+                purged = cursor.fetchone()[0]
+                self.assertEqual(purged["audit_events"], 1)
+                self.assertEqual((purged["incident_events"], purged["incidents"]), (1, 1))
 
         for statement in ("CREATE TABLE lifecycle_must_not_create(id int)", "DELETE FROM audit_events"):
             with self.assertRaises(InsufficientPrivilege):
@@ -124,6 +156,35 @@ class PostgresSecurityIntegrationTests(unittest.TestCase):
                         ("purge_expired_tenant_data", self.owner_role),
                     ],
                 )
+
+    def test_runtime_role_writes_hash_chained_audit_events(self) -> None:
+        from compliance.audit import AuditOutcome
+        from hydraulikdoc.auth import ROLE_PERMISSIONS, UserPrincipal
+        from hydraulikdoc.config import AppSettings
+        from hydraulikdoc.repository import PostgresRepository
+
+        settings = AppSettings.from_environment(
+            {
+                "APP_ENV": "test",
+                "PERSISTENCE_BACKEND": "postgres",
+                "AUDIT_HMAC_KEY": "integration-audit-key-" + "x" * 16,
+                "DATABASE_URL": self.app_dsn,
+            }
+        )
+        repository = PostgresRepository(settings)
+        principal = UserPrincipal(
+            "auditor", f"{self.tenant_a}-audit", "Auditor", "supervisor", permissions=ROLE_PERMISSIONS["supervisor"]
+        )
+        for action in ("integration.audit.first", "integration.audit.second"):
+            repository.emit_audit(principal, action=action, outcome=AuditOutcome.SUCCESS)
+        with self.psycopg.connect(self.app_dsn) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT set_config('app.tenant_id', %s, true)", (principal.tenant_id,))
+                cursor.execute("SELECT previous_hash, event_hash FROM audit_events ORDER BY sequence_id")
+                rows = cursor.fetchall()
+        self.assertEqual(len(rows), 2)
+        self.assertIsNone(rows[0][0])
+        self.assertEqual(rows[1][0], rows[0][1])
 
 
 if __name__ == "__main__":

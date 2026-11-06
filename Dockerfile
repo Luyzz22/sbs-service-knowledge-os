@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 
-FROM python:3.11-slim-bookworm@sha256:2e32f7d302adc1c37428355c1e646897c0c53f4fd60b6a551245fb90ee129f91 AS builder
+FROM python:3.11-slim-bookworm@sha256:a83ba18aef0f865b1a4a611c2cf460fe446f2795673bbb9fe43be570439e3b39 AS builder
 
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_NO_CACHE_DIR=1 \
@@ -18,7 +18,11 @@ COPY requirements.lock ./
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --require-hashes --requirement requirements.lock
 
-FROM python:3.11-slim-bookworm@sha256:2e32f7d302adc1c37428355c1e646897c0c53f4fd60b6a551245fb90ee129f91 AS runtime
+# The interface is German; screen readers need the matching document language (WCAG 3.1.1).
+COPY ops/scripts/set-document-language.py ./
+RUN python set-document-language.py de
+
+FROM python:3.11-slim-bookworm@sha256:a83ba18aef0f865b1a4a611c2cf460fe446f2795673bbb9fe43be570439e3b39 AS runtime
 
 ENV DEBIAN_FRONTEND=noninteractive \
     HOME=/tmp \

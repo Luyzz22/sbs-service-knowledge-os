@@ -44,6 +44,87 @@ class IncidentRecord:
     severity: str
     status: str
     created_at: datetime
+    details: str = ""
+    updated_at: datetime | None = None
+    containment_action: str = ""
+    root_cause: str = ""
+    corrective_action: str = ""
+    effectiveness_check: str = ""
+
+
+@dataclass(frozen=True)
+class IncidentEventRecord:
+    event_id: str
+    incident_id: str
+    event_type: str
+    previous_status: str | None
+    new_status: str | None
+    actor_role: str
+    occurred_at: datetime
+    is_own: bool
+
+
+INCIDENT_STATUSES = ("new", "acknowledged", "in_progress", "resolved", "closed")
+INCIDENT_TRANSITIONS: Mapping[str, tuple[str, ...]] = {
+    "new": ("acknowledged", "in_progress"),
+    "acknowledged": ("in_progress",),
+    "in_progress": ("resolved",),
+    "resolved": ("closed", "in_progress"),
+    "closed": (),
+}
+INCIDENT_CLOSE_PERMISSION = "incident:close"
+
+
+# 8D-light: severe incidents need containment, root cause and corrective action before they can be
+# reported as resolved, and a documented effectiveness check before supervisor sign-off.
+EIGHT_D_SEVERITIES = frozenset({"critical", "p1", "p2"})
+INCIDENT_ANALYSIS_FIELDS = ("containment_action", "root_cause", "corrective_action", "effectiveness_check")
+INCIDENT_ANALYSIS_MIN_CHARS = 10
+INCIDENT_ANALYSIS_MAX_CHARS = 4000
+
+
+class IncidentTransitionRejected(ValueError):
+    """Raised when a requested incident change is not permitted by the workflow."""
+
+
+def missing_analysis_fields(incident: IncidentRecord, target: str) -> tuple[str, ...]:
+    """Return the analysis fields that must be documented before moving the incident to ``target``."""
+    eight_d = incident.severity in EIGHT_D_SEVERITIES
+    required: tuple[str, ...]
+    if target == "resolved":
+        required = ("containment_action", "root_cause", "corrective_action") if eight_d else ("corrective_action",)
+    elif target == "closed" and eight_d:
+        required = ("effectiveness_check",)
+    else:
+        required = ()
+    return tuple(field for field in required if len(getattr(incident, field).strip()) < INCIDENT_ANALYSIS_MIN_CHARS)
+
+
+def check_incident_transition(principal: UserPrincipal, current: IncidentRecord, expected: str, target: str) -> None:
+    """Fail closed unless the role may perform this workflow step from the persisted status."""
+    if not principal.can("incident:write"):
+        raise PermissionError("INCIDENT_WRITE_REQUIRED")
+    if current.status != expected:
+        raise IncidentTransitionRejected("INCIDENT_STALE_STATUS")
+    if target not in INCIDENT_TRANSITIONS.get(current.status, ()):
+        raise IncidentTransitionRejected(f"INCIDENT_TRANSITION_{current.status}_TO_{target}".upper())
+    if target == "closed" and not principal.can(INCIDENT_CLOSE_PERMISSION):
+        raise PermissionError("INCIDENT_CLOSE_REQUIRED")
+    if missing_analysis_fields(current, target):
+        raise IncidentTransitionRejected("INCIDENT_ANALYSIS_INCOMPLETE")
+
+
+def _check_analysis_update(principal: UserPrincipal, current: IncidentRecord, expected_updated_at: datetime) -> None:
+    if not principal.can("incident:write"):
+        raise PermissionError("INCIDENT_WRITE_REQUIRED")
+    if current.status == "closed":
+        raise IncidentTransitionRejected("INCIDENT_CLOSED")
+    if current.updated_at != expected_updated_at:
+        raise IncidentTransitionRejected("INCIDENT_STALE_VERSION")
+
+
+def _bounded_analysis(values: Mapping[str, str]) -> dict[str, str]:
+    return {field: values[field].strip()[:INCIDENT_ANALYSIS_MAX_CHARS] for field in INCIDENT_ANALYSIS_FIELDS}
 
 
 @dataclass(frozen=True)
@@ -57,6 +138,8 @@ class AssetRecord:
     criticality: str
     status: str
     updated_at: datetime
+    functional_location: str = ""
+    equipment_number: str = ""
 
 
 @dataclass(frozen=True)
@@ -87,6 +170,8 @@ class EnterpriseRepository(Protocol):
         manufacturer: str,
         model: str,
         criticality: str,
+        functional_location: str = "",
+        equipment_number: str = "",
     ) -> AssetRecord: ...
 
     def list_assets(self, principal: UserPrincipal) -> tuple[AssetRecord, ...]: ...
@@ -125,6 +210,21 @@ class EnterpriseRepository(Protocol):
 
     def list_incidents(self, principal: UserPrincipal) -> tuple[IncidentRecord, ...]: ...
 
+    def transition_incident(
+        self, principal: UserPrincipal, incident_id: str, *, expected: str, target: str
+    ) -> IncidentRecord: ...
+
+    def update_incident_analysis(
+        self,
+        principal: UserPrincipal,
+        incident_id: str,
+        *,
+        expected_updated_at: datetime,
+        analysis: Mapping[str, str],
+    ) -> IncidentRecord: ...
+
+    def list_incident_events(self, principal: UserPrincipal, incident_id: str) -> tuple[IncidentEventRecord, ...]: ...
+
     def record_acceptance(self, principal: UserPrincipal, notice_type: str, version: str, digest: str) -> None: ...
 
     def has_acceptance(self, principal: UserPrincipal, notice_type: str, version: str) -> bool: ...
@@ -159,6 +259,12 @@ def _audit_chain_key(secret: str) -> bytes:
     ).digest()
 
 
+def _audit_lock_key(tenant_id: str) -> int:
+    """Stable signed 64-bit advisory lock key for one tenant's audit chain."""
+    digest = hashlib.sha256(b"hydraulikdoc-audit-chain:" + tenant_id.encode("utf-8")).digest()
+    return int.from_bytes(digest[:8], "big", signed=True)
+
+
 def _event_hash(key: bytes, previous_hash: str | None, event: AuditEvent) -> str:
     material = {
         "previous_hash": previous_hash,
@@ -181,6 +287,7 @@ class InMemoryRepository:
         self._answers: dict[tuple[str, str], tuple[str, GroundedAnswer]] = {}
         self._reviews: dict[tuple[str, str], ReviewStatus] = {}
         self._incidents: dict[tuple[str, str], IncidentRecord] = {}
+        self._incident_events: list[tuple[str, str, IncidentEventRecord]] = []
         self._acceptances: set[tuple[str, str, str, str]] = set()
         self._privacy_requests: dict[tuple[str, str], tuple[str, PrivacyRequestRecord]] = {}
         self._audit: list[tuple[AuditEvent, str]] = []
@@ -196,6 +303,8 @@ class InMemoryRepository:
         manufacturer: str,
         model: str,
         criticality: str,
+        functional_location: str = "",
+        equipment_number: str = "",
     ) -> AssetRecord:
         record = AssetRecord(
             asset_id=asset_id[:120],
@@ -207,6 +316,8 @@ class InMemoryRepository:
             criticality=criticality,
             status="active",
             updated_at=_now(),
+            functional_location=functional_location[:40],
+            equipment_number=equipment_number[:18],
         )
         with self._lock:
             self._assets[(principal.tenant_id, record.asset_id)] = record
@@ -305,7 +416,7 @@ class InMemoryRepository:
         severity: str,
         details: str,
     ) -> IncidentRecord:
-        del details
+        created = _now()
         record = IncidentRecord(
             incident_id=str(uuid.uuid4()),
             tenant_id=principal.tenant_id,
@@ -313,15 +424,90 @@ class InMemoryRepository:
             title=title[:240],
             severity=severity,
             status="new",
-            created_at=_now(),
+            created_at=created,
+            details=details[:8000],
+            updated_at=created,
         )
         with self._lock:
             self._incidents[(principal.tenant_id, record.incident_id)] = record
+            self._record_incident_event(principal, record.incident_id, "created", None, "new")
         return record
+
+    def _record_incident_event(
+        self,
+        principal: UserPrincipal,
+        incident_id: str,
+        event_type: str,
+        previous_status: str | None,
+        new_status: str | None,
+    ) -> None:
+        actor = _principal_token(self._pseudonymizer, principal)
+        event = IncidentEventRecord(
+            str(uuid.uuid4()), incident_id, event_type, previous_status, new_status, principal.role, _now(), False
+        )
+        self._incident_events.append((principal.tenant_id, actor, event))
 
     def list_incidents(self, principal: UserPrincipal) -> tuple[IncidentRecord, ...]:
         with self._lock:
-            return tuple(item for (tenant, _), item in self._incidents.items() if tenant == principal.tenant_id)
+            return tuple(
+                sorted(
+                    (item for (tenant, _), item in self._incidents.items() if tenant == principal.tenant_id),
+                    key=lambda item: item.created_at,
+                    reverse=True,
+                )
+            )
+
+    def transition_incident(
+        self, principal: UserPrincipal, incident_id: str, *, expected: str, target: str
+    ) -> IncidentRecord:
+        key = (principal.tenant_id, incident_id)
+        with self._lock:
+            current = self._incidents.get(key)
+            if current is None:
+                raise KeyError(incident_id)
+            check_incident_transition(principal, current, expected, target)
+            updated = replace(current, status=target, updated_at=_now())
+            self._incidents[key] = updated
+            self._record_incident_event(principal, incident_id, "status_changed", current.status, target)
+            return updated
+
+    def update_incident_analysis(
+        self,
+        principal: UserPrincipal,
+        incident_id: str,
+        *,
+        expected_updated_at: datetime,
+        analysis: Mapping[str, str],
+    ) -> IncidentRecord:
+        key = (principal.tenant_id, incident_id)
+        values = _bounded_analysis(analysis)
+        with self._lock:
+            current = self._incidents.get(key)
+            if current is None:
+                raise KeyError(incident_id)
+            _check_analysis_update(principal, current, expected_updated_at)
+            if all(getattr(current, field) == value for field, value in values.items()):
+                return current
+            updated = replace(
+                current,
+                updated_at=_now(),
+                containment_action=values["containment_action"],
+                root_cause=values["root_cause"],
+                corrective_action=values["corrective_action"],
+                effectiveness_check=values["effectiveness_check"],
+            )
+            self._incidents[key] = updated
+            self._record_incident_event(principal, incident_id, "analysis_updated", None, None)
+            return updated
+
+    def list_incident_events(self, principal: UserPrincipal, incident_id: str) -> tuple[IncidentEventRecord, ...]:
+        subject = _principal_token(self._pseudonymizer, principal)
+        with self._lock:
+            return tuple(
+                replace(event, is_own=actor == subject)
+                for tenant, actor, event in self._incident_events
+                if tenant == principal.tenant_id and event.incident_id == incident_id
+            )
 
     def record_acceptance(self, principal: UserPrincipal, notice_type: str, version: str, digest: str) -> None:
         subject = _principal_token(self._pseudonymizer, principal)
@@ -421,6 +607,22 @@ class InMemoryRepository:
         return event
 
 
+# Column order matches IncidentRecord. Statements are complete literals so no SQL is assembled at runtime.
+_SELECT_INCIDENTS_SQL = """SELECT incident_id::text, tenant_id, asset_id, title, severity, status, created_at, details, updated_at,
+    containment_action, root_cause, corrective_action, effectiveness_check
+    FROM incidents ORDER BY created_at DESC LIMIT 250"""
+_LOCK_INCIDENT_SQL = """SELECT incident_id::text, tenant_id, asset_id, title, severity, status, created_at, details, updated_at,
+    containment_action, root_cause, corrective_action, effectiveness_check
+    FROM incidents WHERE incident_id=%s FOR UPDATE"""
+_UPDATE_INCIDENT_STATUS_SQL = """UPDATE incidents SET status=%s, updated_at=now() WHERE incident_id=%s
+    RETURNING incident_id::text, tenant_id, asset_id, title, severity, status, created_at, details, updated_at,
+    containment_action, root_cause, corrective_action, effectiveness_check"""
+_UPDATE_INCIDENT_ANALYSIS_SQL = """UPDATE incidents SET containment_action=%s, root_cause=%s, corrective_action=%s,
+    effectiveness_check=%s, updated_at=now() WHERE incident_id=%s
+    RETURNING incident_id::text, tenant_id, asset_id, title, severity, status, created_at, details, updated_at,
+    containment_action, root_cause, corrective_action, effectiveness_check"""
+
+
 class PostgresRepository:
     """PostgreSQL repository using forced RLS and per-transaction tenant context."""
 
@@ -460,6 +662,7 @@ class PostgresRepository:
             "analysis_runs",
             "analysis_reviews",
             "incidents",
+            "incident_events",
             "notice_acceptances",
             "privacy_requests",
             "audit_events",
@@ -479,8 +682,16 @@ class PostgresRepository:
                 purge_function = cursor.fetchone()[0]
                 cursor.execute("SELECT to_regprocedure('public.list_retention_tenant_ids()')")
                 tenant_function = cursor.fetchone()[0]
+                cursor.execute(
+                    """SELECT count(*) FROM information_schema.columns
+                    WHERE table_schema='public' AND table_name='assets'
+                      AND column_name IN ('functional_location', 'equipment_number')"""
+                )
+                sap_columns = cursor.fetchone()[0]
         if protected != required_tables or purge_function is None or tenant_function is None:
             raise RuntimeError("Database schema is missing required RLS or lifecycle controls")
+        if sap_columns != 2:
+            raise RuntimeError("Database schema is missing asset SAP reference columns; run the bootstrap migration")
 
     def upsert_asset(
         self,
@@ -492,6 +703,8 @@ class PostgresRepository:
         manufacturer: str,
         model: str,
         criticality: str,
+        functional_location: str = "",
+        equipment_number: str = "",
     ) -> AssetRecord:
         updated = _now()
         with self._connect() as connection:
@@ -503,11 +716,14 @@ class PostgresRepository:
                 )
                 cursor.execute(
                     """INSERT INTO assets
-                    (asset_id, tenant_id, name, site, manufacturer, model, criticality, status, updated_at)
-                    VALUES (%s,%s,%s,%s,%s,%s,%s,'active',%s)
+                    (asset_id, tenant_id, name, site, manufacturer, model, criticality, status, updated_at,
+                     functional_location, equipment_number)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,'active',%s,%s,%s)
                     ON CONFLICT (tenant_id, asset_id) DO UPDATE SET
                     name=excluded.name, site=excluded.site, manufacturer=excluded.manufacturer,
-                    model=excluded.model, criticality=excluded.criticality, updated_at=excluded.updated_at""",
+                    model=excluded.model, criticality=excluded.criticality, updated_at=excluded.updated_at,
+                    functional_location=excluded.functional_location,
+                    equipment_number=excluded.equipment_number""",
                     (
                         asset_id[:120],
                         principal.tenant_id,
@@ -517,6 +733,8 @@ class PostgresRepository:
                         model[:160],
                         criticality,
                         updated,
+                        functional_location[:40],
+                        equipment_number[:18],
                     ),
                 )
         return AssetRecord(
@@ -529,6 +747,8 @@ class PostgresRepository:
             criticality,
             "active",
             updated,
+            functional_location[:40],
+            equipment_number[:18],
         )
 
     def list_assets(self, principal: UserPrincipal) -> tuple[AssetRecord, ...]:
@@ -537,7 +757,8 @@ class PostgresRepository:
                 self._tenant(cursor, principal.tenant_id)
                 cursor.execute(
                     """SELECT asset_id, tenant_id, name, site, manufacturer, model,
-                    criticality, status, updated_at FROM assets ORDER BY site, name"""
+                    criticality, status, updated_at, functional_location, equipment_number
+                    FROM assets ORDER BY site, name"""
                 )
                 return tuple(AssetRecord(*row) for row in cursor.fetchall())
 
@@ -709,8 +930,8 @@ class PostgresRepository:
                 cursor.execute(
                     """INSERT INTO incidents
                     (incident_id, tenant_id, asset_id, title, details, severity, status, created_by_token,
-                     created_at, retention_until)
-                    VALUES (%s,%s,%s,%s,%s,%s,'new',%s,%s,%s)""",
+                     created_at, updated_at, retention_until)
+                    VALUES (%s,%s,%s,%s,%s,%s,'new',%s,%s,%s,%s)""",
                     (
                         incident_id,
                         principal.tenant_id,
@@ -720,20 +941,119 @@ class PostgresRepository:
                         severity,
                         actor,
                         created,
+                        created,
                         expires,
                     ),
                 )
-        return IncidentRecord(incident_id, principal.tenant_id, asset_id[:120], title[:240], severity, "new", created)
+                self._insert_incident_event(cursor, principal, incident_id, "created", None, "new")
+        return IncidentRecord(
+            incident_id,
+            principal.tenant_id,
+            asset_id[:120],
+            title[:240],
+            severity,
+            "new",
+            created,
+            details[:8000],
+            created,
+        )
 
     def list_incidents(self, principal: UserPrincipal) -> tuple[IncidentRecord, ...]:
         with self._connect() as connection:
             with connection.cursor() as cursor:
                 self._tenant(cursor, principal.tenant_id)
-                cursor.execute(
-                    """SELECT incident_id::text, tenant_id, asset_id, title, severity, status, created_at
-                    FROM incidents ORDER BY created_at DESC LIMIT 250"""
-                )
+                cursor.execute(_SELECT_INCIDENTS_SQL)
                 return tuple(IncidentRecord(*row) for row in cursor.fetchall())
+
+    def transition_incident(
+        self, principal: UserPrincipal, incident_id: str, *, expected: str, target: str
+    ) -> IncidentRecord:
+        with self._connect() as connection:
+            with connection.cursor() as cursor:
+                self._tenant(cursor, principal.tenant_id)
+                current = self._locked_incident(cursor, incident_id)
+                check_incident_transition(principal, current, expected, target)
+                cursor.execute(
+                    _UPDATE_INCIDENT_STATUS_SQL,
+                    (target, incident_id),
+                )
+                updated = cursor.fetchone()
+                if updated is None:
+                    raise KeyError(incident_id)
+                self._insert_incident_event(cursor, principal, incident_id, "status_changed", current.status, target)
+                return IncidentRecord(*updated)
+
+    @staticmethod
+    def _locked_incident(cursor, incident_id: str) -> IncidentRecord:
+        cursor.execute(_LOCK_INCIDENT_SQL, (incident_id,))
+        row = cursor.fetchone()
+        if row is None:
+            raise KeyError(incident_id)
+        return IncidentRecord(*row)
+
+    def _insert_incident_event(
+        self,
+        cursor,
+        principal: UserPrincipal,
+        incident_id: str,
+        event_type: str,
+        previous_status: str | None,
+        new_status: str | None,
+    ) -> None:
+        cursor.execute(
+            """INSERT INTO incident_events
+            (event_id, tenant_id, incident_id, event_type, previous_status, new_status, actor_role, actor_token)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s)""",
+            (
+                str(uuid.uuid4()),
+                principal.tenant_id,
+                incident_id,
+                event_type,
+                previous_status,
+                new_status,
+                principal.role[:40],
+                _principal_token(self._pseudonymizer, principal),
+            ),
+        )
+
+    def update_incident_analysis(
+        self,
+        principal: UserPrincipal,
+        incident_id: str,
+        *,
+        expected_updated_at: datetime,
+        analysis: Mapping[str, str],
+    ) -> IncidentRecord:
+        values = _bounded_analysis(analysis)
+        with self._connect() as connection:
+            with connection.cursor() as cursor:
+                self._tenant(cursor, principal.tenant_id)
+                current = self._locked_incident(cursor, incident_id)
+                _check_analysis_update(principal, current, expected_updated_at)
+                if all(getattr(current, field) == value for field, value in values.items()):
+                    return current
+                cursor.execute(
+                    _UPDATE_INCIDENT_ANALYSIS_SQL,
+                    (*(values[field] for field in INCIDENT_ANALYSIS_FIELDS), incident_id),
+                )
+                updated = cursor.fetchone()
+                if updated is None:
+                    raise KeyError(incident_id)
+                self._insert_incident_event(cursor, principal, incident_id, "analysis_updated", None, None)
+                return IncidentRecord(*updated)
+
+    def list_incident_events(self, principal: UserPrincipal, incident_id: str) -> tuple[IncidentEventRecord, ...]:
+        subject = _principal_token(self._pseudonymizer, principal)
+        with self._connect() as connection:
+            with connection.cursor() as cursor:
+                self._tenant(cursor, principal.tenant_id)
+                cursor.execute(
+                    """SELECT event_id::text, incident_id::text, event_type, previous_status, new_status, actor_role,
+                    occurred_at, actor_token = %s
+                    FROM incident_events WHERE incident_id=%s ORDER BY occurred_at, event_id""",
+                    (subject, incident_id),
+                )
+                return tuple(IncidentEventRecord(*row) for row in cursor.fetchall())
 
     def record_acceptance(self, principal: UserPrincipal, notice_type: str, version: str, digest: str) -> None:
         actor = _principal_token(self._pseudonymizer, principal)
@@ -918,7 +1238,9 @@ class PostgresRepository:
                     "INSERT INTO tenants (tenant_id, display_name) VALUES (%s,%s) ON CONFLICT DO NOTHING",
                     (principal.tenant_id, principal.tenant_id),
                 )
-                cursor.execute("SELECT tenant_id FROM tenants WHERE tenant_id=%s FOR UPDATE", (principal.tenant_id,))
+                # Serialise the per-tenant hash chain without a row lock: FOR UPDATE would need UPDATE rights on
+                # tenants, which the runtime and lifecycle roles deliberately do not have.
+                cursor.execute("SELECT pg_advisory_xact_lock(%s)", (_audit_lock_key(principal.tenant_id),))
                 cursor.execute("SELECT event_hash FROM audit_events ORDER BY sequence_id DESC LIMIT 1")
                 previous_row = cursor.fetchone()
                 previous = previous_row[0] if previous_row else None

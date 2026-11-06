@@ -51,7 +51,7 @@ HydraulikDoc konkurriert deshalb nicht als Sensorhardware oder OEM-Telematik. Di
 
 ## Nicht implementierte Marktanforderungen
 
-- Live-OPC-UA-/MQTT-/ERP-/CMMS-Connectoren benötigen je Zielsystem Bedrohungsmodell, Datenvertrag und Mandantenfreigabe.
+- Live-OPC-UA-/MQTT-/ERP-/CMMS-Connectoren benötigen je Zielsystem Bedrohungsmodell, Datenvertrag und Mandantenfreigabe. Für SAP PM gibt es seit November 2026 einen dateibasierten Zwischenschritt (Stammdatenimport und Meldungsübergabe), siehe [Enterprise-Review](../product/enterprise-review-2026-11.md).
 - Remaining Useful Life braucht anlagenspezifische Trainings-/Validierungsdaten und ist nicht durch generische LLM-Antworten ersetzbar.
 - Mobile Offline-Arbeit, digitale Arbeitsaufträge und Ersatzteilkataloge sind Produkt-Roadmap, keine aktuelle Fähigkeit.
 - SLA, Referenzkunden, Einsparzahlen und Zertifizierungen dürfen erst nach realem Betriebsnachweis vermarktet werden.

@@ -27,6 +27,8 @@ Die ersten beiden Zwecke werden vor Retrieval und Modellaufruf technisch gesperr
 
 Das konkrete Modell und Snapshot werden nicht im Quelltext behauptet. Deploymentname und Modellversion müssen als signierte Releaseparameter gesetzt und im Output gespeichert werden. Auto-Upgrade ist in IaC deaktiviert.
 
+Der Demo-Pfad (`AI_BACKEND=demo`) nutzt keinen der oben genannten Modellbestandteile: Er ruft kein Modell auf, gibt nur unverändert extrahierte Sätze aus synthetischen Dokumenten aus und ist in Produktion sowie hinter Entra ID per Konfiguration gesperrt.
+
 ## Input und Output
 
 Input: validierte PDF-Inhalte und eine Frage bis 2.000 Zeichen. PDF-Dateien durchlaufen statische Kontrolle und Azure Defender Malware Scanning. Source-Inhalte werden als nicht vertrauenswürdige Daten markiert.

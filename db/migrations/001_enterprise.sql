@@ -35,6 +35,10 @@ CREATE TABLE IF NOT EXISTS assets (
     PRIMARY KEY (tenant_id, asset_id)
 );
 
+-- SAP PM references: functional location (TPLNR, max. 40) and equipment number (EQUNR, max. 18).
+ALTER TABLE assets ADD COLUMN IF NOT EXISTS functional_location text NOT NULL DEFAULT '';
+ALTER TABLE assets ADD COLUMN IF NOT EXISTS equipment_number text NOT NULL DEFAULT '';
+
 CREATE TABLE IF NOT EXISTS analysis_runs (
     answer_id uuid PRIMARY KEY,
     tenant_id text NOT NULL REFERENCES tenants(tenant_id),
@@ -84,6 +88,26 @@ UPDATE incidents
 SET retention_until = created_at + interval '730 days'
 WHERE retention_until IS NULL;
 ALTER TABLE incidents ALTER COLUMN retention_until SET NOT NULL;
+
+-- 8D-light problem solving: D3 containment, D4 root cause, D5/D6 corrective action, D7 effectiveness check.
+ALTER TABLE incidents ADD COLUMN IF NOT EXISTS containment_action text NOT NULL DEFAULT '';
+ALTER TABLE incidents ADD COLUMN IF NOT EXISTS root_cause text NOT NULL DEFAULT '';
+ALTER TABLE incidents ADD COLUMN IF NOT EXISTS corrective_action text NOT NULL DEFAULT '';
+ALTER TABLE incidents ADD COLUMN IF NOT EXISTS effectiveness_check text NOT NULL DEFAULT '';
+
+-- Append-only incident history. The runtime role may only INSERT and SELECT; rows follow the
+-- incident retention and are removed by purge_expired_tenant_data before their incident.
+CREATE TABLE IF NOT EXISTS incident_events (
+    event_id uuid PRIMARY KEY,
+    tenant_id text NOT NULL REFERENCES tenants(tenant_id),
+    incident_id uuid NOT NULL REFERENCES incidents(incident_id),
+    event_type text NOT NULL CHECK (event_type IN ('created', 'status_changed', 'analysis_updated')),
+    previous_status text CHECK (previous_status IN ('new', 'acknowledged', 'in_progress', 'resolved', 'closed')),
+    new_status text CHECK (new_status IN ('new', 'acknowledged', 'in_progress', 'resolved', 'closed')),
+    actor_role text NOT NULL,
+    actor_token text NOT NULL,
+    occurred_at timestamptz NOT NULL DEFAULT now()
+);
 
 CREATE TABLE IF NOT EXISTS notice_acceptances (
     acceptance_id uuid PRIMARY KEY,
@@ -136,6 +160,7 @@ CREATE INDEX IF NOT EXISTS documents_tenant_status_idx ON documents(tenant_id, s
 CREATE INDEX IF NOT EXISTS assets_tenant_site_idx ON assets(tenant_id, site, name);
 CREATE INDEX IF NOT EXISTS analysis_runs_tenant_generated_idx ON analysis_runs(tenant_id, generated_at DESC);
 CREATE INDEX IF NOT EXISTS incidents_tenant_status_idx ON incidents(tenant_id, status, created_at DESC);
+CREATE INDEX IF NOT EXISTS incident_events_incident_idx ON incident_events(tenant_id, incident_id, occurred_at);
 CREATE INDEX IF NOT EXISTS audit_events_tenant_sequence_idx ON audit_events(tenant_id, sequence_id);
 CREATE INDEX IF NOT EXISTS privacy_requests_tenant_subject_idx ON privacy_requests(tenant_id, subject_token, requested_at DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS privacy_requests_active_unique_idx
@@ -160,6 +185,8 @@ ALTER TABLE analysis_reviews ENABLE ROW LEVEL SECURITY;
 ALTER TABLE analysis_reviews FORCE ROW LEVEL SECURITY;
 ALTER TABLE incidents ENABLE ROW LEVEL SECURITY;
 ALTER TABLE incidents FORCE ROW LEVEL SECURITY;
+ALTER TABLE incident_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE incident_events FORCE ROW LEVEL SECURITY;
 ALTER TABLE notice_acceptances ENABLE ROW LEVEL SECURITY;
 ALTER TABLE notice_acceptances FORCE ROW LEVEL SECURITY;
 ALTER TABLE privacy_requests ENABLE ROW LEVEL SECURITY;
@@ -179,6 +206,8 @@ DROP POLICY IF EXISTS tenant_analysis_reviews ON analysis_reviews;
 CREATE POLICY tenant_analysis_reviews ON analysis_reviews USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 DROP POLICY IF EXISTS tenant_incidents ON incidents;
 CREATE POLICY tenant_incidents ON incidents USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+DROP POLICY IF EXISTS tenant_incident_events ON incident_events;
+CREATE POLICY tenant_incident_events ON incident_events USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 DROP POLICY IF EXISTS tenant_notice_acceptances ON notice_acceptances;
 CREATE POLICY tenant_notice_acceptances ON notice_acceptances USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 DROP POLICY IF EXISTS tenant_privacy_requests ON privacy_requests;
@@ -187,6 +216,7 @@ DROP POLICY IF EXISTS tenant_audit_events ON audit_events;
 CREATE POLICY tenant_audit_events ON audit_events USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 
 REVOKE UPDATE, DELETE ON audit_events FROM PUBLIC;
+REVOKE UPDATE, DELETE ON incident_events FROM PUBLIC;
 
 CREATE OR REPLACE FUNCTION purge_expired_tenant_data(p_tenant_id text)
 RETURNS jsonb
@@ -197,6 +227,7 @@ AS $$
 DECLARE
     reviews_deleted integer := 0;
     analyses_deleted integer := 0;
+    incident_events_deleted integer := 0;
     incidents_deleted integer := 0;
     notices_deleted integer := 0;
     requests_deleted integer := 0;
@@ -214,6 +245,14 @@ BEGIN
     DELETE FROM public.analysis_runs
     WHERE tenant_id = p_tenant_id AND retention_until <= now();
     GET DIAGNOSTICS analyses_deleted = ROW_COUNT;
+
+    DELETE FROM public.incident_events AS event
+    USING public.incidents AS incident
+    WHERE event.incident_id = incident.incident_id
+      AND event.tenant_id = p_tenant_id
+      AND incident.tenant_id = p_tenant_id
+      AND incident.retention_until <= now();
+    GET DIAGNOSTICS incident_events_deleted = ROW_COUNT;
 
     DELETE FROM public.incidents
     WHERE tenant_id = p_tenant_id AND retention_until <= now();
@@ -238,6 +277,7 @@ BEGIN
     RETURN jsonb_build_object(
         'analysis_reviews', reviews_deleted,
         'analysis_runs', analyses_deleted,
+        'incident_events', incident_events_deleted,
         'incidents', incidents_deleted,
         'notice_acceptances', notices_deleted,
         'privacy_requests', requests_deleted,
