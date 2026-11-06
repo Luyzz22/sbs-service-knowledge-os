@@ -8,6 +8,7 @@ Der Produktionspfad ist bewusst auf Microsoft Azure begrenzt. Google Gemini, Lla
 
 - HydraulikDoc unterstützt Fachkräfte; es steuert keine Maschine.
 - Autonome Maschinensteuerung und Beschäftigtenüberwachung sind technisch gesperrt.
+- Welche Daten über Beschäftigte gespeichert werden, steht in der [technischen Anlage zur Betriebsvereinbarung](docs/compliance/works-council-annex.md). Sie wird aus dem Code erzeugt, und CI schlägt fehl, sobald eine neue Personen-Spalte undokumentiert ins Schema kommt.
 - Jeder KI-Entwurf bleibt `draft`, bis eine berechtigte Person ihn akzeptiert, ablehnt oder einen Experten anfordert.
 - Nur akzeptierte Ergebnisse können durch Rollen mit `analysis:export` als Nachweis exportiert werden.
 - Aussagen wie „DSGVO-konform“, „zertifiziert“ oder „kein Drittlandrisiko“ werden nicht aus Code abgeleitet. Verträge, DSFA/TIA, Betriebsrat, Rechtsgrundlage, Löschkonzept und Betriebsnachweise bleiben Release-Gates.

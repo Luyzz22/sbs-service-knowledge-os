@@ -275,6 +275,21 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
+# v2 adds uploaded documents, given reviews and own incident steps (GDPR Art. 15 completeness).
+SUBJECT_EXPORT_SCHEMA = "hydraulikdoc.subject-export.v2"
+
+
+def _incident_step(event: IncidentEventRecord) -> dict[str, Any]:
+    return {
+        "incident_id": event.incident_id,
+        "event_type": event.event_type,
+        "previous_status": event.previous_status,
+        "new_status": event.new_status,
+        "actor_role": event.actor_role,
+        "occurred_at": event.occurred_at.isoformat(),
+    }
+
+
 def _audit_chain_key(secret: str) -> bytes:
     return hmac.new(
         secret.encode(),
@@ -316,6 +331,10 @@ class InMemoryRepository:
         self._privacy_requests: dict[tuple[str, str], tuple[str, PrivacyRequestRecord]] = {}
         self._audit: list[tuple[AuditEvent, str]] = []
         self._scripted_times: dict[str, datetime] = {}
+        # Pseudonyms of uploaders, reviewers and reporters, kept apart from the records like the database columns.
+        self._uploaders: dict[tuple[str, str], str] = {}
+        self._review_log: list[tuple[str, str, str, ReviewStatus, datetime]] = []
+        self._reporters: dict[tuple[str, str], str] = {}
         self._lock = RLock()
 
     @contextmanager
@@ -391,6 +410,9 @@ class InMemoryRepository:
             if duplicate:
                 raise ValueError("Dieses Dokument wurde für den Mandanten bereits erfasst.")
             self._documents[(principal.tenant_id, record.document_id)] = record
+            self._uploaders[(principal.tenant_id, record.document_id)] = _principal_token(
+                self._pseudonymizer, principal
+            )
         return record
 
     def mark_document_indexed(self, principal: UserPrincipal, document_id: str, page_count: int) -> None:
@@ -442,6 +464,7 @@ class InMemoryRepository:
             if status is ReviewStatus.ACCEPTED and answer.risk_class.value == "heightened" and actor == reviewer:
                 raise PermissionError("FOUR_EYES_REVIEW_REQUIRED")
             self._reviews[(principal.tenant_id, answer_id)] = status
+            self._review_log.append((principal.tenant_id, reviewer, answer_id, status, _now()))
 
     def answer_review_status(self, principal: UserPrincipal, answer_id: str) -> ReviewStatus:
         with self._lock:
@@ -473,6 +496,9 @@ class InMemoryRepository:
         )
         with self._lock:
             self._incidents[(principal.tenant_id, record.incident_id)] = record
+            self._reporters[(principal.tenant_id, record.incident_id)] = _principal_token(
+                self._pseudonymizer, principal
+            )
             self._record_incident_event(principal, record.incident_id, "created", None, "new")
         return record
 
@@ -654,12 +680,48 @@ class InMemoryRepository:
                 for tenant, actor, kind, value in self._acceptances
                 if tenant == principal.tenant_id and actor == subject
             ]
+            documents = [
+                {
+                    "document_id": item.document_id,
+                    "display_name": item.display_name,
+                    "created_at": item.created_at.isoformat(),
+                }
+                for (tenant, document_id), item in self._documents.items()
+                if tenant == principal.tenant_id and self._uploaders.get((tenant, document_id)) == subject
+            ]
+            reviews = [
+                {"answer_id": answer_id, "status": status.value, "reviewed_at": reviewed_at.isoformat()}
+                for tenant, reviewer, answer_id, status, reviewed_at in self._review_log
+                if tenant == principal.tenant_id and reviewer == subject
+            ]
+            incidents = [
+                {
+                    "incident_id": item.incident_id,
+                    "asset_id": item.asset_id,
+                    "title": item.title,
+                    "details": item.details,
+                    "severity": item.severity,
+                    "status": item.status,
+                    "created_at": item.created_at.isoformat(),
+                }
+                for (tenant, incident_id), item in self._incidents.items()
+                if tenant == principal.tenant_id and self._reporters.get((tenant, incident_id)) == subject
+            ]
+            steps = [
+                _incident_step(event)
+                for tenant, actor, event in self._incident_events
+                if tenant == principal.tenant_id and actor == subject
+            ]
         return {
-            "schema": "hydraulikdoc.subject-export.v1",
+            "schema": SUBJECT_EXPORT_SCHEMA,
             "generated_at": _now().isoformat(),
             "subject_token": subject,
             "analysis_runs": answers,
             "notice_acceptances": notices,
+            "documents_uploaded": documents,
+            "reviews_given": reviews,
+            "incidents_created": incidents,
+            "incident_steps": steps,
             "privacy_requests": [item.__dict__ for item in self.list_privacy_requests(principal)],
         }
 
@@ -1277,13 +1339,41 @@ class PostgresRepository:
                     }
                     for row in cursor.fetchall()
                 ]
+                cursor.execute(
+                    """SELECT document_id::text, display_name, created_at FROM documents
+                    WHERE created_by_token=%s ORDER BY created_at DESC""",
+                    (subject,),
+                )
+                documents = [
+                    {"document_id": row[0], "display_name": row[1], "created_at": row[2].isoformat()}
+                    for row in cursor.fetchall()
+                ]
+                cursor.execute(
+                    """SELECT answer_id::text, status, reviewed_at FROM analysis_reviews
+                    WHERE reviewer_token=%s ORDER BY reviewed_at DESC""",
+                    (subject,),
+                )
+                reviews = [
+                    {"answer_id": row[0], "status": row[1], "reviewed_at": row[2].isoformat()}
+                    for row in cursor.fetchall()
+                ]
+                cursor.execute(
+                    """SELECT event_id::text, incident_id::text, event_type, previous_status, new_status,
+                    actor_role, occurred_at, true FROM incident_events
+                    WHERE actor_token=%s ORDER BY occurred_at, event_id""",
+                    (subject,),
+                )
+                steps = [_incident_step(IncidentEventRecord(*row)) for row in cursor.fetchall()]
         return {
-            "schema": "hydraulikdoc.subject-export.v1",
+            "schema": SUBJECT_EXPORT_SCHEMA,
             "generated_at": _now().isoformat(),
             "subject_token": subject,
             "analysis_runs": analysis,
             "notice_acceptances": notices,
+            "documents_uploaded": documents,
+            "reviews_given": reviews,
             "incidents_created": incidents,
+            "incident_steps": steps,
             "privacy_requests": [item.__dict__ for item in self.list_privacy_requests(principal)],
         }
 

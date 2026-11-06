@@ -56,6 +56,7 @@ from .maintenance_kpis import (
     kpi_export_rows,
     maintenance_kpis,
 )
+from .personal_data import EXCLUDED_EVALUATIONS, PERSONAL_DATA_FIELDS
 from .repository import (
     EIGHT_D_SEVERITIES,
     INCIDENT_ANALYSIS_FIELDS,
@@ -1943,6 +1944,37 @@ def _governance(principal: UserPrincipal, repository: EnterpriseRepository, sett
             width="stretch",
             hide_index=True,
         )
+    _render_personal_data_inventory()
+
+
+def _render_personal_data_inventory() -> None:
+    with st.expander(tr("Welche Daten über mich gespeichert werden")):
+        st.caption(
+            tr(
+                "Personen erscheinen nur als nicht umkehrbares Pseudonym; Name und E-Mail werden nicht gespeichert. "
+                "Diese Übersicht ist die technische Anlage für die Betriebsvereinbarung und wird gegen das "
+                "Datenbankschema geprüft."
+            )
+        )
+        days = RetentionPolicy.from_environment().days_by_class
+        st.dataframe(
+            [
+                {
+                    tr("Feld"): f"{item.table}.{item.column}",
+                    tr("Inhalt"): tr(item.content),
+                    tr("Zweck"): tr(item.purpose),
+                    tr("Sichtbarkeit"): tr(item.visibility),
+                    tr("Auswertung"): tr(item.evaluation),
+                    tr("Löschfrist"): tr_plural(days[item.retention], "{n} Tag", "{n} Tage"),
+                    tr("Im Export"): tr("ja") if item.export_section else tr(item.export_note or ""),
+                }
+                for item in PERSONAL_DATA_FIELDS
+            ],
+            width="stretch",
+            hide_index=True,
+        )
+        st.markdown(f"**{tr('Ausgeschlossene Auswertungen')}**")
+        st.markdown("\n".join(f"- {tr(item)}" for item in EXCLUDED_EVALUATIONS))
 
 
 def _system(principal: UserPrincipal, settings: AppSettings) -> None:

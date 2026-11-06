@@ -228,6 +228,43 @@ class PostgresSecurityIntegrationTests(unittest.TestCase):
         )
         self.assertEqual(repository.list_incident_lifecycles(own, since=datetime.now(UTC), limit=100), ())
 
+    def test_runtime_role_exports_every_personal_data_section(self) -> None:
+        from hydraulikdoc.auth import ROLE_PERMISSIONS, UserPrincipal
+        from hydraulikdoc.config import AppSettings
+        from hydraulikdoc.personal_data import PERSONAL_DATA_FIELDS
+        from hydraulikdoc.repository import PostgresRepository
+        from hydraulikdoc.security import ValidatedUpload
+
+        settings = AppSettings.from_environment(
+            {
+                "APP_ENV": "test",
+                "PERSISTENCE_BACKEND": "postgres",
+                "AUDIT_HMAC_KEY": "integration-audit-key-" + "x" * 16,
+                "DATABASE_URL": self.app_dsn,
+            }
+        )
+        repository = PostgresRepository(settings)
+        person = UserPrincipal(
+            "exporter", f"{self.tenant_a}-dsr", "Exporter", "supervisor", permissions=ROLE_PERMISSIONS["supervisor"]
+        )
+        with self.psycopg.connect(self.app_dsn) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT set_config('app.tenant_id', %s, true)", (person.tenant_id,))
+                cursor.execute("INSERT INTO tenants (tenant_id, display_name) VALUES (%s,'DSR')", (person.tenant_id,))
+        repository.register_document(
+            person, ValidatedUpload(str(uuid.uuid4()), "Handbuch.pdf", "b" * 64, b"", "application/pdf")
+        )
+        incident = repository.create_incident(person, asset_id="PU-1", title="Leckage", severity="p3", details="")
+        repository.transition_incident(person, incident.incident_id, expected="new", target="acknowledged")
+
+        export = repository.subject_export(person)
+        sections = {item.export_section for item in PERSONAL_DATA_FIELDS if item.export_section}
+        self.assertLessEqual(sections, set(export))
+        self.assertEqual(len(export["documents_uploaded"]), 1)
+        self.assertEqual([item["incident_id"] for item in export["incidents_created"]], [incident.incident_id])
+        self.assertEqual([item["new_status"] for item in export["incident_steps"]], ["new", "acknowledged"])
+        self.assertEqual(export["reviews_given"], [])
+
 
 if __name__ == "__main__":
     unittest.main()

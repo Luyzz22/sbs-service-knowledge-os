@@ -38,6 +38,7 @@ Priorität: **P1** blockiert Pilot oder Security-Freigabe, **P2** senkt Akzeptan
 | S4 | ERP | Kein Live-Connector (S/4HANA OData, SAP BTP Integration Suite) | P3 | Roadmap, benötigt Bedrohungsmodell und Datenvertrag je Kunde |
 | S5 | ERP | Keine automatische Benutzer-/Gruppenprovisionierung (SCIM aus Entra ID) | P3 | Roadmap |
 | D5 | Werk/Sicherheit | TISAX-/ISO-27001-Evidenzpaket fehlt | P2 | externes Gate |
+| D7 | Werk/Mitbestimmung | Für die Betriebsvereinbarung fehlte eine belastbare Aufstellung, welche Daten über Beschäftigte gespeichert und ausgewertet werden; die Selbstauskunft deckte Dokumente, Reviews und Workflow-Schritte nicht ab | P1 | umgesetzt: Inventar als Code mit CI-Gate gegen das Schema, erzeugte technische Anlage, Übersicht für Beschäftigte, Selbstauskunft v2 |
 
 ## Umgesetzt in diesem Inkrement
 
