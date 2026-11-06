@@ -2,9 +2,9 @@
 streamlit==1.66.1
 # Streamlit declares watchdog only outside macOS; pin it directly so the
 # hash-locked runtime remains reproducible on the Linux image and CI runners.
-watchdog==6.0.0
-openai==2.54.0
-azure-identity==1.25.3
+watchdog==7.0.0
+openai==3.42.1
+azure-identity==1.27.0
 httpx==0.28.1
-psycopg[binary]==3.3.4
+psycopg[binary]==3.3.7
 argon2-cffi==25.1.0
