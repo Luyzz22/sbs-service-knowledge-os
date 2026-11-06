@@ -15,6 +15,7 @@ import re
 import time
 import uuid
 from collections.abc import Mapping
+from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 
@@ -30,6 +31,7 @@ from .repository import (
     DocumentRecord,
     EnterpriseRepository,
     IncidentRecord,
+    InMemoryRepository,
 )
 from .security import InputRejected, ValidatedUpload, validate_question
 
@@ -124,26 +126,49 @@ class DemoIncident:
     title: str
     severity: str
     details: str
-    path: tuple[str, ...]
+    created_days_ago: float
+    # Workflow steps as (target status, hours after creation).
+    steps: tuple[tuple[str, float], ...]
     analysis: Mapping[str, str]
 
 
-# Each incident shows one workflow state: open critical, 8D in progress, awaiting sign-off, closed.
+# Oldest first. Together the incidents show every workflow state and give the maintenance KPIs a story:
+# press 05 overheats again three weeks after a cleaning that did not last (repeat failure), and the
+# pump leak was reopened once before it was fixed for good.
 DEMO_INCIDENTS = (
     DemoIncident(
-        "DEMO-W1-PRESSE-04",
-        "DEMO · Druckspitze 268 bar über Ventileinstellung",
+        "DEMO-W2-PUMPE-07",
+        "DEMO · Leckage an Verschraubung Druckleitung",
+        "warning",
+        "Sichtprüfung: Tropfleckage an Verschraubung der Druckleitung",
+        26,
+        (("in_progress", 20), ("resolved", 26), ("in_progress", 50), ("resolved", 74), ("closed", 192)),
+        {
+            "corrective_action": "Verschraubung erneuert und mit Drehmoment nach Vorgabe angezogen",
+            "effectiveness_check": "Nachkontrolle nach einer Woche ohne Leckage",
+        },
+    ),
+    DemoIncident(
+        "DEMO-W1-PRESSE-05",
+        "DEMO · Öltemperatur 86 °C, Kühlleistung reduziert",
         "critical",
-        "P_HIGH: 268 bar (Warnung ab 250 bar)\nQuelle: synthetische Messreihe",
-        (),
-        {},
+        "T_CRITICAL: 86 °C (Abschaltgrenze 85 °C)",
+        23,
+        (("acknowledged", 0.5), ("in_progress", 1), ("resolved", 7), ("closed", 120)),
+        {
+            "containment_action": "Aggregat abgeschaltet und gegen Wiedereinschalten gesichert",
+            "root_cause": "Kühlerlamellen verschmutzt, Luftdurchsatz deutlich reduziert",
+            "corrective_action": "Kühler gereinigt und Lamellen ausgeblasen",
+            "effectiveness_check": "Öltemperatur über fünf Schichten unter 70 °C",
+        },
     ),
     DemoIncident(
         "DEMO-W2-SGM-01",
         "DEMO · Partikelzahl 1450 je ml",
         "warning",
         "PARTICLES_HIGH: 1450 #/ml (Warnung ab 1000 #/ml)",
-        ("acknowledged", "in_progress"),
+        3,
+        (("acknowledged", 0.75), ("in_progress", 5)),
         {"containment_action": "Nebenstromfilter angeschlossen, Kontrollprobe veranlasst"},
     ),
     DemoIncident(
@@ -151,23 +176,22 @@ DEMO_INCIDENTS = (
         "DEMO · Öltemperatur 88 °C, Abschaltgrenze erreicht",
         "critical",
         "T_CRITICAL: 88 °C (Abschaltgrenze 85 °C)",
-        ("in_progress", "resolved"),
+        2,
+        (("in_progress", 0.25), ("resolved", 9)),
         {
             "containment_action": "Aggregat abgeschaltet und gegen Wiedereinschalten gesichert",
-            "root_cause": "Kühlerlamellen stark verschmutzt, Lüfter mit reduzierter Drehzahl",
+            "root_cause": "Kühlerlamellen erneut stark verschmutzt, Lüfter mit reduzierter Drehzahl",
             "corrective_action": "Kühler gereinigt, Lüftermotor getauscht, Reinigungsintervall verkürzt",
         },
     ),
     DemoIncident(
-        "DEMO-W2-PUMPE-07",
-        "DEMO · Leckage an Verschraubung Druckleitung",
-        "warning",
-        "Sichtprüfung: Tropfleckage an Verschraubung der Druckleitung",
-        ("in_progress", "resolved", "closed"),
-        {
-            "corrective_action": "Verschraubung erneuert und mit Drehmoment nach Vorgabe angezogen",
-            "effectiveness_check": "Nachkontrolle nach einer Woche ohne Leckage",
-        },
+        "DEMO-W1-PRESSE-04",
+        "DEMO · Druckspitze 268 bar über Ventileinstellung",
+        "critical",
+        "P_HIGH: 268 bar (Warnung ab 250 bar)\nQuelle: synthetische Messreihe",
+        2 / 24,
+        (),
+        {},
     ),
 )
 
@@ -217,22 +241,30 @@ def seed_demo_tenant(principal: UserPrincipal, repository: EnterpriseRepository)
             ),
         )
         repository.mark_document_indexed(principal, record.document_id, max(pages))
+    now = datetime.now(UTC)
     for item in DEMO_INCIDENTS:
-        incident = repository.create_incident(
-            principal, asset_id=item.asset_id, title=item.title, severity=item.severity, details=item.details
-        )
+        created = now - timedelta(days=item.created_days_ago)
+        with _staged(repository, principal, created):
+            incident = repository.create_incident(
+                principal, asset_id=item.asset_id, title=item.title, severity=item.severity, details=item.details
+            )
         analysis = {field: item.analysis.get(field, "") for field in INCIDENT_ANALYSIS_FIELDS}
         documented = False
-        for target in item.path:
+        for target, hours in item.steps:
+            at = created + timedelta(hours=hours)
             # The 8D content has to exist before the workflow allows resolution, exactly as for users.
-            if target == "resolved" and item.analysis:
-                incident = _document(repository, principal, incident, analysis)
+            if target == "resolved" and item.analysis and not documented:
+                with _staged(repository, principal, at - timedelta(minutes=15)):
+                    incident = _document(repository, principal, incident, analysis)
                 documented = True
-            incident = repository.transition_incident(
-                principal, incident.incident_id, expected=incident.status, target=target
-            )
+            with _staged(repository, principal, at):
+                incident = repository.transition_incident(
+                    principal, incident.incident_id, expected=incident.status, target=target
+                )
         if item.analysis and not documented:
-            _document(repository, principal, incident, analysis)
+            last_step = item.steps[-1][1] if item.steps else 0
+            with _staged(repository, principal, created + timedelta(hours=last_step + 0.5)):
+                _document(repository, principal, incident, analysis)
     repository.emit_audit(
         principal,
         action="demo.tenant.seeded",
@@ -240,6 +272,13 @@ def seed_demo_tenant(principal: UserPrincipal, repository: EnterpriseRepository)
         metadata={"source_count": len(DEMO_ASSETS) + len(DEMO_DOCUMENTS) + len(DEMO_INCIDENTS)},
     )
     return DemoSeedResult(len(DEMO_ASSETS), len(DEMO_DOCUMENTS), len(DEMO_INCIDENTS))
+
+
+def _staged(repository: EnterpriseRepository, principal: UserPrincipal, at: datetime) -> AbstractContextManager[None]:
+    # Only the development backend can stage history; on PostgreSQL the workflow runs at server time.
+    if isinstance(repository, InMemoryRepository):
+        return repository.scripted_time(principal, at)
+    return nullcontext()
 
 
 def _document(

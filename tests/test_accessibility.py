@@ -119,9 +119,9 @@ class StructureTests(unittest.TestCase):
     def test_every_working_page_has_a_single_h1_title(self) -> None:
         source = UI_MODULE.read_text(encoding="utf-8")
         pages = re.findall(
-            r"^def _(assets|knowledge|condition_monitoring|fluid|incidents|governance|system)\(", source, re.M
+            r"^def _(assets|knowledge|condition_monitoring|fluid|incidents|kpis|governance|system)\(", source, re.M
         )
-        self.assertEqual(len(pages), 7)
+        self.assertEqual(len(pages), 8)
         for page in pages:
             body = source.split(f"def _{page}(", 1)[1].split("\ndef ", 1)[0]
             with self.subTest(page):

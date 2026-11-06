@@ -160,6 +160,7 @@ CREATE INDEX IF NOT EXISTS documents_tenant_status_idx ON documents(tenant_id, s
 CREATE INDEX IF NOT EXISTS assets_tenant_site_idx ON assets(tenant_id, site, name);
 CREATE INDEX IF NOT EXISTS analysis_runs_tenant_generated_idx ON analysis_runs(tenant_id, generated_at DESC);
 CREATE INDEX IF NOT EXISTS incidents_tenant_status_idx ON incidents(tenant_id, status, created_at DESC);
+CREATE INDEX IF NOT EXISTS incidents_tenant_created_idx ON incidents(tenant_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS incident_events_incident_idx ON incident_events(tenant_id, incident_id, occurred_at);
 CREATE INDEX IF NOT EXISTS audit_events_tenant_sequence_idx ON audit_events(tenant_id, sequence_id);
 CREATE INDEX IF NOT EXISTS privacy_requests_tenant_subject_idx ON privacy_requests(tenant_id, subject_token, requested_at DESC);

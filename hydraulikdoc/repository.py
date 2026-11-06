@@ -6,7 +6,8 @@ import hashlib
 import hmac
 import json
 import uuid
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from functools import lru_cache
@@ -62,6 +63,25 @@ class IncidentEventRecord:
     actor_role: str
     occurred_at: datetime
     is_own: bool
+
+
+@dataclass(frozen=True)
+class StatusChange:
+    previous_status: str | None
+    new_status: str
+    occurred_at: datetime
+
+
+@dataclass(frozen=True)
+class IncidentLifecycle:
+    """Workflow timeline of one incident for asset-level figures; deliberately carries no actor data."""
+
+    incident_id: str
+    asset_id: str
+    severity: str
+    status: str
+    created_at: datetime
+    changes: tuple[StatusChange, ...]
 
 
 INCIDENT_STATUSES = ("new", "acknowledged", "in_progress", "resolved", "closed")
@@ -225,6 +245,10 @@ class EnterpriseRepository(Protocol):
 
     def list_incident_events(self, principal: UserPrincipal, incident_id: str) -> tuple[IncidentEventRecord, ...]: ...
 
+    def list_incident_lifecycles(
+        self, principal: UserPrincipal, *, since: datetime, limit: int
+    ) -> tuple[IncidentLifecycle, ...]: ...
+
     def record_acceptance(self, principal: UserPrincipal, notice_type: str, version: str, digest: str) -> None: ...
 
     def has_acceptance(self, principal: UserPrincipal, notice_type: str, version: str) -> bool: ...
@@ -291,7 +315,26 @@ class InMemoryRepository:
         self._acceptances: set[tuple[str, str, str, str]] = set()
         self._privacy_requests: dict[tuple[str, str], tuple[str, PrivacyRequestRecord]] = {}
         self._audit: list[tuple[AuditEvent, str]] = []
+        self._scripted_times: dict[str, datetime] = {}
         self._lock = RLock()
+
+    @contextmanager
+    def scripted_time(self, principal: UserPrincipal, at: datetime) -> Iterator[None]:
+        """Record this tenant's incident workflow at ``at`` instead of now.
+
+        Only the demo seed uses this to stage a realistic history. It exists solely on the development
+        backend: workflow times in PostgreSQL are always server time and cannot be backdated.
+        """
+        with self._lock:
+            self._scripted_times[principal.tenant_id] = at
+        try:
+            yield
+        finally:
+            with self._lock:
+                self._scripted_times.pop(principal.tenant_id, None)
+
+    def _incident_time(self, principal: UserPrincipal) -> datetime:
+        return self._scripted_times.get(principal.tenant_id) or _now()
 
     def upsert_asset(
         self,
@@ -416,7 +459,7 @@ class InMemoryRepository:
         severity: str,
         details: str,
     ) -> IncidentRecord:
-        created = _now()
+        created = self._incident_time(principal)
         record = IncidentRecord(
             incident_id=str(uuid.uuid4()),
             tenant_id=principal.tenant_id,
@@ -443,7 +486,14 @@ class InMemoryRepository:
     ) -> None:
         actor = _principal_token(self._pseudonymizer, principal)
         event = IncidentEventRecord(
-            str(uuid.uuid4()), incident_id, event_type, previous_status, new_status, principal.role, _now(), False
+            str(uuid.uuid4()),
+            incident_id,
+            event_type,
+            previous_status,
+            new_status,
+            principal.role,
+            self._incident_time(principal),
+            False,
         )
         self._incident_events.append((principal.tenant_id, actor, event))
 
@@ -466,7 +516,7 @@ class InMemoryRepository:
             if current is None:
                 raise KeyError(incident_id)
             check_incident_transition(principal, current, expected, target)
-            updated = replace(current, status=target, updated_at=_now())
+            updated = replace(current, status=target, updated_at=self._incident_time(principal))
             self._incidents[key] = updated
             self._record_incident_event(principal, incident_id, "status_changed", current.status, target)
             return updated
@@ -490,7 +540,7 @@ class InMemoryRepository:
                 return current
             updated = replace(
                 current,
-                updated_at=_now(),
+                updated_at=self._incident_time(principal),
                 containment_action=values["containment_action"],
                 root_cause=values["root_cause"],
                 corrective_action=values["corrective_action"],
@@ -507,6 +557,37 @@ class InMemoryRepository:
                 replace(event, is_own=actor == subject)
                 for tenant, actor, event in self._incident_events
                 if tenant == principal.tenant_id and event.incident_id == incident_id
+            )
+
+    def list_incident_lifecycles(
+        self, principal: UserPrincipal, *, since: datetime, limit: int
+    ) -> tuple[IncidentLifecycle, ...]:
+        with self._lock:
+            incidents = sorted(
+                (
+                    item
+                    for (tenant, _), item in self._incidents.items()
+                    if tenant == principal.tenant_id and item.created_at >= since
+                ),
+                key=lambda item: item.created_at,
+                reverse=True,
+            )[:limit]
+            changes: dict[str, list[StatusChange]] = {item.incident_id: [] for item in incidents}
+            for tenant, _, event in self._incident_events:
+                if tenant == principal.tenant_id and event.incident_id in changes and event.new_status:
+                    changes[event.incident_id].append(
+                        StatusChange(event.previous_status, event.new_status, event.occurred_at)
+                    )
+            return tuple(
+                IncidentLifecycle(
+                    item.incident_id,
+                    item.asset_id,
+                    item.severity,
+                    item.status,
+                    item.created_at,
+                    tuple(sorted(changes[item.incident_id], key=lambda change: change.occurred_at)),
+                )
+                for item in incidents
             )
 
     def record_acceptance(self, principal: UserPrincipal, notice_type: str, version: str, digest: str) -> None:
@@ -614,6 +695,11 @@ _SELECT_INCIDENTS_SQL = """SELECT incident_id::text, tenant_id, asset_id, title,
 _LOCK_INCIDENT_SQL = """SELECT incident_id::text, tenant_id, asset_id, title, severity, status, created_at, details, updated_at,
     containment_action, root_cause, corrective_action, effectiveness_check
     FROM incidents WHERE incident_id=%s FOR UPDATE"""
+_SELECT_LIFECYCLE_INCIDENTS_SQL = """SELECT incident_id::text, asset_id, severity, status, created_at
+    FROM incidents WHERE created_at >= %s ORDER BY created_at DESC LIMIT %s"""
+_SELECT_LIFECYCLE_CHANGES_SQL = """SELECT incident_id::text, previous_status, new_status, occurred_at
+    FROM incident_events WHERE incident_id = ANY(%s::uuid[]) AND new_status IS NOT NULL
+    ORDER BY occurred_at, event_id"""
 _UPDATE_INCIDENT_STATUS_SQL = """UPDATE incidents SET status=%s, updated_at=now() WHERE incident_id=%s
     RETURNING incident_id::text, tenant_id, asset_id, title, severity, status, created_at, details, updated_at,
     containment_action, root_cause, corrective_action, effectiveness_check"""
@@ -1054,6 +1140,24 @@ class PostgresRepository:
                     (subject, incident_id),
                 )
                 return tuple(IncidentEventRecord(*row) for row in cursor.fetchall())
+
+    def list_incident_lifecycles(
+        self, principal: UserPrincipal, *, since: datetime, limit: int
+    ) -> tuple[IncidentLifecycle, ...]:
+        with self._connect() as connection:
+            with connection.cursor() as cursor:
+                self._tenant(cursor, principal.tenant_id)
+                cursor.execute(_SELECT_LIFECYCLE_INCIDENTS_SQL, (since, limit))
+                incidents = cursor.fetchall()
+                changes: dict[str, list[StatusChange]] = {row[0]: [] for row in incidents}
+                if changes:
+                    cursor.execute(_SELECT_LIFECYCLE_CHANGES_SQL, (list(changes),))
+                    for incident_id, previous_status, new_status, occurred_at in cursor.fetchall():
+                        changes[incident_id].append(StatusChange(previous_status, new_status, occurred_at))
+                return tuple(
+                    IncidentLifecycle(incident_id, asset_id, severity, status, created_at, tuple(changes[incident_id]))
+                    for incident_id, asset_id, severity, status, created_at in incidents
+                )
 
     def record_acceptance(self, principal: UserPrincipal, notice_type: str, version: str, digest: str) -> None:
         actor = _principal_token(self._pseudonymizer, principal)

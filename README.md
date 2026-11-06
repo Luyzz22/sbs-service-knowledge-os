@@ -81,7 +81,7 @@ Für Vertriebs- und Schulungsdemos ohne Azure und ohne Kundendaten zusätzlich `
 AI_BACKEND=demo streamlit run app.py
 ```
 
-Als Supervisor oder Admin anmelden und im Leitstand **Demodaten laden** wählen. Geladen werden vier fiktive Anlagen mit SAP-Referenzen, zwei synthetische Handbücher und vier Incidents in den Zuständen „neu und kritisch“, „8D in Bearbeitung“, „wartet auf Abnahme“ und „abgeschlossen“. Condition Monitoring bietet eine synthetische 48-h-Messreihe ohne Upload.
+Als Supervisor oder Admin anmelden und im Leitstand **Demodaten laden** wählen. Geladen werden vier fiktive Anlagen mit SAP-Referenzen, zwei synthetische Handbücher und fünf Incidents der letzten vier Wochen in allen Workflow-Zuständen („neu und kritisch“, „8D in Bearbeitung“, „wartet auf Abnahme“, „abgeschlossen“). Presse 05 überhitzt drei Wochen nach einer Kühlerreinigung erneut (Wiederholungsfehler), eine Leckage wurde einmal wiedereröffnet; so zeigen die Kennzahlen realistische Werte. Mit `PERSISTENCE_BACKEND=postgres` entsteht derselbe Datenbestand, aber zum Ladezeitpunkt, weil Zeitstempel dort nicht rückdatierbar sind. Condition Monitoring bietet eine synthetische 48-h-Messreihe ohne Upload.
 
 Der Demo-Pfad ruft kein Sprachmodell auf: Antworten bestehen aus unverändert extrahierten Sätzen der synthetischen Handbücher mit Seitenbeleg und durchlaufen dieselben Sperren, Reviews und Auditereignisse wie der Azure-Pfad. Ein Banner kennzeichnet jede Seite, alle Daten tragen das Präfix `DEMO`. `AI_BACKEND=demo` ist in Produktion und hinter Entra ID technisch gesperrt; die Demodaten werden nur in einen leeren Mandanten geladen. Empfohlene Fragen für die Vorführung:
 

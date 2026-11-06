@@ -34,6 +34,7 @@ Priorität: **P1** blockiert Pilot oder Security-Freigabe, **P2** senkt Akzeptan
 | M1 | Vertrieb | Ohne Azure ist der KI-Pfad gesperrt; es fehlt ein Demo-Mandant mit synthetischen Daten | P2 | umgesetzt: `AI_BACKEND=demo` mit Seed, extraktiven Antworten und Beispiel-Messreihe |
 | U5 | Bedienung | Kein formaler Barrierefreiheitsnachweis (WCAG 2.2 AA / BITV 2.0) | P2 | technischer Teil umgesetzt (Kontrast-, Struktur- und Sprachprüfung); manueller Prüfbericht bleibt externes Gate |
 | U6 | Bedienung | Nur Deutsch; internationale Werke benötigen DE/EN | P3 | umgesetzt: DE/EN mit Browser-Erkennung, zweisprachigen Hinweisen und Vollständigkeitstest |
+| D6 | Werk | Keine Reaktions- und Behebungszeiten, keine Sicht auf Wiederholungsfehler je Anlage; Werksleitung kann den Nutzen des Workflows nicht belegen | P2 | umgesetzt: Kennzahlen je Anlage (MTTA, MTTR, Wiedereröffnung, Störungsabstand, Wiederholungsfehler) ohne Personenbezug, CSV-Export |
 | S4 | ERP | Kein Live-Connector (S/4HANA OData, SAP BTP Integration Suite) | P3 | Roadmap, benötigt Bedrohungsmodell und Datenvertrag je Kunde |
 | S5 | ERP | Keine automatische Benutzer-/Gruppenprovisionierung (SCIM aus Entra ID) | P3 | Roadmap |
 | D5 | Werk/Sicherheit | TISAX-/ISO-27001-Evidenzpaket fehlt | P2 | externes Gate |
@@ -55,10 +56,18 @@ Priorität: **P1** blockiert Pilot oder Security-Freigabe, **P2** senkt Akzeptan
 
 ## Umgesetzt: Demo-Mandant
 
-- **Ein Klick zur vollständigen Geschichte:** Im leeren Mandanten lädt ein Supervisor vier fiktive Anlagen (eine bewusst ohne SAP-Referenz), zwei synthetische Handbücher und vier Incidents, die jeden Workflow-Zustand zeigen, inklusive gesperrter Abnahme mangels D7.
+- **Ein Klick zur vollständigen Geschichte:** Im leeren Mandanten lädt ein Supervisor vier fiktive Anlagen (eine bewusst ohne SAP-Referenz), zwei synthetische Handbücher und fünf Incidents, die jeden Workflow-Zustand zeigen, inklusive gesperrter Abnahme mangels D7. Der Verlauf ist über vier Wochen gestaffelt (Wiederholungsfehler an Presse 05, eine Wiedereröffnung), damit die Kennzahlen aussagekräftig sind. Rückdatieren kann nur das Entwicklungs-Repository; in PostgreSQL gelten immer Serverzeiten.
 - **Keine Scheinintelligenz:** Der Demo-Pfad erzeugt keinen Text, sondern zitiert Sätze unverändert mit Seitenbeleg. Die Auswahl deckt Teilfragen einzeln ab und verwirft schwache Stichworttreffer. Die Antwort sagt ausdrücklich „Demo-Antwort ohne Sprachmodell“, die Provenienz nennt keinen Modellanbieter.
 - **Gleiche Governance:** Verwendungszweck-Sperren, Zitatprüfung, KI-Nutzerhinweis, Review, Vier-Augen-Prinzip und Export laufen unverändert.
 - **Nicht verwechselbar:** Banner auf jeder Seite, Präfix `DEMO` in Titeln, Dokumenten und SAP-Kurztexten, Releasezustand `demo`, Region „lokal“. Die Konfiguration verweigert `demo` in Produktion und hinter Entra ID; Demodaten werden nie in einen Mandanten mit Daten gemischt.
+
+## Umgesetzt: Instandhaltungskennzahlen
+
+- **Je Anlage, nie je Person:** Reaktionszeit (Anlage bis erster Bearbeitungsschritt), Behebungszeit (bis zur letzten Meldung „Behoben“), Wiedereröffnungen, mittlerer Störungsabstand und Wiederholungsfehler (zwei Incidents innerhalb von 30 Tagen). Die Abfrage liefert keine Akteursdaten; eine Leistungs- oder Verhaltenskontrolle nach § 87 Abs. 1 Nr. 6 BetrVG ist damit technisch nicht abbildbar.
+- **Ehrliche Grundlage:** Gemessen werden Dokumentationszeitpunkte, keine Maschinen- oder SAP-Daten. Der Störungsabstand läuft in Kalenderzeit und wird ausdrücklich nicht als MTBF bezeichnet. Incidents ohne Verlauf (vor dessen Einführung) zählen mit, aber ohne Zeiten.
+- **Leitstand:** Wiederholungsfehler der letzten 90 Tage erscheinen als Handlungsbedarf mit Sprung zu den Kennzahlen.
+- **Export:** CSV je Anlage für Supervisor und Admin (`analysis:export`), Schutz vor Formel-Injection, Auditereignis `incident.kpi_export.generated` nur mit Zählwerten.
+- **Skalierung:** eigene Abfrage über das Zeitfenster (bis 10.000 Incidents, danach Hinweis) statt der auf 250 Einträge begrenzten Incident-Liste; neuer Index `incidents(tenant_id, created_at DESC)`.
 
 ## Bewusste Grenzen
 
@@ -72,4 +81,5 @@ Priorität: **P1** blockiert Pilot oder Security-Freigabe, **P2** senkt Akzeptan
 2. ~~Demo-Mandant~~ (M1): umgesetzt.
 3. **Barrierefreiheit** (U5): automatisierte Prüfungen umgesetzt (siehe Kontrollmatrix); offen sind der manuelle Tastatur- und Screenreader-Test und ein Prüfbericht.
 4. ~~DE/EN~~ (U6): umgesetzt. Offen: Sprachwahl dauerhaft je Benutzer speichern, KI-Antworten in der Sprache der Oberfläche.
-5. **Live-Connector-Pilot** (S4) erst nach Datenvertrag und Bedrohungsmodell mit einem konkreten Kunden.
+5. ~~Instandhaltungskennzahlen~~ (D6): umgesetzt, einschließlich gestaffeltem Demo-Verlauf.
+6. **Live-Connector-Pilot** (S4) erst nach Datenvertrag und Bedrohungsmodell mit einem konkreten Kunden.
