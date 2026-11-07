@@ -130,6 +130,13 @@ def main() -> None:
                     "effectiveness_check) ON TABLE incidents TO {}"
                 ).format(sql.Identifier(app_user))
             )
+            # Request owners only insert; the privacy queue moves status and records the outcome.
+            cursor.execute(
+                sql.SQL(
+                    "GRANT UPDATE (status, completed_at, evidence_reference, decision_reason) "
+                    "ON TABLE privacy_requests TO {}"
+                ).format(sql.Identifier(app_user))
+            )
             # Releasing is the only change to a hold; scope, reason and case reference stay as recorded.
             cursor.execute(
                 sql.SQL(

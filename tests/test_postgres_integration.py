@@ -382,6 +382,61 @@ class PostgresSecurityIntegrationTests(unittest.TestCase):
         self.assertGreaterEqual(released["incident_events"], 1)
         self.assertEqual(released["legal_holds"], 0)
 
+    def test_privacy_queue_records_the_case_with_column_grants(self) -> None:
+        from psycopg.errors import InsufficientPrivilege
+
+        from hydraulikdoc.auth import ROLE_PERMISSIONS, UserPrincipal
+        from hydraulikdoc.config import AppSettings
+        from hydraulikdoc.repository import PostgresRepository, PrivacyTransitionRejected
+
+        repository = PostgresRepository(
+            AppSettings.from_environment(
+                {
+                    "APP_ENV": "test",
+                    "PERSISTENCE_BACKEND": "postgres",
+                    "AUDIT_HMAC_KEY": "integration-audit-key-" + "x" * 16,
+                    "DATABASE_URL": self.app_dsn,
+                }
+            )
+        )
+        tenant = f"{self.tenant_a}-dsr-queue"
+        employee = UserPrincipal(
+            "employee", tenant, "Employee", "technician", permissions=ROLE_PERMISSIONS["technician"]
+        )
+        dpo = UserPrincipal("dpo", tenant, "DPO", "admin", permissions=ROLE_PERMISSIONS["admin"])
+        with self.psycopg.connect(self.app_dsn) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT set_config('app.tenant_id', %s, true)", (tenant,))
+                cursor.execute("INSERT INTO tenants (tenant_id, display_name) VALUES (%s,'DSR')", (tenant,))
+        request = repository.create_privacy_request(employee, "erasure")
+        own = repository.create_privacy_request(dpo, "access")
+        with self.assertRaisesRegex(PrivacyTransitionRejected, "PRIVACY_OWN_REQUEST"):
+            repository.decide_privacy_request(dpo, own.request_id, expected="submitted", target="identity_verified")
+
+        repository.decide_privacy_request(dpo, request.request_id, expected="submitted", target="identity_verified")
+        repository.decide_privacy_request(dpo, request.request_id, expected="identity_verified", target="in_review")
+        denied = repository.decide_privacy_request(
+            dpo,
+            request.request_id,
+            expected="in_review",
+            target="denied",
+            decision_reason="legal_hold",
+            evidence_reference="DSR-2026-031",
+        )
+        self.assertEqual((denied.status, denied.decision_reason), ("denied", "legal_hold"))
+        self.assertIsNotNone(denied.completed_at)
+        self.assertEqual(
+            [(item.status, item.evidence_reference) for item in repository.list_privacy_requests(employee)],
+            [("denied", "DSR-2026-031")],
+        )
+        self.assertEqual(repository.list_privacy_queue(dpo)[0].request_id, own.request_id)
+
+        with self.psycopg.connect(self.app_dsn) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT set_config('app.tenant_id', %s, true)", (tenant,))
+                with self.assertRaises(InsufficientPrivilege):
+                    cursor.execute("UPDATE privacy_requests SET request_type = 'access', requested_at = now()")
+
 
 if __name__ == "__main__":
     unittest.main()
