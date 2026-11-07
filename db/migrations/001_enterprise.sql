@@ -140,6 +140,26 @@ CREATE TABLE IF NOT EXISTS privacy_requests (
     retention_until timestamptz NOT NULL
 );
 
+-- Legal holds suspend retention deletion for whole record classes of a tenant. They never expire on their
+-- own: an overdue review is flagged, and only an explicit release resumes deletion.
+CREATE TABLE IF NOT EXISTS legal_holds (
+    hold_id uuid PRIMARY KEY,
+    tenant_id text NOT NULL REFERENCES tenants(tenant_id),
+    case_reference text NOT NULL CHECK (case_reference ~ '^[A-Za-z0-9][A-Za-z0-9._/-]{2,63}$'),
+    reason_code text NOT NULL CHECK (reason_code IN ('litigation', 'authority_request', 'internal_investigation', 'warranty_claim')),
+    record_classes text[] NOT NULL CHECK (
+        cardinality(record_classes) > 0
+        AND record_classes <@ ARRAY['ai_interaction', 'audit_event', 'contract_acceptance', 'data_subject_request', 'incident', 'uploaded_content']::text[]
+    ),
+    review_at timestamptz NOT NULL,
+    created_by_token text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    released_by_token text,
+    released_at timestamptz,
+    retention_until timestamptz,
+    CHECK ((released_at IS NULL) = (released_by_token IS NULL) AND (released_at IS NULL) = (retention_until IS NULL))
+);
+
 CREATE TABLE IF NOT EXISTS audit_events (
     sequence_id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     event_id uuid NOT NULL UNIQUE,
@@ -163,6 +183,7 @@ CREATE INDEX IF NOT EXISTS incidents_tenant_status_idx ON incidents(tenant_id, s
 CREATE INDEX IF NOT EXISTS incidents_tenant_created_idx ON incidents(tenant_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS incident_events_incident_idx ON incident_events(tenant_id, incident_id, occurred_at);
 CREATE INDEX IF NOT EXISTS audit_events_tenant_sequence_idx ON audit_events(tenant_id, sequence_id);
+CREATE INDEX IF NOT EXISTS legal_holds_tenant_active_idx ON legal_holds(tenant_id) WHERE released_at IS NULL;
 CREATE INDEX IF NOT EXISTS privacy_requests_tenant_subject_idx ON privacy_requests(tenant_id, subject_token, requested_at DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS privacy_requests_active_unique_idx
     ON privacy_requests(tenant_id, subject_token, request_type)
@@ -194,6 +215,8 @@ ALTER TABLE privacy_requests ENABLE ROW LEVEL SECURITY;
 ALTER TABLE privacy_requests FORCE ROW LEVEL SECURITY;
 ALTER TABLE audit_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE audit_events FORCE ROW LEVEL SECURITY;
+ALTER TABLE legal_holds ENABLE ROW LEVEL SECURITY;
+ALTER TABLE legal_holds FORCE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS tenant_tenants ON tenants;
 CREATE POLICY tenant_tenants ON tenants USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
@@ -215,9 +238,24 @@ DROP POLICY IF EXISTS tenant_privacy_requests ON privacy_requests;
 CREATE POLICY tenant_privacy_requests ON privacy_requests USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 DROP POLICY IF EXISTS tenant_audit_events ON audit_events;
 CREATE POLICY tenant_audit_events ON audit_events USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+DROP POLICY IF EXISTS tenant_legal_holds ON legal_holds;
+CREATE POLICY tenant_legal_holds ON legal_holds USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 
 REVOKE UPDATE, DELETE ON audit_events FROM PUBLIC;
 REVOKE UPDATE, DELETE ON incident_events FROM PUBLIC;
+REVOKE UPDATE, DELETE ON legal_holds FROM PUBLIC;
+
+CREATE OR REPLACE FUNCTION legal_hold_active(p_tenant_id text, p_record_class text)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SET search_path = pg_catalog, public
+AS $$
+    SELECT EXISTS (
+        SELECT 1 FROM public.legal_holds AS hold
+        WHERE hold.tenant_id = p_tenant_id AND hold.released_at IS NULL AND p_record_class = ANY(hold.record_classes)
+    )
+$$;
 
 CREATE OR REPLACE FUNCTION purge_expired_tenant_data(p_tenant_id text)
 RETURNS jsonb
@@ -234,7 +272,15 @@ DECLARE
     requests_deleted integer := 0;
     documents_deleted integer := 0;
     audits_deleted integer := 0;
+    holds_deleted integer := 0;
+    hold_ai boolean := public.legal_hold_active(p_tenant_id, 'ai_interaction');
+    hold_incident boolean := public.legal_hold_active(p_tenant_id, 'incident');
+    hold_notice boolean := public.legal_hold_active(p_tenant_id, 'contract_acceptance');
+    hold_request boolean := public.legal_hold_active(p_tenant_id, 'data_subject_request');
+    hold_document boolean := public.legal_hold_active(p_tenant_id, 'uploaded_content');
+    hold_audit boolean := public.legal_hold_active(p_tenant_id, 'audit_event');
 BEGIN
+    IF NOT hold_ai THEN
     DELETE FROM public.analysis_reviews AS review
     USING public.analysis_runs AS analysis
     WHERE review.answer_id = analysis.answer_id
@@ -246,7 +292,9 @@ BEGIN
     DELETE FROM public.analysis_runs
     WHERE tenant_id = p_tenant_id AND retention_until <= now();
     GET DIAGNOSTICS analyses_deleted = ROW_COUNT;
+    END IF;
 
+    IF NOT hold_incident THEN
     DELETE FROM public.incident_events AS event
     USING public.incidents AS incident
     WHERE event.incident_id = incident.incident_id
@@ -258,22 +306,36 @@ BEGIN
     DELETE FROM public.incidents
     WHERE tenant_id = p_tenant_id AND retention_until <= now();
     GET DIAGNOSTICS incidents_deleted = ROW_COUNT;
+    END IF;
 
+    IF NOT hold_notice THEN
     DELETE FROM public.notice_acceptances
     WHERE tenant_id = p_tenant_id AND retention_until <= now();
     GET DIAGNOSTICS notices_deleted = ROW_COUNT;
+    END IF;
 
+    IF NOT hold_request THEN
     DELETE FROM public.privacy_requests
     WHERE tenant_id = p_tenant_id AND retention_until <= now();
     GET DIAGNOSTICS requests_deleted = ROW_COUNT;
+    END IF;
 
+    IF NOT hold_document THEN
     DELETE FROM public.documents
     WHERE tenant_id = p_tenant_id AND deleted_at IS NOT NULL AND retention_until <= now();
     GET DIAGNOSTICS documents_deleted = ROW_COUNT;
+    END IF;
 
+    IF NOT hold_audit THEN
     DELETE FROM public.audit_events
     WHERE tenant_id = p_tenant_id AND retention_until <= now();
     GET DIAGNOSTICS audits_deleted = ROW_COUNT;
+    END IF;
+
+    -- Released holds are evidence of their own and are kept as long as audit events.
+    DELETE FROM public.legal_holds
+    WHERE tenant_id = p_tenant_id AND released_at IS NOT NULL AND retention_until <= now();
+    GET DIAGNOSTICS holds_deleted = ROW_COUNT;
 
     RETURN jsonb_build_object(
         'analysis_reviews', reviews_deleted,
@@ -283,12 +345,14 @@ BEGIN
         'notice_acceptances', notices_deleted,
         'privacy_requests', requests_deleted,
         'documents', documents_deleted,
-        'audit_events', audits_deleted
+        'audit_events', audits_deleted,
+        'legal_holds', holds_deleted
     );
 END;
 $$;
 
 REVOKE ALL ON FUNCTION purge_expired_tenant_data(text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION legal_hold_active(text, text) FROM PUBLIC;
 
 CREATE OR REPLACE FUNCTION list_retention_tenant_ids()
 RETURNS TABLE(tenant_id text)

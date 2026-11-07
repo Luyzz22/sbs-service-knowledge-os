@@ -22,6 +22,7 @@ PERSON_COLUMNS = frozenset({"actor_role", "question_hash"})
 PSEUDONYM = msg("Pseudonym der Person (HMAC, nicht umkehrbar)")
 NOT_SHOWN = msg("In der Oberfläche nicht angezeigt")
 NO_EVALUATION = msg("Keine Auswertung je Person")
+HOLD_RETENTION = msg("Frist läuft erst ab Aufhebung des Holds")
 
 
 @dataclass(frozen=True)
@@ -36,6 +37,7 @@ class PersonalDataField:
     # Section of the self-service data export (GDPR Art. 15) that contains the field; None needs the stated route.
     export_section: str | None
     export_note: Message | None = None
+    retention_note: Message | None = None
 
 
 PERSONAL_DATA_FIELDS = (
@@ -130,6 +132,30 @@ PERSONAL_DATA_FIELDS = (
         "privacy_requests",
     ),
     PersonalDataField(
+        "legal_holds",
+        "created_by_token",
+        PSEUDONYM,
+        msg("Nachweis, wer einen Legal Hold gesetzt hat"),
+        NOT_SHOWN,
+        NO_EVALUATION,
+        RecordClass.AUDIT_EVENT,
+        None,
+        msg("Auf Antrag über das Datenschutzteam; Verwaltungsnachweis der Admin-Rolle"),
+        HOLD_RETENTION,
+    ),
+    PersonalDataField(
+        "legal_holds",
+        "released_by_token",
+        PSEUDONYM,
+        msg("Nachweis, wer einen Legal Hold aufgehoben hat"),
+        NOT_SHOWN,
+        NO_EVALUATION,
+        RecordClass.AUDIT_EVENT,
+        None,
+        msg("Auf Antrag über das Datenschutzteam; Verwaltungsnachweis der Admin-Rolle"),
+        HOLD_RETENTION,
+    ),
+    PersonalDataField(
         "audit_events",
         "actor_token",
         PSEUDONYM,
@@ -189,7 +215,8 @@ def render_annex(policy: RetentionPolicy | None = None) -> str:
         export = f"Selbstauskunft `{item.export_section}`" if item.export_section else str(item.export_note)
         lines.append(
             f"| `{item.table}.{item.column}` | {item.content} | {item.purpose} | {item.visibility} | "
-            f"{item.evaluation} | {days[item.retention]} Tage ({item.retention.value}) | {export} |"
+            f"{item.evaluation} | {days[item.retention]} Tage ({item.retention.value})"
+            f"{'; ' + str(item.retention_note) if item.retention_note else ''} | {export} |"
         )
     lines += ["", "## Ausgeschlossene Auswertungen", ""]
     lines += [f"- {item}" for item in EXCLUDED_EVALUATIONS]

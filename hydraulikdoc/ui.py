@@ -9,7 +9,7 @@ import io
 import json
 import time
 from collections.abc import Mapping
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -66,6 +66,8 @@ from .repository import (
     INCIDENT_CLOSE_PERMISSION,
     INCIDENT_STATUSES,
     INCIDENT_TRANSITIONS,
+    LEGAL_HOLD_PERMISSION,
+    LEGAL_HOLD_REASONS,
     AssetRecord,
     AuditChainReport,
     DocumentRecord,
@@ -576,6 +578,17 @@ def _overview(principal: UserPrincipal, repository: EnterpriseRepository, settin
             kpis_column.button(tr("Zu den Kennzahlen"), on_click=_go_to, args=("Kennzahlen",), key="overview-kpis")
     else:
         st.success(tr("Kein offener Handlungsbedarf im Incident Workflow."))
+    if principal.can(LEGAL_HOLD_PERMISSION):
+        overdue = [item for item in repository.list_legal_holds(principal) if item.review_overdue(datetime.now(UTC))]
+        if overdue:
+            st.warning(
+                tr_plural(
+                    len(overdue),
+                    "{n} Legal Hold ist zur Wiedervorlage fällig: Weitergeltung prüfen oder aufheben.",
+                    "{n} Legal Holds sind zur Wiedervorlage fällig: Weitergeltung prüfen oder aufheben.",
+                )
+            )
+            st.button(tr("Zu Legal Hold"), on_click=_go_to, args=("Governance",), key="overview-legal-hold")
     _render_setup_progress(principal, repository, settings, assets, documents)
     st.subheader(tr("Freigabegrenzen"))
     st.warning(tr("Keine autonome Maschinensteuerung. Keine automatische Sicherheitsfreigabe."))
@@ -1818,6 +1831,29 @@ PRIVACY_REQUEST_LABELS = {
     "erasure": msg("Löschung"),
     "objection": msg("Widerspruch"),
 }
+RECORD_CLASS_LABELS = {
+    "ai_interaction": msg("KI-Anfragen und Reviews"),
+    "incident": msg("Incidents und Verlauf"),
+    "uploaded_content": msg("Dokumente"),
+    "audit_event": msg("Auditereignisse"),
+    "contract_acceptance": msg("Hinweisbestätigungen"),
+    "data_subject_request": msg("Datenschutzanfragen"),
+}
+LEGAL_HOLD_REASON_LABELS = {
+    "litigation": msg("Rechtsstreit"),
+    "authority_request": msg("Behördenanfrage"),
+    "internal_investigation": msg("Interne Untersuchung"),
+    "warranty_claim": msg("Gewährleistung oder Produkthaftung"),
+}
+LEGAL_HOLD_ERRORS = {
+    "LEGAL_HOLD_CASE_REFERENCE_INVALID": msg(
+        "Aktenzeichen mit 3 bis 64 Zeichen aus Buchstaben, Ziffern und . _ / - angeben, ohne Personennamen."
+    ),
+    "LEGAL_HOLD_SCOPE_INVALID": msg("Mindestens eine Datenklasse auswählen."),
+    "LEGAL_HOLD_REVIEW_DATE_INVALID": msg(
+        "Die Wiedervorlage muss in der Zukunft und höchstens ein Jahr entfernt liegen."
+    ),
+}
 PRIVACY_REQUEST_STATUS_LABELS = {
     "submitted": msg("eingereicht"),
     "identity_verified": msg("Identität geprüft"),
@@ -1947,6 +1983,110 @@ def _governance(principal: UserPrincipal, repository: EnterpriseRepository, sett
             hide_index=True,
         )
     _render_personal_data_inventory()
+    if principal.can(LEGAL_HOLD_PERMISSION):
+        _render_legal_holds(principal, repository)
+
+
+def _render_legal_holds(principal: UserPrincipal, repository: EnterpriseRepository) -> None:
+    st.divider()
+    st.subheader(tr("Legal Hold"))
+    st.caption(
+        tr(
+            "Setzt die Löschfristen ganzer Datenklassen des Mandanten aus, etwa bei Rechtsstreit oder Behördenanfrage. "
+            "Ein Hold endet nie automatisch: Er wird zur Wiedervorlage angemahnt und nur ausdrücklich aufgehoben."
+        )
+    )
+    if notice := st.session_state.pop("legal_hold_notice", None):
+        st.success(notice)
+    holds = repository.list_legal_holds(principal)
+    now = datetime.now(UTC)
+    active = [item for item in holds if item.released_at is None]
+    if holds:
+        st.dataframe(
+            [
+                {
+                    tr("Aktenzeichen"): item.case_reference,
+                    tr("Grund"): label(LEGAL_HOLD_REASON_LABELS, item.reason_code),
+                    tr("Datenklassen"): ", ".join(label(RECORD_CLASS_LABELS, value) for value in item.record_classes),
+                    tr("Wiedervorlage"): fmt_datetime(item.review_at)
+                    + (f" · {tr('fällig')}" if item.review_overdue(now) else ""),
+                    tr("Gesetzt"): fmt_datetime(item.created_at),
+                    tr("Aufgehoben"): fmt_datetime(item.released_at) if item.released_at else "–",
+                }
+                for item in holds
+            ],
+            width="stretch",
+            hide_index=True,
+        )
+    with st.form("legal-hold-create", clear_on_submit=True):
+        reference = st.text_input(tr("Aktenzeichen"), max_chars=64, placeholder="LH-2026-014")
+        reason = st.selectbox(
+            tr("Grund"), LEGAL_HOLD_REASONS, format_func=lambda option: label(LEGAL_HOLD_REASON_LABELS, option)
+        )
+        classes = st.multiselect(
+            tr("Datenklassen"),
+            tuple(RECORD_CLASS_LABELS),
+            default=tuple(RECORD_CLASS_LABELS),
+            format_func=lambda option: label(RECORD_CLASS_LABELS, option),
+        )
+        today = date.today()
+        review = st.date_input(
+            tr("Wiedervorlage"),
+            value=today + timedelta(days=90),
+            min_value=today + timedelta(days=1),
+            max_value=today + timedelta(days=365),
+        )
+        submitted = st.form_submit_button(tr("Legal Hold setzen"))
+    if submitted:
+        try:
+            hold = repository.create_legal_hold(
+                principal,
+                case_reference=reference,
+                reason_code=reason,
+                record_classes=tuple(classes),
+                review_at=datetime(review.year, review.month, review.day, 8, tzinfo=UTC),
+            )
+        except ValueError as error:
+            st.error(label(LEGAL_HOLD_ERRORS, str(error)))
+        else:
+            repository.emit_audit(
+                principal,
+                action="legal_hold.created",
+                outcome=AuditOutcome.SUCCESS,
+                resource_type="legal_hold",
+                resource_id=hold.hold_id,
+                metadata={"reason_code": hold.reason_code, "collection": ",".join(hold.record_classes)},
+            )
+            st.session_state.legal_hold_notice = tr(
+                "Legal Hold {reference} ist aktiv; betroffene Daten werden nicht mehr gelöscht.",
+                reference=hold.case_reference,
+            )
+            st.rerun()
+    if not active:
+        return
+    by_id = {item.hold_id: item for item in active}
+    selected = st.selectbox(
+        tr("Aktiven Hold aufheben"),
+        tuple(by_id),
+        format_func=lambda option: by_id[option].case_reference,
+        key="legal-hold-release-select",
+    )
+    confirmed = st.checkbox(tr("Aufhebung ist mit der Rechtsabteilung abgestimmt."), key="legal-hold-release-confirm")
+    if st.button(tr("Legal Hold aufheben"), disabled=not confirmed, key="legal-hold-release"):
+        released = repository.release_legal_hold(principal, selected)
+        repository.emit_audit(
+            principal,
+            action="legal_hold.released",
+            outcome=AuditOutcome.SUCCESS,
+            resource_type="legal_hold",
+            resource_id=released.hold_id,
+            metadata={"reason_code": released.reason_code, "collection": ",".join(released.record_classes)},
+        )
+        st.session_state.legal_hold_notice = tr(
+            "Legal Hold {reference} ist aufgehoben; die regulären Löschfristen gelten wieder.",
+            reference=released.case_reference,
+        )
+        st.rerun()
 
 
 def _render_personal_data_inventory() -> None:
@@ -1967,7 +2107,8 @@ def _render_personal_data_inventory() -> None:
                     tr("Zweck"): tr(item.purpose),
                     tr("Sichtbarkeit"): tr(item.visibility),
                     tr("Auswertung"): tr(item.evaluation),
-                    tr("Löschfrist"): tr_plural(days[item.retention], "{n} Tag", "{n} Tage"),
+                    tr("Löschfrist"): tr_plural(days[item.retention], "{n} Tag", "{n} Tage")
+                    + (f"; {tr(item.retention_note)}" if item.retention_note else ""),
                     tr("Im Export"): tr("ja") if item.export_section else tr(item.export_note or ""),
                 }
                 for item in PERSONAL_DATA_FIELDS

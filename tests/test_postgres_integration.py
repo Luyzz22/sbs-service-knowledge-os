@@ -309,6 +309,79 @@ class PostgresSecurityIntegrationTests(unittest.TestCase):
         self.assertEqual((broken.intact, broken.reason), (False, "HASH_MISMATCH"))
         self.assertEqual(broken.broken_sequence, report.first_sequence + 1)
 
+    def test_legal_hold_suspends_purge_until_released(self) -> None:
+        from datetime import UTC, datetime, timedelta
+
+        from psycopg.errors import InsufficientPrivilege
+
+        from hydraulikdoc.auth import ROLE_PERMISSIONS, UserPrincipal
+        from hydraulikdoc.config import AppSettings
+        from hydraulikdoc.repository import PostgresRepository
+        from hydraulikdoc.security import ValidatedUpload
+
+        def repository_for(dsn: str) -> PostgresRepository:
+            return PostgresRepository(
+                AppSettings.from_environment(
+                    {
+                        "APP_ENV": "test",
+                        "PERSISTENCE_BACKEND": "postgres",
+                        "AUDIT_HMAC_KEY": "integration-audit-key-" + "x" * 16,
+                        "DATABASE_URL": dsn,
+                    }
+                )
+            )
+
+        runtime, lifecycle = repository_for(self.app_dsn), repository_for(self.lifecycle_dsn)
+        admin = UserPrincipal("legal", f"{self.tenant_a}-hold", "Legal", "admin", permissions=ROLE_PERMISSIONS["admin"])
+        with self.psycopg.connect(self.app_dsn) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT set_config('app.tenant_id', %s, true)", (admin.tenant_id,))
+                cursor.execute("INSERT INTO tenants (tenant_id, display_name) VALUES (%s,'Hold')", (admin.tenant_id,))
+        incident = runtime.create_incident(admin, asset_id="PU-1", title="Gewährleistung", severity="p2", details="")
+        document = runtime.register_document(
+            admin, ValidatedUpload(str(uuid.uuid4()), "Prüfbericht.pdf", "c" * 64, b"", "application/pdf")
+        )
+        hold = runtime.create_legal_hold(
+            admin,
+            case_reference="LH-2026-014",
+            reason_code="warranty_claim",
+            record_classes=("incident", "uploaded_content"),
+            review_at=datetime.now(UTC) + timedelta(days=30),
+        )
+        with self.psycopg.connect(self.admin_dsn) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "UPDATE incidents SET retention_until = now() - interval '1 day' WHERE tenant_id = %s",
+                    (admin.tenant_id,),
+                )
+                cursor.execute(
+                    "UPDATE documents SET retention_until = now() - interval '1 day' WHERE tenant_id = %s",
+                    (admin.tenant_id,),
+                )
+
+        self.assertEqual(lifecycle.list_expired_documents(admin), ())
+        held = lifecycle.purge_expired_records(admin)
+        self.assertEqual((held["incidents"], held["incident_events"]), (0, 0))
+        self.assertEqual([item.incident_id for item in runtime.list_incidents(admin)], [incident.incident_id])
+
+        with self.psycopg.connect(self.app_dsn) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT set_config('app.tenant_id', %s, true)", (admin.tenant_id,))
+                with self.assertRaises(InsufficientPrivilege):
+                    cursor.execute("UPDATE legal_holds SET record_classes = ARRAY['audit_event']")
+            connection.rollback()
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT set_config('app.tenant_id', %s, true)", (admin.tenant_id,))
+                with self.assertRaises(InsufficientPrivilege):
+                    cursor.execute("DELETE FROM legal_holds")
+
+        runtime.release_legal_hold(admin, hold.hold_id)
+        self.assertEqual([item.document_id for item in lifecycle.list_expired_documents(admin)], [document.document_id])
+        released = lifecycle.purge_expired_records(admin)
+        self.assertEqual(released["incidents"], 1)
+        self.assertGreaterEqual(released["incident_events"], 1)
+        self.assertEqual(released["legal_holds"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()
