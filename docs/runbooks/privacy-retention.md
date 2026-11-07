@@ -40,7 +40,14 @@ Der Web-Runtime-Account besitzt weder DDL noch allgemeines `DELETE` und darf die
 
 ## Legal Hold
 
-Ein Legal Hold ist kein Umgebungswert, der Fristen global abschaltet. Er braucht Fall-ID, Rechtsgrund, Scope, approvierende Rolle, Beginn, Reviewdatum und Ende. Bis eine technisch scoped Hold-Funktion implementiert ist, muss ein Hold über kontrollierte Datenbank-/Backup-Verfahren durch den DSR- und Legal-Owner umgesetzt und separat evidenziert werden.
+Ein Legal Hold ist kein Umgebungswert, der Fristen global abschaltet, sondern ein Datensatz je Mandant in `legal_holds`. Admins setzen ihn in der Governance-Seite (Berechtigung `legal_hold:manage`):
+
+1. **Anlegen:** Aktenzeichen ohne Personennamen, Grund (Rechtsstreit, Behördenanfrage, interne Untersuchung, Gewährleistung/Produkthaftung), betroffene Datenklassen (Record Classes) und eine Wiedervorlage innerhalb eines Jahres. Das Auditereignis `legal_hold.created` hält Grund und Scope fest.
+2. **Wirkung:** `purge_expired_tenant_data` überspringt jede Datenklasse unter aktivem Hold, und `list_expired_documents` liefert keine Dokumente, solange `uploaded_content` gehalten wird. Der Hold gilt für Fristabläufe und ersetzt keine Sperre einzelner Löschanträge; ein Löschantrag nach Art. 17 während eines Holds wird mit Verweis auf Art. 17 Abs. 3 lit. e begründet abgelehnt oder zurückgestellt.
+3. **Wiedervorlage:** Ein Hold endet nie automatisch. Ist die Wiedervorlage fällig, mahnen Leitstand und Governance-Seite. Die Rechtsabteilung bestätigt die Weitergeltung durch einen neuen Hold mit neuem Datum, danach wird der alte aufgehoben; oder sie hebt ihn auf.
+4. **Aufheben:** nur nach bestätigter Abstimmung mit der Rechtsabteilung. Danach greifen die regulären Fristen beim nächsten nächtlichen Lauf. Der aufgehobene Hold bleibt so lange erhalten wie Auditereignisse (`AUDIT_EVENT_RETENTION_DAYS`).
+
+Die Runtime-Rolle darf an einem Hold nur die Aufhebung schreiben; Aktenzeichen, Grund und Scope sind nach dem Anlegen unveränderlich, Löschen ist nicht möglich. Backups unterliegen eigenen Fristen; ein Hold, der auch Backups erfassen soll, wird zusätzlich im Backup-Verfahren umgesetzt und evidenziert.
 
 ## Verifikation
 

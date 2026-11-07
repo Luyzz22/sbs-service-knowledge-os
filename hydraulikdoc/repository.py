@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import re
 import uuid
 from collections.abc import Iterable, Iterator, Mapping
 from contextlib import contextmanager
@@ -163,6 +164,51 @@ class AssetRecord:
 
 
 @dataclass(frozen=True)
+class LegalHoldRecord:
+    hold_id: str
+    tenant_id: str
+    case_reference: str
+    reason_code: str
+    record_classes: tuple[str, ...]
+    review_at: datetime
+    created_at: datetime
+    released_at: datetime | None = None
+
+    def review_overdue(self, now: datetime) -> bool:
+        return self.released_at is None and self.review_at <= now
+
+
+LEGAL_HOLD_PERMISSION = "legal_hold:manage"
+LEGAL_HOLD_REASONS = ("litigation", "authority_request", "internal_investigation", "warranty_claim")
+LEGAL_HOLD_CASE_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]{2,63}")
+# A hold must come up for review within a year; it is never released automatically.
+LEGAL_HOLD_MAX_REVIEW = timedelta(days=366)
+
+
+def _check_legal_hold(
+    principal: UserPrincipal,
+    case_reference: str,
+    reason_code: str,
+    record_classes: tuple[str, ...],
+    review_at: datetime,
+    now: datetime,
+) -> tuple[str, tuple[str, ...]]:
+    if not principal.can(LEGAL_HOLD_PERMISSION):
+        raise PermissionError("LEGAL_HOLD_MANAGE_REQUIRED")
+    reference = case_reference.strip()
+    if not LEGAL_HOLD_CASE_PATTERN.fullmatch(reference):
+        raise ValueError("LEGAL_HOLD_CASE_REFERENCE_INVALID")
+    if reason_code not in LEGAL_HOLD_REASONS:
+        raise ValueError("LEGAL_HOLD_REASON_INVALID")
+    classes = tuple(sorted(set(record_classes)))
+    if not classes or not set(classes) <= {item.value for item in RecordClass}:
+        raise ValueError("LEGAL_HOLD_SCOPE_INVALID")
+    if review_at.tzinfo is None or not now < review_at <= now + LEGAL_HOLD_MAX_REVIEW:
+        raise ValueError("LEGAL_HOLD_REVIEW_DATE_INVALID")
+    return reference, classes
+
+
+@dataclass(frozen=True)
 class PrivacyRequestRecord:
     request_id: str
     tenant_id: str
@@ -273,6 +319,20 @@ class EnterpriseRepository(Protocol):
     def verify_audit_chain(
         self, principal: UserPrincipal, anchor: tuple[int, str] | None = None
     ) -> AuditChainReport: ...
+
+    def create_legal_hold(
+        self,
+        principal: UserPrincipal,
+        *,
+        case_reference: str,
+        reason_code: str,
+        record_classes: tuple[str, ...],
+        review_at: datetime,
+    ) -> LegalHoldRecord: ...
+
+    def release_legal_hold(self, principal: UserPrincipal, hold_id: str) -> LegalHoldRecord: ...
+
+    def list_legal_holds(self, principal: UserPrincipal) -> tuple[LegalHoldRecord, ...]: ...
 
 
 def _now() -> datetime:
@@ -420,6 +480,7 @@ class InMemoryRepository:
         self._uploaders: dict[tuple[str, str], str] = {}
         self._review_log: list[tuple[str, str, str, ReviewStatus, datetime]] = []
         self._reporters: dict[tuple[str, str], str] = {}
+        self._legal_holds: dict[tuple[str, str], LegalHoldRecord] = {}
         self._lock = RLock()
 
     @contextmanager
@@ -845,6 +906,46 @@ class InMemoryRepository:
             ]
         return verify_audit_chain_rows(self._audit_chain_key, rows, anchor)
 
+    def create_legal_hold(
+        self,
+        principal: UserPrincipal,
+        *,
+        case_reference: str,
+        reason_code: str,
+        record_classes: tuple[str, ...],
+        review_at: datetime,
+    ) -> LegalHoldRecord:
+        now = _now()
+        reference, classes = _check_legal_hold(principal, case_reference, reason_code, record_classes, review_at, now)
+        record = LegalHoldRecord(
+            str(uuid.uuid4()), principal.tenant_id, reference, reason_code, classes, review_at, now
+        )
+        with self._lock:
+            self._legal_holds[(principal.tenant_id, record.hold_id)] = record
+        return record
+
+    def release_legal_hold(self, principal: UserPrincipal, hold_id: str) -> LegalHoldRecord:
+        if not principal.can(LEGAL_HOLD_PERMISSION):
+            raise PermissionError("LEGAL_HOLD_MANAGE_REQUIRED")
+        key = (principal.tenant_id, hold_id)
+        with self._lock:
+            current = self._legal_holds.get(key)
+            if current is None or current.released_at is not None:
+                raise KeyError(hold_id)
+            released = replace(current, released_at=_now())
+            self._legal_holds[key] = released
+            return released
+
+    def list_legal_holds(self, principal: UserPrincipal) -> tuple[LegalHoldRecord, ...]:
+        with self._lock:
+            return tuple(
+                sorted(
+                    (item for (tenant, _), item in self._legal_holds.items() if tenant == principal.tenant_id),
+                    key=lambda item: item.created_at,
+                    reverse=True,
+                )
+            )
+
 
 # Column order matches IncidentRecord. Statements are complete literals so no SQL is assembled at runtime.
 _SELECT_INCIDENTS_SQL = """SELECT incident_id::text, tenant_id, asset_id, title, severity, status, created_at, details, updated_at,
@@ -909,6 +1010,7 @@ class PostgresRepository:
             "incident_events",
             "notice_acceptances",
             "privacy_requests",
+            "legal_holds",
             "audit_events",
         }
         with self._connect() as connection:
@@ -1486,7 +1588,10 @@ class PostgresRepository:
                 cursor.execute(
                     """SELECT document_id::text, tenant_id, display_name, sha256, status,
                     page_count, created_at, retention_until FROM documents
-                    WHERE deleted_at IS NULL AND retention_until <= now() ORDER BY retention_until"""
+                    WHERE deleted_at IS NULL AND retention_until <= now()
+                      AND NOT EXISTS (SELECT 1 FROM legal_holds
+                        WHERE released_at IS NULL AND 'uploaded_content' = ANY(record_classes))
+                    ORDER BY retention_until"""
                 )
                 return tuple(DocumentRecord(*row) for row in cursor.fetchall())
 
@@ -1567,6 +1672,79 @@ class PostgresRepository:
             with connection.cursor(name="audit_chain_verification") as stream:
                 stream.execute(_SELECT_AUDIT_CHAIN_SQL)
                 return verify_audit_chain_rows(self._audit_chain_key, (_audit_chain_row(row) for row in stream), anchor)
+
+    def create_legal_hold(
+        self,
+        principal: UserPrincipal,
+        *,
+        case_reference: str,
+        reason_code: str,
+        record_classes: tuple[str, ...],
+        review_at: datetime,
+    ) -> LegalHoldRecord:
+        reference, classes = _check_legal_hold(
+            principal, case_reference, reason_code, record_classes, review_at, _now()
+        )
+        with self._connect() as connection:
+            with connection.cursor() as cursor:
+                self._tenant(cursor, principal.tenant_id)
+                cursor.execute(
+                    _INSERT_LEGAL_HOLD_SQL,
+                    (
+                        str(uuid.uuid4()),
+                        principal.tenant_id,
+                        reference,
+                        reason_code,
+                        list(classes),
+                        review_at,
+                        _principal_token(self._pseudonymizer, principal),
+                    ),
+                )
+                return _legal_hold(cursor.fetchone())
+
+    def release_legal_hold(self, principal: UserPrincipal, hold_id: str) -> LegalHoldRecord:
+        if not principal.can(LEGAL_HOLD_PERMISSION):
+            raise PermissionError("LEGAL_HOLD_MANAGE_REQUIRED")
+        released = _now()
+        with self._connect() as connection:
+            with connection.cursor() as cursor:
+                self._tenant(cursor, principal.tenant_id)
+                cursor.execute(
+                    _RELEASE_LEGAL_HOLD_SQL,
+                    (
+                        _principal_token(self._pseudonymizer, principal),
+                        released,
+                        self._retention.expires_at(RecordClass.AUDIT_EVENT, released),
+                        hold_id,
+                    ),
+                )
+                row = cursor.fetchone()
+                if row is None:
+                    raise KeyError(hold_id)
+                return _legal_hold(row)
+
+    def list_legal_holds(self, principal: UserPrincipal) -> tuple[LegalHoldRecord, ...]:
+        with self._connect() as connection:
+            with connection.cursor() as cursor:
+                self._tenant(cursor, principal.tenant_id)
+                cursor.execute(_SELECT_LEGAL_HOLDS_SQL)
+                return tuple(_legal_hold(row) for row in cursor.fetchall())
+
+
+_INSERT_LEGAL_HOLD_SQL = """INSERT INTO legal_holds
+    (hold_id, tenant_id, case_reference, reason_code, record_classes, review_at, created_by_token)
+    VALUES (%s,%s,%s,%s,%s,%s,%s)
+    RETURNING hold_id::text, tenant_id, case_reference, reason_code, record_classes, review_at, created_at, released_at"""
+# Releasing is the only change to a hold; the column grant for the runtime role allows nothing else.
+_RELEASE_LEGAL_HOLD_SQL = """UPDATE legal_holds SET released_by_token=%s, released_at=%s, retention_until=%s
+    WHERE hold_id=%s AND released_at IS NULL
+    RETURNING hold_id::text, tenant_id, case_reference, reason_code, record_classes, review_at, created_at, released_at"""
+_SELECT_LEGAL_HOLDS_SQL = """SELECT hold_id::text, tenant_id, case_reference, reason_code, record_classes, review_at,
+    created_at, released_at FROM legal_holds ORDER BY created_at DESC LIMIT 200"""
+
+
+def _legal_hold(row: tuple[Any, ...]) -> LegalHoldRecord:
+    return LegalHoldRecord(row[0], row[1], row[2], row[3], tuple(row[4]), row[5], row[6], row[7])
 
 
 _SELECT_AUDIT_CHAIN_SQL = """SELECT sequence_id, previous_hash, event_hash, event_id::text, action, outcome, actor_token,

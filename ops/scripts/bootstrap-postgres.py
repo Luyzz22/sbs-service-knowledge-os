@@ -80,6 +80,7 @@ def main() -> None:
         "incident_events",
         "notice_acceptances",
         "privacy_requests",
+        "legal_holds",
         "audit_events",
     )
     mutable_tables = tables[:-1]
@@ -94,7 +95,11 @@ def main() -> None:
                         sql.Identifier(owner_role),
                     )
                 )
-            for function in ("purge_expired_tenant_data(text)", "list_retention_tenant_ids()"):
+            for function in (
+                "purge_expired_tenant_data(text)",
+                "list_retention_tenant_ids()",
+                "legal_hold_active(text, text)",
+            ):
                 cursor.execute(
                     sql.SQL("ALTER FUNCTION {} OWNER TO {}").format(sql.SQL(function), sql.Identifier(owner_role))
                 )
@@ -125,6 +130,12 @@ def main() -> None:
                     "effectiveness_check) ON TABLE incidents TO {}"
                 ).format(sql.Identifier(app_user))
             )
+            # Releasing is the only change to a hold; scope, reason and case reference stay as recorded.
+            cursor.execute(
+                sql.SQL(
+                    "GRANT UPDATE (released_by_token, released_at, retention_until) ON TABLE legal_holds TO {}"
+                ).format(sql.Identifier(app_user))
+            )
             cursor.execute(sql.SQL("GRANT SELECT, INSERT ON TABLE audit_events TO {}").format(sql.Identifier(app_user)))
             cursor.execute(
                 sql.SQL("GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO {}").format(sql.Identifier(app_user))
@@ -145,6 +156,7 @@ def main() -> None:
             cursor.execute(
                 sql.SQL("GRANT SELECT, UPDATE ON TABLE documents TO {}").format(sql.Identifier(lifecycle_user))
             )
+            cursor.execute(sql.SQL("GRANT SELECT ON TABLE legal_holds TO {}").format(sql.Identifier(lifecycle_user)))
             cursor.execute(
                 sql.SQL("GRANT SELECT, INSERT ON TABLE audit_events TO {}").format(sql.Identifier(lifecycle_user))
             )
