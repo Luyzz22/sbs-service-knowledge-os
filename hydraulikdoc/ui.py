@@ -68,12 +68,18 @@ from .repository import (
     INCIDENT_TRANSITIONS,
     LEGAL_HOLD_PERMISSION,
     LEGAL_HOLD_REASONS,
+    PRIVACY_DECISION_REASONS,
+    PRIVACY_MANAGE_PERMISSION,
+    PRIVACY_OPEN_STATUSES,
+    PRIVACY_REQUEST_TRANSITIONS,
     AssetRecord,
     AuditChainReport,
     DocumentRecord,
     EnterpriseRepository,
     IncidentRecord,
     IncidentTransitionRejected,
+    PrivacyRequestRecord,
+    PrivacyTransitionRejected,
     get_repository,
     missing_analysis_fields,
 )
@@ -589,6 +595,17 @@ def _overview(principal: UserPrincipal, repository: EnterpriseRepository, settin
                 )
             )
             st.button(tr("Zu Legal Hold"), on_click=_go_to, args=("Governance",), key="overview-legal-hold")
+    if principal.can(PRIVACY_MANAGE_PERMISSION):
+        late = [item for item in repository.list_privacy_queue(principal) if item.overdue(datetime.now(UTC))]
+        if late:
+            st.warning(
+                tr_plural(
+                    len(late),
+                    "{n} Datenschutzantrag hat die interne Frist überschritten.",
+                    "{n} Datenschutzanträge haben die interne Frist überschritten.",
+                )
+            )
+            st.button(tr("Zu den Datenschutzanträgen"), on_click=_go_to, args=("Governance",), key="overview-privacy")
     _render_setup_progress(principal, repository, settings, assets, documents)
     st.subheader(tr("Freigabegrenzen"))
     st.warning(tr("Keine autonome Maschinensteuerung. Keine automatische Sicherheitsfreigabe."))
@@ -1831,6 +1848,28 @@ PRIVACY_REQUEST_LABELS = {
     "erasure": msg("Löschung"),
     "objection": msg("Widerspruch"),
 }
+PRIVACY_DECISION_LABELS = {
+    "fulfilled": msg("erfüllt"),
+    "no_data": msg("keine Daten vorhanden"),
+    "identity_not_verified": msg("Identität nicht nachgewiesen"),
+    "legal_hold": msg("Legal Hold (Art. 17 Abs. 3 lit. e DSGVO)"),
+    "retention_obligation": msg("gesetzliche Aufbewahrungspflicht (Art. 17 Abs. 3 lit. b DSGVO)"),
+    "manifestly_unfounded": msg("offenkundig unbegründet oder exzessiv (Art. 12 Abs. 5 DSGVO)"),
+}
+PRIVACY_ACTION_LABELS = {
+    "identity_verified": msg("Identität bestätigen"),
+    "in_review": msg("In Prüfung nehmen"),
+    "completed": msg("Abschließen"),
+    "denied": msg("Ablehnen"),
+}
+PRIVACY_DECISION_ERRORS = {
+    "PRIVACY_OWN_REQUEST": msg("Eigene Anträge bearbeitet eine andere berechtigte Person."),
+    "PRIVACY_STALE_STATUS": msg("Der Antrag wurde zwischenzeitlich bearbeitet; Ansicht neu laden."),
+    "PRIVACY_DECISION_REASON_REQUIRED": msg("Begründung auswählen."),
+    "PRIVACY_EVIDENCE_REFERENCE_REQUIRED": msg(
+        "Vorgangsnummer mit 3 bis 64 Zeichen aus Buchstaben, Ziffern und . _ / - angeben."
+    ),
+}
 RECORD_CLASS_LABELS = {
     "ai_interaction": msg("KI-Anfragen und Reviews"),
     "incident": msg("Incidents und Verlauf"),
@@ -1983,8 +2022,134 @@ def _governance(principal: UserPrincipal, repository: EnterpriseRepository, sett
             hide_index=True,
         )
     _render_personal_data_inventory()
+    if principal.can(PRIVACY_MANAGE_PERMISSION):
+        _render_privacy_queue(principal, repository)
     if principal.can(LEGAL_HOLD_PERMISSION):
         _render_legal_holds(principal, repository)
+
+
+def _render_privacy_queue(principal: UserPrincipal, repository: EnterpriseRepository) -> None:
+    st.divider()
+    st.subheader(tr("Datenschutzanträge bearbeiten"))
+    st.caption(
+        tr(
+            "Anträge erscheinen nur mit Antrags-ID; die Person nennt diese ID bei der Identitätsprüfung. "
+            "Die interne Zielfrist liegt bei 28 Tagen, die gesetzliche bei einem Monat (Art. 12 Abs. 3 DSGVO). "
+            "Die Umsetzung, etwa Löschung oder Berichtigung, erfolgt nach Runbook; hier wird der Vorgang nachgewiesen."
+        )
+    )
+    if notice := st.session_state.pop("privacy_notice", None):
+        st.success(notice)
+    queue = repository.list_privacy_queue(principal)
+    if not queue:
+        st.info(tr("Keine Datenschutzanträge im Mandanten."))
+        return
+    now = datetime.now(UTC)
+    late = sum(1 for item in queue if item.overdue(now))
+    if late:
+        st.warning(
+            tr_plural(
+                late,
+                "{n} offener Antrag hat die interne Frist überschritten.",
+                "{n} offene Anträge haben die interne Frist überschritten.",
+            )
+        )
+    st.dataframe(
+        [
+            {
+                tr("ID"): item.request_id[:8],
+                tr("Typ"): label(PRIVACY_REQUEST_LABELS, item.request_type),
+                tr("Status"): label(PRIVACY_REQUEST_STATUS_LABELS, item.status),
+                tr("Eingang"): fmt_datetime(item.requested_at),
+                tr("Interne Zielfrist"): fmt_datetime(item.due_at)
+                + (f" · {tr('überfällig')}" if item.overdue(now) else ""),
+                tr("Begründung"): label(PRIVACY_DECISION_LABELS, item.decision_reason) if item.decision_reason else "–",
+                tr("Vorgang"): item.evidence_reference or "–",
+            }
+            for item in queue
+        ],
+        width="stretch",
+        hide_index=True,
+    )
+    open_requests = {item.request_id: item for item in queue if item.status in PRIVACY_OPEN_STATUSES}
+    if not open_requests:
+        return
+    selected = st.selectbox(
+        tr("Offenen Antrag bearbeiten"),
+        tuple(open_requests),
+        format_func=lambda option: (
+            f"{option[:8]} · {label(PRIVACY_REQUEST_LABELS, open_requests[option].request_type)} · "
+            f"{label(PRIVACY_REQUEST_STATUS_LABELS, open_requests[option].status)}"
+        ),
+        key="privacy-queue-selected",
+    )
+    _privacy_decision_form(principal, repository, open_requests[selected])
+
+
+def _privacy_decision_form(
+    principal: UserPrincipal, repository: EnterpriseRepository, request: PrivacyRequestRecord
+) -> None:
+    if request.request_type == "erasure" and any(
+        item.released_at is None for item in repository.list_legal_holds(principal)
+    ):
+        st.warning(
+            tr(
+                "Für den Mandanten ist ein Legal Hold aktiv. Löschung der gehaltenen Daten nach Art. 17 Abs. 3 lit. e "
+                "DSGVO zurückstellen und die Person darüber informieren."
+            )
+        )
+    target = st.radio(
+        tr("Nächster Schritt"),
+        PRIVACY_REQUEST_TRANSITIONS[request.status],
+        format_func=lambda option: label(PRIVACY_ACTION_LABELS, option),
+        horizontal=True,
+        key=f"privacy-target-{request.request_id}",
+    )
+    reason = reference = None
+    if target in PRIVACY_DECISION_REASONS:
+        reason = st.selectbox(
+            tr("Begründung"),
+            PRIVACY_DECISION_REASONS[target],
+            format_func=lambda option: label(PRIVACY_DECISION_LABELS, option),
+            key=f"privacy-reason-{request.request_id}-{target}",
+        )
+        reference = st.text_input(
+            tr("Vorgangsnummer (Ticket oder Akte)"),
+            max_chars=64,
+            placeholder="DSR-2026-031",
+            key=f"privacy-reference-{request.request_id}",
+        )
+    if st.button(label(PRIVACY_ACTION_LABELS, target), key=f"privacy-decide-{request.request_id}"):
+        try:
+            decided = repository.decide_privacy_request(
+                principal,
+                request.request_id,
+                expected=request.status,
+                target=target,
+                decision_reason=reason,
+                evidence_reference=reference,
+            )
+        except PrivacyTransitionRejected as error:
+            st.error(label(PRIVACY_DECISION_ERRORS, str(error)))
+            return
+        repository.emit_audit(
+            principal,
+            action="privacy.request.status_changed",
+            outcome=AuditOutcome.SUCCESS,
+            resource_type="privacy_request",
+            resource_id=decided.request_id,
+            metadata={
+                "request_type": decided.request_type,
+                "previous_status": request.status,
+                "reason_code": decided.decision_reason,
+            },
+        )
+        st.session_state.privacy_notice = tr(
+            "Antrag {id} steht jetzt auf „{status}“.",
+            id=decided.request_id[:8],
+            status=label(PRIVACY_REQUEST_STATUS_LABELS, decided.status),
+        )
+        st.rerun()
 
 
 def _render_legal_holds(principal: UserPrincipal, repository: EnterpriseRepository) -> None:

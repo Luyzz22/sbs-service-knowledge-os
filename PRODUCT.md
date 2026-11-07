@@ -46,6 +46,7 @@ HydraulikDoc ist die evidenzorientierte Arbeitsoberfläche zwischen technischer 
 | Implementiert | Inventar aller personenbeziehbaren Felder als technische Anlage zur Betriebsvereinbarung, per CI gegen das Schema geprüft; vollständige Selbstauskunft | `hydraulikdoc/personal_data.py`, `docs/compliance/works-council-annex.md` |
 | Implementiert | Verifikation der Audit-Hashkette: nächtlich je Mandant mit Ankern außerhalb der Datenbank, auf Abruf für Admins in der System-Seite | `hydraulikdoc/repository.py`, `ops/scripts/verify-audit-chain.py` |
 | Implementiert | Legal Hold je Datenklasse mit Aktenzeichen, Grund und Pflicht-Wiedervorlage; setzt den Löschlauf aus, endet nie automatisch | `legal_holds`, `purge_expired_tenant_data`, Governance-Seite |
+| Implementiert | Bearbeitung von Datenschutzanträgen: Statusworkflow, Begründung als fester Code, Vorgangsnummer, keine Bearbeitung eigener Anträge, Fristmahnung | `hydraulikdoc/repository.py`, Governance-Seite |
 | Externes Gate | AVV/DPA, Transferbewertung, DSFA, Rechtsgrundlagen, Betriebsrat | kundeninstanzbezogene Evidenz außerhalb des Codes |
 | Externes Gate | ISO-/C5-Testat, Pentest, Restore-Nachweis, SLA | nur nach abgeschlossenem Prüfverfahren kommunizieren |
 

@@ -160,6 +160,12 @@ CREATE TABLE IF NOT EXISTS legal_holds (
     CHECK ((released_at IS NULL) = (released_by_token IS NULL) AND (released_at IS NULL) = (retention_until IS NULL))
 );
 
+-- Outcome of a closed privacy request; free text is deliberately not stored.
+ALTER TABLE privacy_requests ADD COLUMN IF NOT EXISTS decision_reason text CHECK (
+    decision_reason IS NULL
+    OR decision_reason IN ('fulfilled', 'no_data', 'identity_not_verified', 'legal_hold', 'retention_obligation', 'manifestly_unfounded')
+);
+
 CREATE TABLE IF NOT EXISTS audit_events (
     sequence_id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     event_id uuid NOT NULL UNIQUE,

@@ -36,7 +36,7 @@ Der Web-Runtime-Account besitzt weder DDL noch allgemeines `DELETE` und darf die
 3. DSR-Owner prüft Identität, Vertretungsmacht, Scope, Rechte Dritter, Aufbewahrungspflichten und Legal Holds.
 4. Für Löschung werden betroffene Analysen, Incidents, Notices, Dokumente und externe Empfänger bestimmt. Dokumentlöschung nutzt dieselbe Search-/Blob-/DB-Propagation.
 5. Backups und Soft-Delete-Horizonte werden in der Antwort transparent genannt; gesperrte Wiederherstellung und späteste physische Vernichtung werden dokumentiert.
-6. Abschluss oder begründete Ablehnung wird mit Evidence Reference und Zeitpunkt gespeichert. Der aktuelle UI-Umfang stellt den Antrag; die Bearbeitungsoberfläche/Case-Management-Integration bleibt ein organisatorisches Gate.
+6. Abschluss oder begründete Ablehnung wird mit Vorgangsnummer, Begründung und Zeitpunkt gespeichert. Die Bearbeitung läuft in der Governance-Seite (Berechtigung `privacy:manage`, nur Admins): Statusfolge eingereicht → Identität geprüft → in Prüfung → abgeschlossen oder abgelehnt, jeder Schritt als `privacy.request.status_changed` auditiert. Begründungen sind feste Codes (erfüllt, keine Daten, Identität nicht nachgewiesen, Legal Hold nach Art. 17 Abs. 3 lit. e, Aufbewahrungspflicht nach lit. b, offenkundig unbegründet nach Art. 12 Abs. 5); Freitext wird nicht gespeichert. Eigene Anträge bearbeitet eine andere berechtigte Person. Überfällige Anträge mahnen Leitstand und Governance-Seite. Die antragstellende Person sieht Status und Begründung in ihrer Übersicht und im Selbstauskunfts-Export. Die eigentliche Umsetzung (Löschung, Berichtigung) bleibt ein Verfahren nach den Schritten 3 bis 5; eine Anbindung an ein externes Case-Management ist optional.
 
 ## Legal Hold
 

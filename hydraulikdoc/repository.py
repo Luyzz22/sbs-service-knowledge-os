@@ -216,6 +216,59 @@ class PrivacyRequestRecord:
     status: str
     requested_at: datetime
     due_at: datetime
+    completed_at: datetime | None = None
+    evidence_reference: str | None = None
+    decision_reason: str | None = None
+
+    def overdue(self, now: datetime) -> bool:
+        return self.status in PRIVACY_OPEN_STATUSES and self.due_at <= now
+
+
+PRIVACY_MANAGE_PERMISSION = "privacy:manage"
+PRIVACY_OPEN_STATUSES = frozenset({"submitted", "identity_verified", "in_review"})
+PRIVACY_REQUEST_TRANSITIONS: Mapping[str, tuple[str, ...]] = {
+    "submitted": ("identity_verified", "denied"),
+    "identity_verified": ("in_review", "denied"),
+    "in_review": ("completed", "denied"),
+}
+PRIVACY_DECISION_REASONS: Mapping[str, tuple[str, ...]] = {
+    "completed": ("fulfilled", "no_data"),
+    # Art. 12 (5), Art. 17 (3) (b) and (e) GDPR, or an identity that could not be verified.
+    "denied": ("identity_not_verified", "legal_hold", "retention_obligation", "manifestly_unfounded"),
+}
+PRIVACY_EVIDENCE_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]{2,63}")
+
+
+class PrivacyTransitionRejected(ValueError):
+    """Raised when a privacy request change is not permitted by the case workflow."""
+
+
+def _check_privacy_decision(
+    principal: UserPrincipal,
+    current: PrivacyRequestRecord,
+    owner_is_principal: bool,
+    expected: str,
+    target: str,
+    decision_reason: str | None,
+    evidence_reference: str | None,
+) -> str | None:
+    """Fail closed unless the step is allowed; returns the normalised evidence reference."""
+    if not principal.can(PRIVACY_MANAGE_PERMISSION):
+        raise PermissionError("PRIVACY_MANAGE_REQUIRED")
+    if owner_is_principal:
+        raise PrivacyTransitionRejected("PRIVACY_OWN_REQUEST")
+    if current.status != expected:
+        raise PrivacyTransitionRejected("PRIVACY_STALE_STATUS")
+    if target not in PRIVACY_REQUEST_TRANSITIONS.get(current.status, ()):
+        raise PrivacyTransitionRejected(f"PRIVACY_TRANSITION_{current.status}_TO_{target}".upper())
+    if target not in PRIVACY_DECISION_REASONS:
+        return None
+    if decision_reason not in PRIVACY_DECISION_REASONS[target]:
+        raise PrivacyTransitionRejected("PRIVACY_DECISION_REASON_REQUIRED")
+    reference = (evidence_reference or "").strip()
+    if not PRIVACY_EVIDENCE_PATTERN.fullmatch(reference):
+        raise PrivacyTransitionRejected("PRIVACY_EVIDENCE_REFERENCE_REQUIRED")
+    return reference
 
 
 def _principal_token(pseudonymizer: SubjectPseudonymizer, principal: UserPrincipal) -> str:
@@ -302,6 +355,19 @@ class EnterpriseRepository(Protocol):
     def create_privacy_request(self, principal: UserPrincipal, request_type: str) -> PrivacyRequestRecord: ...
 
     def list_privacy_requests(self, principal: UserPrincipal) -> tuple[PrivacyRequestRecord, ...]: ...
+
+    def list_privacy_queue(self, principal: UserPrincipal) -> tuple[PrivacyRequestRecord, ...]: ...
+
+    def decide_privacy_request(
+        self,
+        principal: UserPrincipal,
+        request_id: str,
+        *,
+        expected: str,
+        target: str,
+        decision_reason: str | None = None,
+        evidence_reference: str | None = None,
+    ) -> PrivacyRequestRecord: ...
 
     def subject_export(self, principal: UserPrincipal) -> Mapping[str, Any]: ...
 
@@ -803,6 +869,46 @@ class InMemoryRepository:
                 for (tenant, _), (owner, record) in self._privacy_requests.items()
                 if tenant == principal.tenant_id and owner == subject
             )
+
+    def list_privacy_queue(self, principal: UserPrincipal) -> tuple[PrivacyRequestRecord, ...]:
+        if not principal.can(PRIVACY_MANAGE_PERMISSION):
+            raise PermissionError("PRIVACY_MANAGE_REQUIRED")
+        with self._lock:
+            records = [
+                record for (tenant, _), (_, record) in self._privacy_requests.items() if tenant == principal.tenant_id
+            ]
+        return tuple(sorted(records, key=_privacy_queue_order))
+
+    def decide_privacy_request(
+        self,
+        principal: UserPrincipal,
+        request_id: str,
+        *,
+        expected: str,
+        target: str,
+        decision_reason: str | None = None,
+        evidence_reference: str | None = None,
+    ) -> PrivacyRequestRecord:
+        actor = _principal_token(self._pseudonymizer, principal)
+        key = (principal.tenant_id, request_id)
+        with self._lock:
+            stored = self._privacy_requests.get(key)
+            if stored is None:
+                raise KeyError(request_id)
+            owner, current = stored
+            reference = _check_privacy_decision(
+                principal, current, owner == actor, expected, target, decision_reason, evidence_reference
+            )
+            final = target in PRIVACY_DECISION_REASONS
+            updated = replace(
+                current,
+                status=target,
+                completed_at=_now() if final else None,
+                evidence_reference=reference,
+                decision_reason=decision_reason if final else None,
+            )
+            self._privacy_requests[key] = (owner, updated)
+            return updated
 
     def subject_export(self, principal: UserPrincipal) -> Mapping[str, Any]:
         subject = _principal_token(self._pseudonymizer, principal)
@@ -1469,11 +1575,52 @@ class PostgresRepository:
             with connection.cursor() as cursor:
                 self._tenant(cursor, principal.tenant_id)
                 cursor.execute(
-                    """SELECT request_id::text, tenant_id, request_type, status, requested_at, due_at
+                    """SELECT request_id::text, tenant_id, request_type, status, requested_at, due_at, completed_at,
+                    evidence_reference, decision_reason
                     FROM privacy_requests WHERE subject_token=%s ORDER BY requested_at DESC""",
                     (subject,),
                 )
                 return tuple(PrivacyRequestRecord(*row) for row in cursor.fetchall())
+
+    def list_privacy_queue(self, principal: UserPrincipal) -> tuple[PrivacyRequestRecord, ...]:
+        if not principal.can(PRIVACY_MANAGE_PERMISSION):
+            raise PermissionError("PRIVACY_MANAGE_REQUIRED")
+        with self._connect() as connection:
+            with connection.cursor() as cursor:
+                self._tenant(cursor, principal.tenant_id)
+                cursor.execute(_SELECT_PRIVACY_QUEUE_SQL)
+                return tuple(
+                    sorted((PrivacyRequestRecord(*row) for row in cursor.fetchall()), key=_privacy_queue_order)
+                )
+
+    def decide_privacy_request(
+        self,
+        principal: UserPrincipal,
+        request_id: str,
+        *,
+        expected: str,
+        target: str,
+        decision_reason: str | None = None,
+        evidence_reference: str | None = None,
+    ) -> PrivacyRequestRecord:
+        actor = _principal_token(self._pseudonymizer, principal)
+        final = target in PRIVACY_DECISION_REASONS
+        with self._connect() as connection:
+            with connection.cursor() as cursor:
+                self._tenant(cursor, principal.tenant_id)
+                cursor.execute(_LOCK_PRIVACY_REQUEST_SQL, (request_id,))
+                row = cursor.fetchone()
+                if row is None:
+                    raise KeyError(request_id)
+                current = PrivacyRequestRecord(*row[:9])
+                reference = _check_privacy_decision(
+                    principal, current, row[9] == actor, expected, target, decision_reason, evidence_reference
+                )
+                cursor.execute(
+                    _UPDATE_PRIVACY_REQUEST_SQL,
+                    (target, _now() if final else None, reference, decision_reason if final else None, request_id),
+                )
+                return PrivacyRequestRecord(*cursor.fetchone())
 
     def subject_export(self, principal: UserPrincipal) -> Mapping[str, Any]:
         subject = _principal_token(self._pseudonymizer, principal)
@@ -1729,6 +1876,22 @@ class PostgresRepository:
                 self._tenant(cursor, principal.tenant_id)
                 cursor.execute(_SELECT_LEGAL_HOLDS_SQL)
                 return tuple(_legal_hold(row) for row in cursor.fetchall())
+
+
+_SELECT_PRIVACY_QUEUE_SQL = """SELECT request_id::text, tenant_id, request_type, status, requested_at, due_at, completed_at,
+    evidence_reference, decision_reason FROM privacy_requests ORDER BY requested_at DESC LIMIT 500"""
+# FOR UPDATE needs only the column UPDATE grant; the owner's pseudonym is read to block self-handling.
+_LOCK_PRIVACY_REQUEST_SQL = """SELECT request_id::text, tenant_id, request_type, status, requested_at, due_at, completed_at,
+    evidence_reference, decision_reason, subject_token FROM privacy_requests WHERE request_id=%s FOR UPDATE"""
+_UPDATE_PRIVACY_REQUEST_SQL = """UPDATE privacy_requests
+    SET status=%s, completed_at=%s, evidence_reference=%s, decision_reason=%s WHERE request_id=%s
+    RETURNING request_id::text, tenant_id, request_type, status, requested_at, due_at, completed_at,
+    evidence_reference, decision_reason"""
+
+
+def _privacy_queue_order(record: PrivacyRequestRecord) -> tuple[bool, datetime]:
+    # Open requests first, the closest deadline on top; closed ones follow by their deadline.
+    return (record.status not in PRIVACY_OPEN_STATUSES, record.due_at)
 
 
 _INSERT_LEGAL_HOLD_SQL = """INSERT INTO legal_holds
