@@ -44,6 +44,7 @@ HydraulikDoc ist die evidenzorientierte Arbeitsoberfläche zwischen technischer 
 | Implementiert | SAP-PM-Referenzen je Asset, CSV-Stammdatenimport und dateibasierte Übergabe von Instandhaltungsmeldungen | `hydraulikdoc/interop.py`; Feldmapping ist kundenseitig zu validieren |
 | Implementiert in IaC | Auswahl deutscher Azure-Regionen, private PaaS-Endpunkte, WAF, Zonenredundanz | `infra/azure/main.bicep`; reale Konfiguration ist Deployment-Evidenz |
 | Implementiert | Inventar aller personenbeziehbaren Felder als technische Anlage zur Betriebsvereinbarung, per CI gegen das Schema geprüft; vollständige Selbstauskunft | `hydraulikdoc/personal_data.py`, `docs/compliance/works-council-annex.md` |
+| Implementiert | Verifikation der Audit-Hashkette: nächtlich je Mandant mit Ankern außerhalb der Datenbank, auf Abruf für Admins in der System-Seite | `hydraulikdoc/repository.py`, `ops/scripts/verify-audit-chain.py` |
 | Externes Gate | AVV/DPA, Transferbewertung, DSFA, Rechtsgrundlagen, Betriebsrat | kundeninstanzbezogene Evidenz außerhalb des Codes |
 | Externes Gate | ISO-/C5-Testat, Pentest, Restore-Nachweis, SLA | nur nach abgeschlossenem Prüfverfahren kommunizieren |
 

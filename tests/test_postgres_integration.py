@@ -265,6 +265,50 @@ class PostgresSecurityIntegrationTests(unittest.TestCase):
         self.assertEqual([item["new_status"] for item in export["incident_steps"]], ["new", "acknowledged"])
         self.assertEqual(export["reviews_given"], [])
 
+    def test_audit_chain_verification_detects_tampering(self) -> None:
+        from compliance.audit import AuditOutcome
+        from hydraulikdoc.auth import ROLE_PERMISSIONS, UserPrincipal
+        from hydraulikdoc.config import AppSettings
+        from hydraulikdoc.repository import PostgresRepository
+
+        settings = AppSettings.from_environment(
+            {
+                "APP_ENV": "test",
+                "PERSISTENCE_BACKEND": "postgres",
+                "AUDIT_HMAC_KEY": "integration-audit-key-" + "x" * 16,
+                "DATABASE_URL": self.app_dsn,
+            }
+        )
+        repository = PostgresRepository(settings)
+        admin = UserPrincipal(
+            "auditor", f"{self.tenant_a}-chain", "Auditor", "admin", permissions=ROLE_PERMISSIONS["admin"]
+        )
+        for index in range(3):
+            repository.emit_audit(
+                admin, action="integration.chain.event", outcome=AuditOutcome.SUCCESS, metadata={"source_count": index}
+            )
+        previous_tz = os.environ.get("PGTZ")
+        # Timestamps come back in the session time zone; verification must still hash them in UTC.
+        os.environ["PGTZ"] = "Europe/Berlin"
+        try:
+            report = repository.verify_audit_chain(admin)
+            self.assertEqual((report.intact, report.event_count), (True, 3))
+            with self.psycopg.connect(self.admin_dsn) as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        """UPDATE audit_events SET metadata = '{"source_count": 99}'::jsonb
+                        WHERE sequence_id = (SELECT min(sequence_id) + 1 FROM audit_events WHERE tenant_id = %s)""",
+                        (admin.tenant_id,),
+                    )
+            broken = repository.verify_audit_chain(admin)
+        finally:
+            if previous_tz is None:
+                os.environ.pop("PGTZ", None)
+            else:
+                os.environ["PGTZ"] = previous_tz
+        self.assertEqual((broken.intact, broken.reason), (False, "HASH_MISMATCH"))
+        self.assertEqual(broken.broken_sequence, report.first_sequence + 1)
+
 
 if __name__ == "__main__":
     unittest.main()

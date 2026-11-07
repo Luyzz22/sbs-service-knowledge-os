@@ -26,7 +26,7 @@ Die Grundsätze Zweckbindung, Datenminimierung, Speicherbegrenzung, Integrität 
 | Auftragsverarbeitung | Externes Gate | Providerliste technisch Azure-only | AVV/DPA nach Art. 28, Unterauftragsverarbeiter, Weisungen |
 | Drittlandtransfer | Externes Gate | regionale Standard-Deployments, private Endpunkte, Datenminimierung | TIA, SCC/DPF-Bewertung, FISA/EO/CLOUD-Act, Abuse Monitoring |
 | DSFA | Bedingt/extern | Risikogates und Datenfluss dokumentiert | Art.-35-Schwellenprüfung, DSB-Freigabe, ggf. DSFA |
-| TOM/Nachweis | Implementiert + extern | Audit-Hashkette, SBOM, CI-Scans, WAF, Runbooks | Penetrationstest, Berechtigungstest, Restore-/Incident-Übung |
+| TOM/Nachweis | Implementiert + extern | Audit-Hashkette mit nächtlicher Verifikation je Mandant und Ankern außerhalb der Datenbank, SBOM, CI-Scans, WAF, Runbooks | Penetrationstest, Berechtigungstest, Restore-/Incident-Übung |
 
 Ein deutscher Azure-Standort beseitigt ein Drittland-/Behördenzugriffsrisiko nicht automatisch, weil Anbieterstruktur, Remote Support, Telemetrie und rechtliche Zugriffsmöglichkeiten separat bewertet werden müssen.
 
@@ -44,7 +44,7 @@ HydraulikDoc ist nach dokumentiertem Intended Purpose ein assistives System für
 | Art. 9 Risikomanagement | Unterstützt | Zweckklassifizierung, gesperrte Zwecke, heightened Safety Review, Incidentworkflow | instanzbezogene Risikoakte und Owner |
 | Art. 10 Daten-Governance | Unterstützt | Dokumentvalidierung, Tenantgrenze, Provenienz | Datenqualität und Repräsentativität freigeben |
 | Art. 11 Technische Dokumentation | Unterstützt | Architektur, System Card, Modell-/Prompt-/Regionsevidenz | Betreiberakte vervollständigen |
-| Art. 12 Logging | Implementiert | automatische pseudonymisierte Ereignisse, HMAC-authentisierte Hashkette, Retention | SIEM-Aufbewahrung genehmigen |
+| Art. 12 Logging | Implementiert | automatische pseudonymisierte Ereignisse, HMAC-authentisierte Hashkette mit Verifikation (`ops/scripts/verify-audit-chain.py`, System-Seite für Admins), Retention | SIEM-Aufbewahrung der nächtlichen Anker genehmigen und Alarm bei `failure_count > 0` einrichten |
 | Art. 13 Transparenz | Implementiert | Quellen, Einschränkungen, Provider, Deployment, Snapshot, Promptversion, Reviewstatus | instanzbezogene Nutzerinformation |
 | Art. 14 Human Oversight | Implementiert | jeder Output Draft; Reviewrollen; nur akzeptierte Exporte; autonome Steuerung blockiert | Prüferqualifikation und Arbeitsanweisung |
 | Art. 15 Accuracy/Robustness/Cybersecurity | Technisch unterstützt + extern | Hybrid Retrieval, Temperature 0, Zitatgate, Prompt-Injection-Regeln, WAF, Scanpipeline, Eval-Harness und verpflichtende Eval-Evidence-ID | repräsentatives Goldset, Fachreview, Red Team und freigegebene Schwellen |
