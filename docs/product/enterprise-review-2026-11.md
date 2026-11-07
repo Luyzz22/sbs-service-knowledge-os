@@ -35,6 +35,7 @@ Priorität: **P1** blockiert Pilot oder Security-Freigabe, **P2** senkt Akzeptan
 | U5 | Bedienung | Kein formaler Barrierefreiheitsnachweis (WCAG 2.2 AA / BITV 2.0) | P2 | technischer Teil umgesetzt (Kontrast-, Struktur- und Sprachprüfung); manueller Prüfbericht bleibt externes Gate |
 | U6 | Bedienung | Nur Deutsch; internationale Werke benötigen DE/EN | P3 | umgesetzt: DE/EN mit Browser-Erkennung, zweisprachigen Hinweisen und Vollständigkeitstest |
 | D6 | Werk | Keine Reaktions- und Behebungszeiten, keine Sicht auf Wiederholungsfehler je Anlage; Werksleitung kann den Nutzen des Workflows nicht belegen | P2 | umgesetzt: Kennzahlen je Anlage (MTTA, MTTR, Wiedereröffnung, Störungsabstand, Wiederholungsfehler) ohne Personenbezug, CSV-Export |
+| D8 | Werk/Sicherheit | Die Audit-Hashkette wurde geschrieben, aber nie geprüft; ein Manipulationsschutz ohne Verifikation trägt im ISO-27001-/TISAX-Audit nicht | P1 | umgesetzt: nächtliche Verifikation je Mandant im Lifecycle-Job mit Ankern in Log Analytics, Prüfung auf Abruf für Admins, Runbook für Kettenbrüche |
 | S4 | ERP | Kein Live-Connector (S/4HANA OData, SAP BTP Integration Suite) | P3 | Roadmap, benötigt Bedrohungsmodell und Datenvertrag je Kunde |
 | S5 | ERP | Keine automatische Benutzer-/Gruppenprovisionierung (SCIM aus Entra ID) | P3 | Roadmap |
 | D5 | Werk/Sicherheit | TISAX-/ISO-27001-Evidenzpaket fehlt | P2 | externes Gate |

@@ -58,6 +58,7 @@ from .maintenance_kpis import (
 )
 from .personal_data import EXCLUDED_EVALUATIONS, PERSONAL_DATA_FIELDS
 from .repository import (
+    AUDIT_VERIFY_PERMISSION,
     EIGHT_D_SEVERITIES,
     INCIDENT_ANALYSIS_FIELDS,
     INCIDENT_ANALYSIS_MAX_CHARS,
@@ -66,6 +67,7 @@ from .repository import (
     INCIDENT_STATUSES,
     INCIDENT_TRANSITIONS,
     AssetRecord,
+    AuditChainReport,
     DocumentRecord,
     EnterpriseRepository,
     IncidentRecord,
@@ -1977,7 +1979,7 @@ def _render_personal_data_inventory() -> None:
         st.markdown("\n".join(f"- {tr(item)}" for item in EXCLUDED_EVALUATIONS))
 
 
-def _system(principal: UserPrincipal, settings: AppSettings) -> None:
+def _system(principal: UserPrincipal, repository: EnterpriseRepository, settings: AppSettings) -> None:
     st.title(tr("System Evidence"))
     st.caption(tr("Keine Secrets und keine Rohinhalte werden in dieser Ansicht ausgegeben."))
     policy = RetentionPolicy.from_environment()
@@ -2004,6 +2006,62 @@ def _system(principal: UserPrincipal, settings: AppSettings) -> None:
             "principal_role": principal.role,
         }
     )
+    if principal.can(AUDIT_VERIFY_PERMISSION):
+        _render_audit_chain_check(principal, repository)
+
+
+def _render_audit_chain_check(principal: UserPrincipal, repository: EnterpriseRepository) -> None:
+    st.subheader(tr("Auditkette"))
+    st.caption(
+        tr(
+            "Berechnet jedes Auditereignis des Mandanten neu und prüft die Verkettung. Eine geänderte, entfernte "
+            "oder umsortierte Eintragung fällt auf. Das Löschen der jüngsten Einträge erkennt nur der nächtliche "
+            "Abgleich mit den außerhalb der Datenbank gespeicherten Ankern."
+        )
+    )
+    if st.button(tr("Auditkette prüfen"), key="audit-chain-verify"):
+        report = repository.verify_audit_chain(principal)
+        repository.emit_audit(
+            principal,
+            action="audit.chain.verified",
+            outcome=AuditOutcome.SUCCESS if report.intact else AuditOutcome.FAILURE,
+            metadata={
+                "source_count": report.event_count,
+                "failure_count": 0 if report.intact else 1,
+                "reason_code": report.reason,
+            },
+        )
+        st.session_state.audit_chain_report = report
+    shown: AuditChainReport | None = st.session_state.get("audit_chain_report")
+    if shown is None:
+        return
+    if shown.intact:
+        st.success(
+            tr_plural(shown.event_count, "Kette intakt: {n} Ereignis geprüft.", "Kette intakt: {n} Ereignisse geprüft.")
+        )
+    else:
+        st.error(
+            tr(
+                "Kette unterbrochen bei Ereignis {sequence} ({reason}). Sicherheitsvorfall nach Runbook melden.",
+                sequence=shown.broken_sequence if shown.broken_sequence is not None else "–",
+                reason=shown.reason,
+            )
+        )
+    if shown.head_hash:
+        st.caption(
+            tr(
+                "Letztes Ereignis {sequence}, Hash {hash}. Diesen Anker außerhalb der Datenbank festhalten.",
+                sequence=shown.head_sequence,
+                hash=shown.head_hash,
+            )
+        )
+    if shown.starts_after_purge:
+        st.caption(
+            tr(
+                "Die Kette beginnt bei Ereignis {sequence}; ältere Einträge wurden nach Löschfrist entfernt.",
+                sequence=shown.first_sequence,
+            )
+        )
 
 
 def run() -> None:
@@ -2050,7 +2108,7 @@ def run() -> None:
         elif selected == "Governance":
             _governance(principal, repository, settings)
         else:
-            _system(principal, settings)
+            _system(principal, repository, settings)
     except AuthenticationError:
         st.error(tr("Diese Funktion ist für Ihre App-Rolle nicht freigegeben."))
     except Exception as error:

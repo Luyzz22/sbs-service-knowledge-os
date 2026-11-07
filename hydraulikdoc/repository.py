@@ -6,7 +6,7 @@ import hashlib
 import hmac
 import json
 import uuid
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
@@ -270,6 +270,10 @@ class EnterpriseRepository(Protocol):
         metadata: Mapping[str, Any] | None = None,
     ) -> AuditEvent: ...
 
+    def verify_audit_chain(
+        self, principal: UserPrincipal, anchor: tuple[int, str] | None = None
+    ) -> AuditChainReport: ...
+
 
 def _now() -> datetime:
     return datetime.now(UTC)
@@ -302,6 +306,87 @@ def _audit_lock_key(tenant_id: str) -> int:
     """Stable signed 64-bit advisory lock key for one tenant's audit chain."""
     digest = hashlib.sha256(b"hydraulikdoc-audit-chain:" + tenant_id.encode("utf-8")).digest()
     return int.from_bytes(digest[:8], "big", signed=True)
+
+
+AUDIT_VERIFY_PERMISSION = "audit:verify"
+
+
+@dataclass(frozen=True)
+class AuditChainReport:
+    """Result of recomputing one tenant's audit hash chain."""
+
+    event_count: int
+    intact: bool
+    first_sequence: int | None
+    head_sequence: int | None
+    head_hash: str | None
+    # The oldest kept event points to a predecessor that retention has purged.
+    starts_after_purge: bool
+    broken_sequence: int | None = None
+    reason: str | None = None
+    # Comparison with a head recorded outside the database by an earlier run: MATCH, PURGED or a failure.
+    anchor_status: str | None = None
+
+
+def verify_audit_chain_rows(
+    key: bytes,
+    rows: Iterable[tuple[int, str | None, str, AuditEvent]],
+    anchor: tuple[int, str] | None = None,
+) -> AuditChainReport:
+    """Recompute every event hash and link in sequence order.
+
+    A changed event fails HASH_MISMATCH, a removed or reordered event fails LINK_MISMATCH. Deleting the
+    newest events leaves a valid but shorter chain; only an anchor kept outside the database (an earlier
+    run's head) reveals that, as ANCHOR_MISSING or ANCHOR_MISMATCH.
+    """
+    count = 0
+    first: int | None = None
+    head: tuple[int, str] | None = None
+    starts_after_purge = False
+    anchored_hash: str | None = None
+    for sequence, previous, stored, event in rows:
+        if head is None:
+            first = sequence
+            starts_after_purge = previous is not None
+        reason = None
+        if head is not None and previous != head[1]:
+            reason = "LINK_MISMATCH"
+        elif not hmac.compare_digest(_event_hash(key, previous, event), stored.strip()):
+            reason = "HASH_MISMATCH"
+        if reason:
+            return AuditChainReport(
+                count,
+                False,
+                first,
+                head[0] if head else None,
+                head[1] if head else None,
+                starts_after_purge,
+                sequence,
+                reason,
+            )
+        count += 1
+        head = (sequence, stored.strip())
+        if anchor and sequence == anchor[0]:
+            anchored_hash = head[1]
+    anchor_status = None
+    if anchor:
+        if anchored_hash is not None:
+            anchor_status = "MATCH" if hmac.compare_digest(anchored_hash, anchor[1]) else "ANCHOR_MISMATCH"
+        elif first is not None and anchor[0] < first:
+            anchor_status = "PURGED"
+        else:
+            anchor_status = "ANCHOR_MISSING"
+    intact = anchor_status not in {"ANCHOR_MISMATCH", "ANCHOR_MISSING"}
+    return AuditChainReport(
+        count,
+        intact,
+        first,
+        head[0] if head else None,
+        head[1] if head else None,
+        starts_after_purge,
+        reason=None if intact else anchor_status,
+        anchor_status=anchor_status,
+    )
 
 
 def _event_hash(key: bytes, previous_hash: str | None, event: AuditEvent) -> str:
@@ -748,6 +833,17 @@ class InMemoryRepository:
             previous = self._audit[-1][1] if self._audit else None
             self._audit.append((event, _event_hash(self._audit_chain_key, previous, event)))
         return event
+
+    def verify_audit_chain(self, principal: UserPrincipal, anchor: tuple[int, str] | None = None) -> AuditChainReport:
+        if not principal.can(AUDIT_VERIFY_PERMISSION):
+            raise PermissionError("AUDIT_VERIFY_REQUIRED")
+        # The development backend keeps one chain for all tenants; PostgreSQL chains each tenant separately.
+        with self._lock:
+            rows = [
+                (index, self._audit[index - 2][1] if index > 1 else None, digest, event)
+                for index, (event, digest) in enumerate(self._audit, start=1)
+            ]
+        return verify_audit_chain_rows(self._audit_chain_key, rows, anchor)
 
 
 # Column order matches IncidentRecord. Statements are complete literals so no SQL is assembled at runtime.
@@ -1460,6 +1556,51 @@ class PostgresRepository:
                     ),
                 )
         return event
+
+    def verify_audit_chain(self, principal: UserPrincipal, anchor: tuple[int, str] | None = None) -> AuditChainReport:
+        if not principal.can(AUDIT_VERIFY_PERMISSION):
+            raise PermissionError("AUDIT_VERIFY_REQUIRED")
+        with self._connect() as connection:
+            with connection.cursor() as cursor:
+                self._tenant(cursor, principal.tenant_id)
+            # A server-side cursor streams the chain, so a long audit history never sits in memory at once.
+            with connection.cursor(name="audit_chain_verification") as stream:
+                stream.execute(_SELECT_AUDIT_CHAIN_SQL)
+                return verify_audit_chain_rows(self._audit_chain_key, (_audit_chain_row(row) for row in stream), anchor)
+
+
+_SELECT_AUDIT_CHAIN_SQL = """SELECT sequence_id, previous_hash, event_hash, event_id::text, action, outcome, actor_token,
+    resource_type, resource_token, metadata, occurred_at, retention_until FROM audit_events ORDER BY sequence_id"""
+
+
+def _audit_chain_row(row: tuple[Any, ...]) -> tuple[int, str | None, str, AuditEvent]:
+    """Rebuild the hashed event from its row; timestamps return in the session time zone and are hashed in UTC."""
+    (
+        sequence,
+        previous,
+        stored,
+        event_id,
+        action,
+        outcome,
+        actor,
+        resource_type,
+        resource,
+        metadata,
+        occurred,
+        retention,
+    ) = row
+    event = AuditEvent(
+        action=action,
+        outcome=AuditOutcome(outcome),
+        actor_token=actor,
+        resource_type=resource_type,
+        resource_token=resource,
+        expires_at=retention.astimezone(UTC),
+        metadata=metadata or {},
+        event_id=event_id,
+        occurred_at=occurred.astimezone(UTC),
+    )
+    return sequence, previous.strip() if previous else None, stored, event
 
 
 @lru_cache(maxsize=2)

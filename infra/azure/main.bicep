@@ -1263,9 +1263,11 @@ resource retentionLifecycleJob 'Microsoft.App/jobs@2024-03-01' = if (deployAppli
         {
           name: 'retention-lifecycle'
           image: containerImage
+          // Verify the audit chains right after purging; the job fails when either step fails.
           command: [
-            'python'
-            'ops/scripts/enforce-retention.py'
+            'sh'
+            '-c'
+            'python ops/scripts/enforce-retention.py; retention=$?; python ops/scripts/verify-audit-chain.py; verification=$?; exit $((retention | verification))'
           ]
           resources: {
             cpu: json('1.0')
