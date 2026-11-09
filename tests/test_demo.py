@@ -51,7 +51,7 @@ class DemoTenantTests(unittest.TestCase):
 
     def test_seed_covers_every_workflow_state_with_labelled_data(self) -> None:
         result = seed_demo_tenant(self.supervisor, self.repository)
-        self.assertEqual((result.assets, result.documents, result.incidents), (4, 2, 5))
+        self.assertEqual((result.assets, result.documents, result.incidents), (4, 3, 5))
         incidents = self.repository.list_incidents(self.supervisor)
         self.assertEqual(
             sorted(item.status for item in incidents), ["closed", "closed", "in_progress", "new", "resolved"]

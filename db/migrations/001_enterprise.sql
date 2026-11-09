@@ -22,6 +22,34 @@ ALTER TABLE documents DROP CONSTRAINT IF EXISTS documents_tenant_id_sha256_key;
 CREATE UNIQUE INDEX IF NOT EXISTS documents_active_digest_idx
     ON documents(tenant_id, sha256) WHERE deleted_at IS NULL;
 
+-- Document control (ISO 9001 7.5.3): only released documents are evidence for answers. Rows that
+-- existed before this migration stay usable and carry no release date, which marks them for a
+-- formal release; every later upload starts as a draft.
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS release_status text NOT NULL DEFAULT 'released'
+    CHECK (release_status IN ('draft', 'released', 'withdrawn'));
+ALTER TABLE documents ALTER COLUMN release_status SET DEFAULT 'draft';
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS revision text NOT NULL DEFAULT '';
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS document_number text NOT NULL DEFAULT '';
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS released_at timestamptz;
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS review_due_at timestamptz;
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS withdrawn_at timestamptz;
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS withdrawal_reason text NOT NULL DEFAULT '';
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS supersedes_document_id uuid
+    REFERENCES documents(document_id) ON DELETE SET NULL;
+
+-- Append-only release history. The acting person is recorded here only, not on the document; rows
+-- follow the document and are removed by purge_expired_tenant_data before it.
+CREATE TABLE IF NOT EXISTS document_events (
+    event_id uuid PRIMARY KEY,
+    tenant_id text NOT NULL REFERENCES tenants(tenant_id),
+    document_id uuid NOT NULL REFERENCES documents(document_id),
+    event_type text NOT NULL CHECK (event_type IN ('uploaded', 'released', 'withdrawn', 'review_confirmed')),
+    reason_code text,
+    actor_role text NOT NULL,
+    actor_token text NOT NULL,
+    occurred_at timestamptz NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS assets (
     asset_id text NOT NULL,
     tenant_id text NOT NULL REFERENCES tenants(tenant_id),
@@ -183,6 +211,7 @@ CREATE TABLE IF NOT EXISTS audit_events (
 );
 
 CREATE INDEX IF NOT EXISTS documents_tenant_status_idx ON documents(tenant_id, status);
+CREATE INDEX IF NOT EXISTS document_events_document_idx ON document_events(tenant_id, document_id, occurred_at);
 CREATE INDEX IF NOT EXISTS assets_tenant_site_idx ON assets(tenant_id, site, name);
 CREATE INDEX IF NOT EXISTS analysis_runs_tenant_generated_idx ON analysis_runs(tenant_id, generated_at DESC);
 CREATE INDEX IF NOT EXISTS incidents_tenant_status_idx ON incidents(tenant_id, status, created_at DESC);
@@ -205,6 +234,8 @@ ALTER TABLE tenants ENABLE ROW LEVEL SECURITY;
 ALTER TABLE tenants FORCE ROW LEVEL SECURITY;
 ALTER TABLE documents ENABLE ROW LEVEL SECURITY;
 ALTER TABLE documents FORCE ROW LEVEL SECURITY;
+ALTER TABLE document_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE document_events FORCE ROW LEVEL SECURITY;
 ALTER TABLE assets ENABLE ROW LEVEL SECURITY;
 ALTER TABLE assets FORCE ROW LEVEL SECURITY;
 ALTER TABLE analysis_runs ENABLE ROW LEVEL SECURITY;
@@ -228,6 +259,8 @@ DROP POLICY IF EXISTS tenant_tenants ON tenants;
 CREATE POLICY tenant_tenants ON tenants USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 DROP POLICY IF EXISTS tenant_documents ON documents;
 CREATE POLICY tenant_documents ON documents USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+DROP POLICY IF EXISTS tenant_document_events ON document_events;
+CREATE POLICY tenant_document_events ON document_events USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 DROP POLICY IF EXISTS tenant_assets ON assets;
 CREATE POLICY tenant_assets ON assets USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 DROP POLICY IF EXISTS tenant_analysis_runs ON analysis_runs;
@@ -249,6 +282,7 @@ CREATE POLICY tenant_legal_holds ON legal_holds USING (tenant_id = current_setti
 
 REVOKE UPDATE, DELETE ON audit_events FROM PUBLIC;
 REVOKE UPDATE, DELETE ON incident_events FROM PUBLIC;
+REVOKE UPDATE, DELETE ON document_events FROM PUBLIC;
 REVOKE UPDATE, DELETE ON legal_holds FROM PUBLIC;
 
 CREATE OR REPLACE FUNCTION legal_hold_active(p_tenant_id text, p_record_class text)
@@ -276,6 +310,7 @@ DECLARE
     incidents_deleted integer := 0;
     notices_deleted integer := 0;
     requests_deleted integer := 0;
+    document_events_deleted integer := 0;
     documents_deleted integer := 0;
     audits_deleted integer := 0;
     holds_deleted integer := 0;
@@ -327,6 +362,15 @@ BEGIN
     END IF;
 
     IF NOT hold_document THEN
+    DELETE FROM public.document_events AS event
+    USING public.documents AS document
+    WHERE event.document_id = document.document_id
+      AND event.tenant_id = p_tenant_id
+      AND document.tenant_id = p_tenant_id
+      AND document.deleted_at IS NOT NULL
+      AND document.retention_until <= now();
+    GET DIAGNOSTICS document_events_deleted = ROW_COUNT;
+
     DELETE FROM public.documents
     WHERE tenant_id = p_tenant_id AND deleted_at IS NOT NULL AND retention_until <= now();
     GET DIAGNOSTICS documents_deleted = ROW_COUNT;
@@ -350,6 +394,7 @@ BEGIN
         'incidents', incidents_deleted,
         'notice_acceptances', notices_deleted,
         'privacy_requests', requests_deleted,
+        'document_events', document_events_deleted,
         'documents', documents_deleted,
         'audit_events', audits_deleted,
         'legal_holds', holds_deleted

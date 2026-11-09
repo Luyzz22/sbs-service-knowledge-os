@@ -23,7 +23,7 @@ Der Container Apps Job `*-retention-lifecycle` läuft um 02:00 UTC:
 2. findet abgelaufene Dokumente per RLS-Kontext;
 3. löscht alle Search-Chunks in begrenzten Batches;
 4. löscht den privaten Blob;
-5. markiert und entfernt Dokumentmetadaten;
+5. markiert und entfernt Dokumentmetadaten einschließlich des Verlaufs der Dokumentenlenkung (`document_events`); der Verweis einer Nachfolgerevision auf das gelöschte Dokument wird geleert;
 6. ruft eine `SECURITY DEFINER`-Funktion auf, die ausschließlich abgelaufene Datensätze dieses Tenants löscht;
 7. schreibt ein pseudonymisiertes Erfolg-/Fehlerereignis.
 

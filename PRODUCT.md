@@ -17,9 +17,9 @@ HydraulikDoc ist die evidenzorientierte Arbeitsoberfläche zwischen technischer 
 ## Kernabläufe
 
 1. Ein berechtigter Nutzer registriert ein Asset mit Standort und Kritikalität.
-2. Ein technisches PDF wird validiert, privat gespeichert, auf Malware geprüft, strukturiert extrahiert und tenant-isoliert indexiert.
+2. Ein technisches PDF wird validiert, privat gespeichert, auf Malware geprüft, strukturiert extrahiert und tenant-isoliert indexiert. Es bleibt ein Entwurf, bis eine zweite Person es freigibt.
 3. Eine Frage wird klassifiziert. Gesperrte Zwecke werden vor jedem Modellaufruf abgewiesen.
-4. Hybrid Retrieval liefert tenant-gefilterte Evidenz. Das Modell darf ausschließlich diese Evidenz verwenden.
+4. Hybrid Retrieval liefert tenant-gefilterte Evidenz ausschließlich aus freigegebenen Revisionen. Das Modell darf ausschließlich diese Evidenz verwenden.
 5. Ein Output ohne gültige `[S1]`-Quellenmarke wird verworfen und nicht persistiert.
 6. Der Entwurf wird mit Modell-, Deployment-, Region-, Prompt-, Zeit-, Nutzer- und Quellenprovenienz gespeichert.
 7. Ein berechtigter Mensch akzeptiert, verwirft oder eskaliert. Nur akzeptierte Ergebnisse sind exportierbar.
@@ -32,6 +32,7 @@ HydraulikDoc ist die evidenzorientierte Arbeitsoberfläche zwischen technischer 
 | Implementiert | Entra-App-Rollen, Tenant-Filter und PostgreSQL FORCE RLS mit getrennter Lifecycle-Rolle | `hydraulikdoc/auth.py`, `db/migrations/001_enterprise.sql` |
 | Implementiert | Azure-only RAG mit Managed Identity | `hydraulikdoc/azure_ai.py`, `infra/azure/main.bicep` |
 | Implementiert | Uploadvalidierung, Malware-Gate und private Speicherung | `hydraulikdoc/security.py`, `hydraulikdoc/azure_ai.py` |
+| Implementiert | Dokumentenlenkung: Entwurf, Freigabe durch eine zweite Person, Revisionen, Rückzug, Überprüfungstermin und Verlauf je Dokument | `hydraulikdoc/repository.py`, `document_events`, `tests/test_document_control.py` |
 | Implementiert | KI-Zitatvalidierung und Prompt-Injection-Abwehr | `hydraulikdoc/governance.py`, `hydraulikdoc/azure_ai.py` |
 | Implementiert | Human Review und rollenbegrenzter Export | `hydraulikdoc/ui.py`, `hydraulikdoc/repository.py` |
 | Implementiert | Deterministische Condition-/Fluid-Vorbewertung | `hydraulikdoc/condition_monitoring.py`, `fluid_advisor.py` |

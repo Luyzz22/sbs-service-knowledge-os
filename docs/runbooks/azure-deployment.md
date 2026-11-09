@@ -76,10 +76,19 @@ Die Pipeline gibt die öffentliche Application-Gateway-IP aus. DNS A/AAAA-Konfig
 - Health, Login und Rollenzuordnung je App-Rolle testen;
 - zwei Testtenants anlegen und Cross-Tenant-Negativtests ausführen;
 - EICAR in einem isolierten Testtenant verwenden, um das Malware-Gate zu prüfen;
-- ein freigegebenes Testhandbuch indexieren, Quellen-/Zitatgate und Reviewexport prüfen;
+- je Mandant mindestens zwei Konten zuweisen, von denen eines `document:release` besitzt (Supervisor oder Admin); ohne zweite Person bleibt jeder Upload ein Entwurf;
+- ein freigegebenes Testhandbuch hochladen, als zweite Person freigeben, Quellen-/Zitatgate und Reviewexport prüfen; vor der Freigabe darf dieselbe Frage keine Quelle liefern;
 - Dokument löschen und Search/Blob/PostgreSQL-Propagation nachweisen;
 - WAF-, Defender-, Entra- und Container-Logs in das SIEM aufnehmen;
 - Backup-/Restore-Drill durchführen.
+
+### Update einer bestehenden Instanz auf die Dokumentenlenkung
+
+Die Migration läuft im Adminjob vor dem Start der neuen Revision; die Anwendung verweigert sonst den Start (`check_schema`). Vorhandene Dokumente behalten ihre Wirkung: Sie gelten als freigegeben, tragen aber keinen Freigabezeitpunkt und erscheinen im Leitstand als „ohne dokumentierte Freigabe“. Nach dem Update:
+
+1. Betreiber informieren, dass neue Uploads erst nach Freigabe durch eine zweite Person zitiert werden.
+2. Altbestand je Mandant durchgehen und formal freigeben oder zurückziehen; dabei Revision und Überprüfungstermin setzen.
+3. Rollback beachten: Ein Image vor der Dokumentenlenkung kennt den Freigabestatus nicht und würde Entwürfe und zurückgezogene Revisionen wieder zitieren. Ein solcher Rollback braucht eine dokumentierte Entscheidung und bis zum erneuten Update eine Sperre der KI-Funktion oder die vorherige Löschung dieser Dokumente.
 
 ## 7. Release-Evidenz
 

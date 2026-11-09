@@ -9,6 +9,7 @@ Der Produktionspfad ist bewusst auf Microsoft Azure begrenzt. Google Gemini, Lla
 - HydraulikDoc unterstützt Fachkräfte; es steuert keine Maschine.
 - Autonome Maschinensteuerung und Beschäftigtenüberwachung sind technisch gesperrt.
 - Welche Daten über Beschäftigte gespeichert werden, steht in der [technischen Anlage zur Betriebsvereinbarung](docs/compliance/works-council-annex.md). Sie wird aus dem Code erzeugt, und CI schlägt fehl, sobald eine neue Personen-Spalte undokumentiert ins Schema kommt.
+- Ein hochgeladenes Dokument wird erst zitiert, nachdem eine zweite Person es freigegeben hat; zurückgezogene Revisionen werden nicht mehr zitiert.
 - Jeder KI-Entwurf bleibt `draft`, bis eine berechtigte Person ihn akzeptiert, ablehnt oder einen Experten anfordert.
 - Nur akzeptierte Ergebnisse können durch Rollen mit `analysis:export` als Nachweis exportiert werden.
 - Aussagen wie „DSGVO-konform“, „zertifiziert“ oder „kein Drittlandrisiko“ werden nicht aus Code abgeleitet. Verträge, DSFA/TIA, Betriebsrat, Rechtsgrundlage, Löschkonzept und Betriebsnachweise bleiben Release-Gates.
@@ -74,6 +75,18 @@ Die Oberfläche ist auf Deutsch und Englisch verfügbar. Beim ersten Aufruf folg
 
 Neue Oberflächentexte werden auf Deutsch mit `tr()` oder `msg()` geschrieben und in `hydraulikdoc/translations.py` übersetzt. `tests/test_i18n.py` schlägt fehl, wenn eine Übersetzung fehlt, Platzhalter abweichen oder Einträge verwaist sind.
 
+### Dokumentenlenkung
+
+Die Wissensbasis führt Dokumente als gelenkte Dokumente, angelehnt an ISO 9001 Abschnitt 7.5.3:
+
+- **Entwurf:** Jeder Upload ist zunächst ein Entwurf mit Revision und optionaler Dokumentnummer. Er wird geprüft und indexiert, aber nicht zitiert.
+- **Freigabe:** Supervisor oder Admin geben frei (`document:release`), jedoch nie den eigenen Upload. Ein Werk braucht deshalb mindestens zwei Personen, von denen eine freigeben darf. Mit der Freigabe wird ein Überprüfungstermin innerhalb eines Jahres gesetzt.
+- **Neue Revision:** Beim Upload die Vorgängerin auswählen. Sie bleibt gültig, bis die neue Revision freigegeben ist, und wird dann automatisch zurückgezogen.
+- **Rückzug:** Mit Grund, sofort wirksam und endgültig. Gespeicherte Antworten, die das Dokument zitieren, tragen danach einen Warnhinweis.
+- **Überprüfung:** Fällige Termine stehen im Leitstand. Ein überfälliger Termin sperrt das Dokument nicht; die Bestätigung oder der Rückzug ist eine bewusste Entscheidung.
+
+Der Verlauf je Dokument zeigt Rolle und Zeitpunkt, keine Namen. Beim Update einer bestehenden Instanz gelten vorhandene Dokumente weiter als freigegeben, sind aber als „ohne dokumentierte Freigabe“ markiert, bis eine zweite Person sie formal freigibt. Die Regeln setzt das Repository durch; die Datenbank ist maßgeblich, der Suchindex wird nur zusätzlich gefiltert.
+
 ### Demo-Mandant für Vorführungen
 
 Für Vertriebs- und Schulungsdemos ohne Azure und ohne Kundendaten zusätzlich `AI_BACKEND=demo` setzen:
@@ -82,13 +95,14 @@ Für Vertriebs- und Schulungsdemos ohne Azure und ohne Kundendaten zusätzlich `
 AI_BACKEND=demo streamlit run app.py
 ```
 
-Als Supervisor oder Admin anmelden und im Leitstand **Demodaten laden** wählen. Geladen werden vier fiktive Anlagen mit SAP-Referenzen, zwei synthetische Handbücher und fünf Incidents der letzten vier Wochen in allen Workflow-Zuständen („neu und kritisch“, „8D in Bearbeitung“, „wartet auf Abnahme“, „abgeschlossen“). Presse 05 überhitzt drei Wochen nach einer Kühlerreinigung erneut (Wiederholungsfehler), eine Leckage wurde einmal wiedereröffnet; so zeigen die Kennzahlen realistische Werte. Mit `PERSISTENCE_BACKEND=postgres` entsteht derselbe Datenbestand, aber zum Ladezeitpunkt, weil Zeitstempel dort nicht rückdatierbar sind. Condition Monitoring bietet eine synthetische 48-h-Messreihe ohne Upload.
+Als Supervisor oder Admin anmelden und im Leitstand **Demodaten laden** wählen. Geladen werden vier fiktive Anlagen mit SAP-Referenzen, zwei freigegebene synthetische Handbücher, eine neue Revision der HA-250-Anleitung als Entwurf und fünf Incidents der letzten vier Wochen in allen Workflow-Zuständen („neu und kritisch“, „8D in Bearbeitung“, „wartet auf Abnahme“, „abgeschlossen“). Presse 05 überhitzt drei Wochen nach einer Kühlerreinigung erneut (Wiederholungsfehler), eine Leckage wurde einmal wiedereröffnet; so zeigen die Kennzahlen realistische Werte. Mit `PERSISTENCE_BACKEND=postgres` entsteht derselbe Datenbestand, aber zum Ladezeitpunkt, weil Zeitstempel dort nicht rückdatierbar sind. Condition Monitoring bietet eine synthetische 48-h-Messreihe ohne Upload.
 
 Der Demo-Pfad ruft kein Sprachmodell auf: Antworten bestehen aus unverändert extrahierten Sätzen der synthetischen Handbücher mit Seitenbeleg und durchlaufen dieselben Sperren, Reviews und Auditereignisse wie der Azure-Pfad. Ein Banner kennzeichnet jede Seite, alle Daten tragen das Präfix `DEMO`. `AI_BACKEND=demo` ist in Produktion und hinter Entra ID technisch gesperrt; die Demodaten werden nur in einen leeren Mandanten geladen. Empfohlene Fragen für die Vorführung:
 
 - Welcher Betriebsdruck gilt für HA-250 und wann ist das Aggregat stillzusetzen?
 - Wie hoch darf der Wassergehalt sein?
 - Was ist bei hoher Partikelzahl zu tun?
+- Nach wie vielen Betriebsstunden ist ein Ölwechsel erforderlich? Die Antwort zitiert Revision 1 (4000 h). Danach in der Wissensbasis Revision 2 freigeben und erneut fragen: Jetzt gilt Revision 2 (3000 h), Revision 1 ist zurückgezogen, und die erste Antwort trägt einen Warnhinweis.
 
 ## Qualitätssicherung
 

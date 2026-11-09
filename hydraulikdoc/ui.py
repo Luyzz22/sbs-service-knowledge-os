@@ -59,6 +59,9 @@ from .maintenance_kpis import (
 from .personal_data import EXCLUDED_EVALUATIONS, PERSONAL_DATA_FIELDS
 from .repository import (
     AUDIT_VERIFY_PERMISSION,
+    DOCUMENT_RELEASE_PERMISSION,
+    DOCUMENT_SUPERSEDED_REASON,
+    DOCUMENT_WITHDRAWAL_REASONS,
     EIGHT_D_SEVERITIES,
     INCIDENT_ANALYSIS_FIELDS,
     INCIDENT_ANALYSIS_MAX_CHARS,
@@ -74,6 +77,7 @@ from .repository import (
     PRIVACY_REQUEST_TRANSITIONS,
     AssetRecord,
     AuditChainReport,
+    DocumentControl,
     DocumentRecord,
     EnterpriseRepository,
     IncidentRecord,
@@ -139,6 +143,43 @@ DOCUMENT_STATUS_LABELS = {
     "processing": msg("wird verarbeitet"),
     "ready": msg("bereit"),
     "failed": msg("fehlgeschlagen"),
+}
+# "legacy" is not stored: it marks documents that were in use before document control was introduced.
+DOCUMENT_RELEASE_LABELS = {
+    "draft": msg("Entwurf"),
+    "released": msg("Freigegeben"),
+    "withdrawn": msg("Zurückgezogen"),
+    "legacy": msg("Altbestand"),
+}
+DOCUMENT_STATE_ORDER = ("draft", "legacy", "released", "withdrawn")
+DOCUMENT_WITHDRAWAL_LABELS = {
+    "obsolete": msg("Veraltet"),
+    "incorrect": msg("Inhaltlich fehlerhaft"),
+    "safety_notice": msg("Sicherheitsmitteilung des Herstellers"),
+    "no_longer_applicable": msg("Anlage oder Verfahren entfällt"),
+    "superseded": msg("Durch neue Revision ersetzt"),
+}
+DOCUMENT_EVENT_LABELS = {
+    "uploaded": msg("Hochgeladen"),
+    "released": msg("Freigegeben"),
+    "withdrawn": msg("Zurückgezogen"),
+    "review_confirmed": msg("Überprüfung bestätigt"),
+}
+DOCUMENT_CONTROL_ERRORS = {
+    "DOCUMENT_REVISION_INVALID": msg("Revision mit 1 bis 16 Zeichen aus Buchstaben, Ziffern und . _ - angeben."),
+    "DOCUMENT_NUMBER_INVALID": msg("Dokumentnummer mit 2 bis 64 Zeichen aus Buchstaben, Ziffern und . _ / - angeben."),
+    "DOCUMENT_SUPERSEDES_INVALID": msg("Ersetzt werden kann nur ein freigegebenes Dokument."),
+    "DOCUMENT_SUPERSEDES_PENDING": msg("Für dieses Dokument wartet bereits eine neue Revision auf Freigabe."),
+    "DOCUMENT_REVISION_UNCHANGED": msg("Die neue Revision muss sich von der ersetzten unterscheiden."),
+    "DOCUMENT_RELEASE_REQUIRED": msg("Freigegebene Dokumente lenkt nur die Rolle Supervisor oder Admin."),
+    "DOCUMENT_WITHDRAWN": msg("Zurückgezogene Dokumente werden nicht wieder freigegeben; neue Revision hochladen."),
+    "DOCUMENT_ALREADY_RELEASED": msg("Das Dokument ist bereits freigegeben."),
+    "DOCUMENT_NOT_INDEXED": msg("Das Dokument ist noch nicht vollständig indexiert."),
+    "FOUR_EYES_RELEASE_REQUIRED": msg("Eigene Uploads gibt eine zweite Person frei (Vier-Augen-Prinzip)."),
+    "DOCUMENT_REVIEW_DATE_INVALID": msg("Die Überprüfung muss in der Zukunft und höchstens ein Jahr entfernt liegen."),
+    "DOCUMENT_WITHDRAWAL_REASON_INVALID": msg("Grund der Zurückziehung auswählen."),
+    "DOCUMENT_NOT_RELEASED": msg("Das Dokument ist nicht freigegeben."),
+    "DOCUMENT_RELEASE_NOT_RECORDED": msg("Für dieses Dokument ist noch keine Freigabe dokumentiert; zuerst freigeben."),
 }
 REVIEW_STATUS_LABELS = {
     "accepted": msg("Geprüft und akzeptiert"),
@@ -232,6 +273,10 @@ def label(table: Mapping[Any, str], key: Any) -> str:
 def fmt_datetime(value: datetime) -> str:
     # ISO order in English avoids the US/UK day-month ambiguity for international plants.
     return value.strftime("%Y-%m-%d %H:%M" if _language() == "en" else "%d.%m.%Y %H:%M")
+
+
+def fmt_date(value: datetime) -> str:
+    return value.strftime("%Y-%m-%d" if _language() == "en" else "%d.%m.%Y")
 
 
 def label_nav(page: str) -> str:
@@ -606,11 +651,67 @@ def _overview(principal: UserPrincipal, repository: EnterpriseRepository, settin
                 )
             )
             st.button(tr("Zu den Datenschutzanträgen"), on_click=_go_to, args=("Governance",), key="overview-privacy")
+    _render_document_actions(principal, documents, now)
     _render_setup_progress(principal, repository, settings, assets, documents)
     st.subheader(tr("Freigabegrenzen"))
     st.warning(tr("Keine autonome Maschinensteuerung. Keine automatische Sicherheitsfreigabe."))
     if settings.release_state != "configured":
         st.info(tr("Produktionsfreigabe bleibt offen, bis Deployment-Evidenz und Compliance-Gate bestätigt sind."))
+
+
+def _render_document_actions(principal: UserPrincipal, documents: tuple[DocumentRecord, ...], now: datetime) -> None:
+    """Open document control work for this person; a draft is invisible to the AI until someone acts."""
+    pending = [item for item in documents if item.release_status == "draft" and item.status == "ready"]
+    notices: list[str] = []
+    if principal.can(DOCUMENT_RELEASE_PERMISSION):
+        releasable = [item for item in pending if not item.is_own]
+        own = len(pending) - len(releasable)
+        review_due = [item for item in documents if item.review_overdue(now)]
+        legacy = [item for item in documents if not item.release_recorded]
+        if releasable:
+            notices.append(
+                tr_plural(
+                    len(releasable),
+                    "{n} Dokument wartet auf Ihre Freigabe; die KI zitiert es bis dahin nicht.",
+                    "{n} Dokumente warten auf Ihre Freigabe; die KI zitiert sie bis dahin nicht.",
+                )
+            )
+        if own:
+            notices.append(
+                tr_plural(
+                    own,
+                    "{n} eigener Upload wartet auf die Freigabe durch eine zweite Person.",
+                    "{n} eigene Uploads warten auf die Freigabe durch eine zweite Person.",
+                )
+            )
+        if review_due:
+            notices.append(
+                tr_plural(
+                    len(review_due),
+                    "{n} freigegebenes Dokument ist zur Überprüfung fällig.",
+                    "{n} freigegebene Dokumente sind zur Überprüfung fällig.",
+                )
+            )
+        if legacy:
+            notices.append(
+                tr_plural(
+                    len(legacy),
+                    "{n} Dokument aus dem Altbestand hat keine dokumentierte Freigabe.",
+                    "{n} Dokumente aus dem Altbestand haben keine dokumentierte Freigabe.",
+                )
+            )
+    elif pending:
+        notices.append(
+            tr_plural(
+                len(pending),
+                "{n} Dokument wartet auf die Freigabe durch einen Supervisor; die KI zitiert es bis dahin nicht.",
+                "{n} Dokumente warten auf die Freigabe durch einen Supervisor; die KI zitiert sie bis dahin nicht.",
+            )
+        )
+    for text in notices:
+        st.warning(text)
+    if notices:
+        st.button(tr("Zur Dokumentenlenkung"), on_click=_go_to, args=("Wissensbasis",), key="overview-documents")
 
 
 def _render_demo_seed(principal: UserPrincipal, repository: EnterpriseRepository) -> None:
@@ -622,9 +723,10 @@ def _render_demo_seed(principal: UserPrincipal, repository: EnterpriseRepository
     st.subheader(tr("Demo starten"))
     st.write(
         tr(
-            "Lädt vier fiktive Anlagen mit SAP-Referenzen, zwei synthetische Handbücher und fünf Incidents der "
-            "letzten vier Wochen in allen Workflow-Zuständen, darunter ein Wiederholungsfehler und ein "
-            "wiedereröffneter Incident für die Kennzahlen."
+            "Lädt vier fiktive Anlagen mit SAP-Referenzen, zwei freigegebene synthetische Handbücher, eine neue "
+            "Revision als Entwurf zur Freigabe und fünf Incidents der letzten vier Wochen in allen "
+            "Workflow-Zuständen, darunter ein Wiederholungsfehler und ein wiedereröffneter Incident für die "
+            "Kennzahlen."
         )
     )
     if blockers:
@@ -643,7 +745,7 @@ def _render_demo_seed(principal: UserPrincipal, repository: EnterpriseRepository
 SETUP_STEPS = {
     "assets": msg("Assets erfasst"),
     "sap": msg("SAP-Referenz je Asset gepflegt"),
-    "documents": msg("Herstellerunterlagen indexiert"),
+    "documents": msg("Herstellerunterlagen freigegeben"),
     "ai_notice": msg("KI-Nutzerhinweis bestätigt"),
     "privacy": msg("Datenschutzhinweis zur Kenntnis genommen"),
 }
@@ -658,7 +760,7 @@ def _render_setup_progress(
 ) -> None:
     st.subheader(tr("Einrichtung"))
     linked = sum(1 for item in assets if item.functional_location or item.equipment_number)
-    ready_documents = sum(1 for item in documents if item.status == "ready")
+    ready_documents = sum(1 for item in documents if item.usable_for_answers)
     steps = (
         (
             "assets",
@@ -676,7 +778,7 @@ def _render_setup_progress(
             "documents",
             ready_documents > 0,
             "Wissensbasis",
-            tr_plural(ready_documents, "{n} Dokument bereit", "{n} Dokumente bereit"),
+            tr_plural(ready_documents, "{n} Dokument freigegeben", "{n} Dokumente freigegeben"),
         ),
         (
             "ai_notice",
@@ -868,12 +970,28 @@ def _render_answer(
     st.markdown(answer.text)
     st.subheader(tr("Evidenz"))
     if answer.citations:
+        usable = {item.document_id for item in repository.list_documents(principal) if item.usable_for_answers}
+        if any(citation.document_id not in usable for citation in answer.citations):
+            st.markdown(
+                '<div class="hd-notice hd-blocked">'
+                + html.escape(
+                    tr(
+                        "Mindestens eine zitierte Quelle ist inzwischen nicht mehr freigegeben. "
+                        "Diese Antwort nicht mehr verwenden und die Frage neu stellen."
+                    )
+                )
+                + "</div>",
+                unsafe_allow_html=True,
+            )
         for index, citation in enumerate(answer.citations, start=1):
+            document = citation.display_name
+            if citation.revision:
+                document = tr("{name} · Revision {revision}", name=document, revision=citation.revision)
             st.markdown(
                 tr(
                     "**S{index}** · {document} · Seite {page} · Chunk `{chunk}`",
                     index=index,
-                    document=citation.display_name,
+                    document=document,
                     page=citation.page,
                     chunk=citation.chunk_id[:12],
                 )
@@ -983,6 +1101,376 @@ USE_CASE_LABELS = {
 }
 
 
+def _document_state(document: DocumentRecord) -> str:
+    return document.release_status if document.release_recorded else "legacy"
+
+
+def _document_title(document: DocumentRecord) -> str:
+    if document.revision:
+        return tr("{name} · Revision {revision}", name=document.display_name, revision=document.revision)
+    return document.display_name
+
+
+def _document_error(error: BaseException) -> str:
+    code = str(error.args[0]) if error.args else ""
+    return label(DOCUMENT_CONTROL_ERRORS, code) if code in DOCUMENT_CONTROL_ERRORS else tr_error(error)
+
+
+def _cited_answers_note(count: int) -> str:
+    if not count:
+        return ""
+    return " " + tr_plural(
+        count,
+        "{n} gespeicherte Antwort zitiert dieses Dokument und ist neu zu bewerten.",
+        "{n} gespeicherte Antworten zitieren dieses Dokument und sind neu zu bewerten.",
+    )
+
+
+def _render_document_row(
+    principal: UserPrincipal,
+    repository: EnterpriseRepository,
+    settings: AppSettings,
+    document: DocumentRecord,
+    by_id: Mapping[str, DocumentRecord],
+) -> None:
+    state = _document_state(document)
+    columns = st.columns([5, 3, 2])
+    columns[0].write(document.display_name)
+    facts = []
+    if document.revision:
+        facts.append(tr("Revision {revision}", revision=document.revision))
+    if document.document_number:
+        facts.append(document.document_number)
+    facts.append(
+        tr(
+            "{pages} Seiten · {status}",
+            pages=document.page_count,
+            status=label(DOCUMENT_STATUS_LABELS, document.status),
+        )
+    )
+    predecessor = by_id.get(document.supersedes_document_id or "")
+    if predecessor is not None:
+        facts.append(tr("ersetzt {document}", document=_document_title(predecessor)))
+    if document.is_own:
+        facts.append(tr("Ihr Upload"))
+    columns[0].caption(" · ".join(facts))
+    columns[1].markdown(
+        f'<span class="hd-status hd-status-{state}">{html.escape(label(DOCUMENT_RELEASE_LABELS, state))}</span>',
+        unsafe_allow_html=True,
+    )
+    if state == "draft":
+        columns[1].caption(tr("Wird von der KI erst nach der Freigabe zitiert."))
+    elif state == "legacy":
+        columns[1].caption(tr("In Verwendung, Freigabe nicht dokumentiert."))
+    elif state == "withdrawn" and document.withdrawn_at is not None:
+        columns[1].caption(
+            tr(
+                "seit {date}: {reason}",
+                date=fmt_date(document.withdrawn_at),
+                reason=label(DOCUMENT_WITHDRAWAL_LABELS, document.withdrawal_reason),
+            )
+        )
+    elif state == "released" and document.review_due_at is not None:
+        if document.review_overdue(datetime.now(UTC)):
+            columns[1].caption(tr("Überprüfung fällig seit {date}", date=fmt_date(document.review_due_at)))
+        else:
+            columns[1].caption(tr("Überprüfung bis {date}", date=fmt_date(document.review_due_at)))
+    # Taking a released document out of use is a release decision; drafts stay with the uploaders.
+    deletable = principal.can("knowledge:write") and (
+        document.release_status != "released" or principal.can(DOCUMENT_RELEASE_PERMISSION)
+    )
+    if deletable and columns[2].button(tr("Löschen"), key=f"delete:{document.document_id}"):
+        try:
+            _rag(settings, repository).delete_document(principal, document.document_id)
+            st.rerun()
+        except PermissionError as error:
+            st.error(_document_error(error))
+        except Exception as error:
+            st.error(tr("Löschung nicht abgeschlossen. Referenz {reference}", reference=public_error_code(error)))
+
+
+def _render_document_upload(
+    principal: UserPrincipal,
+    repository: EnterpriseRepository,
+    settings: AppSettings,
+    documents: tuple[DocumentRecord, ...],
+) -> None:
+    uploaded = st.file_uploader(tr("Technisches PDF hinzufügen"), type=["pdf"], key="manual-upload")
+    if uploaded:
+        released = {item.document_id: item for item in documents if item.release_status == "released"}
+        revision_column, number_column, supersedes_column = st.columns([1, 2, 3])
+        revision = revision_column.text_input(tr("Revision"), value="1", max_chars=16, key="manual-revision")
+        number = number_column.text_input(
+            tr("Dokumentnummer (optional)"), max_chars=64, placeholder="BA-HA-250", key="manual-number"
+        )
+        supersedes = supersedes_column.selectbox(
+            tr("Ersetzt freigegebenes Dokument"),
+            ("", *released),
+            format_func=lambda option: _document_title(released[option]) if option else tr("Keines (neues Dokument)"),
+            key="manual-supersedes",
+        )
+        st.caption(
+            tr(
+                "Der Upload wird als Entwurf indexiert. Für KI-Antworten gibt ihn eine zweite Person mit der Rolle "
+                "Supervisor oder Admin frei; eine ersetzte Revision wird erst mit dieser Freigabe zurückgezogen."
+            )
+        )
+        if st.button(tr("Validieren und indexieren"), type="primary", disabled=not settings.azure_ready):
+            try:
+                validated = validate_pdf_upload(uploaded.name, uploaded.getvalue(), settings.max_upload_bytes)
+                control = DocumentControl(revision, number, supersedes or None)
+                with st.spinner(tr("Dokument wird sicher gespeichert, strukturiert und indexiert …")):
+                    _rag(settings, repository).ingest(principal, validated, control)
+                st.session_state.document_notice = tr(
+                    "Dokument wurde als Entwurf indexiert und wartet auf die Freigabe durch eine zweite Person."
+                )
+                st.rerun()
+            except (InputRejected, ValueError) as error:
+                st.error(_document_error(error))
+            except Exception as error:
+                st.error(tr("Indexierung fehlgeschlagen. Referenz {reference}", reference=public_error_code(error)))
+    if settings.demo_mode:
+        st.caption(tr("Upload ist im Demo-Modus gesperrt; es stehen nur synthetische Dokumente zur Verfügung."))
+    elif not settings.azure_ready:
+        st.caption(tr("Upload ist gesperrt, bis alle Azure-Endpunkte und Deployments konfiguriert sind."))
+
+
+def _render_document_control(
+    principal: UserPrincipal,
+    repository: EnterpriseRepository,
+    by_id: Mapping[str, DocumentRecord],
+    now: datetime,
+) -> None:
+    st.divider()
+    st.subheader(tr("Dokumentenlenkung"))
+    st.caption(
+        tr(
+            "Die KI zitiert nur freigegebene Dokumente. Hochladen und Freigeben liegen bei zwei verschiedenen "
+            "Personen; zurückgezogene Revisionen bleiben sichtbar, bis sie gelöscht werden."
+        )
+    )
+    ordered = sorted(
+        by_id.values(), key=lambda item: (DOCUMENT_STATE_ORDER.index(_document_state(item)), item.display_name)
+    )
+    selected = st.selectbox(
+        tr("Dokument"),
+        tuple(item.document_id for item in ordered),
+        format_func=lambda option: (
+            f"{_document_title(by_id[option])} · {label(DOCUMENT_RELEASE_LABELS, _document_state(by_id[option]))}"
+        ),
+        key="document-control-select",
+    )
+    document = by_id[selected]
+    state = _document_state(document)
+    _document_history(principal, repository, document)
+    if not principal.can(DOCUMENT_RELEASE_PERMISSION):
+        st.caption(tr("Freigabe, Zurückziehung und Überprüfung erfordern die Rolle Supervisor oder Admin."))
+        return
+    if state in ("draft", "legacy"):
+        _document_release_form(principal, repository, document, by_id, now)
+    if state == "released":
+        _document_review_form(principal, repository, document, now)
+    if document.release_status == "released":
+        _document_withdrawal_form(principal, repository, document)
+    if state == "withdrawn":
+        st.caption(tr("Zurückgezogen ist endgültig. Für eine erneute Verwendung eine neue Revision hochladen."))
+
+
+def _document_history(principal: UserPrincipal, repository: EnterpriseRepository, document: DocumentRecord) -> None:
+    st.markdown(f"#### {tr('Verlauf')}")
+    events = repository.list_document_events(principal, document.document_id)
+    if not events:
+        st.caption(tr("Für dieses Dokument liegt kein Verlauf vor (vor Einführung der Dokumentenlenkung hochgeladen)."))
+        return
+    entries = []
+    for event in events:
+        text = label(DOCUMENT_EVENT_LABELS, event.event_type)
+        if event.reason_code:
+            text = f"{text}: {label(DOCUMENT_WITHDRAWAL_LABELS, event.reason_code)}"
+        actor = label(ROLE_LABELS, event.actor_role)
+        if event.is_own:
+            actor = tr("{role} (Sie)", role=actor)
+        entries.append(
+            f'<li><time datetime="{event.occurred_at.isoformat()}">{fmt_datetime(event.occurred_at)} UTC</time>'
+            f"<span>{html.escape(text)}</span><small>{html.escape(actor)}</small></li>"
+        )
+    st.markdown(f'<ol class="hd-timeline">{"".join(entries)}</ol>', unsafe_allow_html=True)
+    st.caption(tr("Personen werden nur mit Rolle angezeigt; die pseudonymisierte Kennung bleibt im Auditnachweis."))
+
+
+def _review_date_input(now: datetime, key: str) -> datetime:
+    today = now.date()
+    chosen = st.date_input(
+        tr("Nächste Überprüfung"),
+        value=today + timedelta(days=365),
+        min_value=today + timedelta(days=1),
+        max_value=today + timedelta(days=365),
+        key=key,
+    )
+    return datetime(chosen.year, chosen.month, chosen.day, 8, tzinfo=UTC)
+
+
+def _document_release_form(
+    principal: UserPrincipal,
+    repository: EnterpriseRepository,
+    document: DocumentRecord,
+    by_id: Mapping[str, DocumentRecord],
+    now: datetime,
+) -> None:
+    st.markdown(f"#### {tr('Freigabe')}")
+    if not document.release_recorded:
+        st.caption(
+            tr(
+                "Altbestand: Das Dokument war vor Einführung der Dokumentenlenkung in Verwendung und bleibt bis zur "
+                "förmlichen Freigabe zitierbar."
+            )
+        )
+    if document.status != "ready":
+        st.caption(label(DOCUMENT_CONTROL_ERRORS, "DOCUMENT_NOT_INDEXED"))
+        return
+    if document.is_own:
+        st.info(label(DOCUMENT_CONTROL_ERRORS, "FOUR_EYES_RELEASE_REQUIRED"))
+        return
+    predecessor = by_id.get(document.supersedes_document_id or "")
+    if predecessor is not None and predecessor.release_status == "released":
+        st.caption(tr("Mit der Freigabe wird {document} zurückgezogen.", document=_document_title(predecessor)))
+    review_due = _review_date_input(now, f"document-release-review:{document.document_id}")
+    confirmed = st.checkbox(
+        tr("Inhalt, Revision und Geltungsbereich sind fachlich geprüft."),
+        key=f"document-release-confirm:{document.document_id}",
+    )
+    if not st.button(
+        tr("Dokument freigeben"),
+        type="primary",
+        disabled=not confirmed,
+        key=f"document-release:{document.document_id}",
+    ):
+        return
+    try:
+        result = repository.release_document(principal, document.document_id, review_due_at=review_due)
+    except PermissionError as error:
+        repository.emit_audit(
+            principal,
+            action="knowledge.document.release_denied",
+            outcome=AuditOutcome.DENIED,
+            resource_type="document",
+            resource_id=document.document_id,
+            metadata={"reason_code": str(error)},
+        )
+        st.error(_document_error(error))
+        return
+    except ValueError as error:
+        st.error(_document_error(error))
+        return
+    except KeyError:
+        st.error(tr("Das Dokument existiert nicht mehr; Ansicht neu laden."))
+        return
+    repository.emit_audit(
+        principal,
+        action="knowledge.document.released",
+        outcome=AuditOutcome.SUCCESS,
+        resource_type="document",
+        resource_id=result.document.document_id,
+        metadata={"previous_status": _document_state(document)},
+    )
+    notice = tr("{document} ist freigegeben und wird ab sofort zitiert.", document=_document_title(result.document))
+    if result.superseded is not None:
+        repository.emit_audit(
+            principal,
+            action="knowledge.document.withdrawn",
+            outcome=AuditOutcome.SUCCESS,
+            resource_type="document",
+            resource_id=result.superseded.document_id,
+            metadata={"reason_code": DOCUMENT_SUPERSEDED_REASON, "answer_count": result.superseded_answer_count},
+        )
+        notice += " " + tr("{document} wurde zurückgezogen.", document=_document_title(result.superseded))
+        notice += _cited_answers_note(result.superseded_answer_count)
+    st.session_state.document_notice = notice
+    st.rerun()
+
+
+def _document_review_form(
+    principal: UserPrincipal, repository: EnterpriseRepository, document: DocumentRecord, now: datetime
+) -> None:
+    st.markdown(f"#### {tr('Regelmäßige Überprüfung')}")
+    st.caption(
+        tr(
+            "Bestätigt, dass das Dokument weiterhin gilt. Eine fällige Überprüfung sperrt keine Antworten, "
+            "bleibt aber als Handlungsbedarf im Leitstand stehen."
+        )
+    )
+    review_due = _review_date_input(now, f"document-review-date:{document.document_id}")
+    if not st.button(tr("Überprüfung bestätigen"), key=f"document-review:{document.document_id}"):
+        return
+    try:
+        updated = repository.confirm_document_review(principal, document.document_id, review_due_at=review_due)
+    except (PermissionError, ValueError) as error:
+        st.error(_document_error(error))
+        return
+    except KeyError:
+        st.error(tr("Das Dokument existiert nicht mehr; Ansicht neu laden."))
+        return
+    repository.emit_audit(
+        principal,
+        action="knowledge.document.review_confirmed",
+        outcome=AuditOutcome.SUCCESS,
+        resource_type="document",
+        resource_id=updated.document_id,
+    )
+    st.session_state.document_notice = tr(
+        "Überprüfung für {document} bestätigt; nächste Überprüfung bis {date}.",
+        document=_document_title(updated),
+        date=fmt_date(review_due),
+    )
+    st.rerun()
+
+
+def _document_withdrawal_form(
+    principal: UserPrincipal, repository: EnterpriseRepository, document: DocumentRecord
+) -> None:
+    st.markdown(f"#### {tr('Zurückziehen')}")
+    st.caption(
+        tr(
+            "Sperrt das Dokument sofort für neue Antworten; dafür genügt eine Person. Zurückgezogen ist endgültig, "
+            "eine erneute Verwendung braucht eine neue Revision."
+        )
+    )
+    reason = st.selectbox(
+        tr("Grund"),
+        DOCUMENT_WITHDRAWAL_REASONS,
+        format_func=lambda option: label(DOCUMENT_WITHDRAWAL_LABELS, option),
+        key=f"document-withdraw-reason:{document.document_id}",
+    )
+    confirmed = st.checkbox(
+        tr("Das Dokument darf ab sofort nicht mehr zitiert werden."),
+        key=f"document-withdraw-confirm:{document.document_id}",
+    )
+    if not st.button(
+        tr("Dokument zurückziehen"), disabled=not confirmed, key=f"document-withdraw:{document.document_id}"
+    ):
+        return
+    try:
+        result = repository.withdraw_document(principal, document.document_id, reason)
+    except (PermissionError, ValueError) as error:
+        st.error(_document_error(error))
+        return
+    except KeyError:
+        st.error(tr("Das Dokument existiert nicht mehr; Ansicht neu laden."))
+        return
+    repository.emit_audit(
+        principal,
+        action="knowledge.document.withdrawn",
+        outcome=AuditOutcome.SUCCESS,
+        resource_type="document",
+        resource_id=result.document.document_id,
+        metadata={"reason_code": reason, "answer_count": result.cited_answer_count},
+    )
+    st.session_state.document_notice = tr(
+        "{document} ist zurückgezogen und wird nicht mehr zitiert.", document=_document_title(result.document)
+    ) + _cited_answers_note(result.cited_answer_count)
+    st.rerun()
+
+
 def _knowledge(principal: UserPrincipal, repository: EnterpriseRepository, settings: AppSettings) -> None:
     st.title(tr("Wissensbasis"))
     if settings.demo_mode:
@@ -990,47 +1478,20 @@ def _knowledge(principal: UserPrincipal, repository: EnterpriseRepository, setti
     else:
         st.caption(tr("Azure Document Intelligence, tenant-gefilterte Hybrid-Suche und quellengebundene Antworten."))
     documents = repository.list_documents(principal)
+    now = datetime.now(UTC)
+    if notice := st.session_state.pop("document_notice", None):
+        st.success(notice)
+    by_id = {item.document_id: item for item in documents}
     if documents:
         for document in documents:
-            columns = st.columns([5, 2, 2])
-            columns[0].write(document.display_name)
-            columns[1].caption(
-                tr(
-                    "{pages} Seiten · {status}",
-                    pages=document.page_count,
-                    status=label(DOCUMENT_STATUS_LABELS, document.status),
-                )
-            )
-            if principal.can("knowledge:write") and columns[2].button(
-                tr("Löschen"), key=f"delete:{document.document_id}"
-            ):
-                try:
-                    _rag(settings, repository).delete_document(principal, document.document_id)
-                    st.rerun()
-                except Exception as error:
-                    st.error(
-                        tr("Löschung nicht abgeschlossen. Referenz {reference}", reference=public_error_code(error))
-                    )
+            _render_document_row(principal, repository, settings, document, by_id)
     else:
         st.info(tr("Für diesen Mandanten sind noch keine Dokumente indexiert."))
 
     if principal.can("knowledge:write"):
-        uploaded = st.file_uploader(tr("Technisches PDF hinzufügen"), type=["pdf"], key="manual-upload")
-        if uploaded and st.button(tr("Validieren und indexieren"), type="primary", disabled=not settings.azure_ready):
-            try:
-                validated = validate_pdf_upload(uploaded.name, uploaded.getvalue(), settings.max_upload_bytes)
-                with st.spinner(tr("Dokument wird sicher gespeichert, strukturiert und indexiert …")):
-                    _rag(settings, repository).ingest(principal, validated)
-                st.success(tr("Dokument wurde indexiert."))
-                st.rerun()
-            except (InputRejected, ValueError) as error:
-                st.error(tr_error(error))
-            except Exception as error:
-                st.error(tr("Indexierung fehlgeschlagen. Referenz {reference}", reference=public_error_code(error)))
-        if settings.demo_mode:
-            st.caption(tr("Upload ist im Demo-Modus gesperrt; es stehen nur synthetische Dokumente zur Verfügung."))
-        elif not settings.azure_ready:
-            st.caption(tr("Upload ist gesperrt, bis alle Azure-Endpunkte und Deployments konfiguriert sind."))
+        _render_document_upload(principal, repository, settings, documents)
+    if documents:
+        _render_document_control(principal, repository, by_id, now)
 
     st.divider()
     st.subheader(tr("Quellengebundene Abfrage"))
@@ -1060,6 +1521,8 @@ def _knowledge(principal: UserPrincipal, repository: EnterpriseRepository, setti
                 "Was ist bei hoher Partikelzahl zu tun?"
             )
         )
+    if not any(item.usable_for_answers for item in documents):
+        st.info(tr("Noch kein Dokument ist freigegeben; bis dahin findet die KI keine zitierfähige Evidenz."))
     disabled = not accepted or not settings.ai_ready or not decision.allowed
     if st.button(tr("KI-Entwurf erzeugen"), type="primary", disabled=disabled):
         try:

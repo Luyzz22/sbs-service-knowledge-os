@@ -1,6 +1,8 @@
 import re
 import unittest
+import uuid
 from collections.abc import Sequence
+from datetime import UTC, datetime, timedelta
 
 from compliance.audit import AuditEvent, AuditOutcome
 from hydraulikdoc.auth import ROLE_PERMISSIONS, UserPrincipal
@@ -18,6 +20,7 @@ from hydraulikdoc.governance import (
     system_prompt,
 )
 from hydraulikdoc.repository import InMemoryRepository
+from hydraulikdoc.security import ValidatedUpload
 
 
 def _rules(prompt: str) -> dict[str, str]:
@@ -40,7 +43,9 @@ class _FakeSearch:
     def __init__(self, hits: tuple[SearchHit, ...]) -> None:
         self._hits = hits
 
-    def query(self, tenant_id: str, question: str, vector: Sequence[float]) -> tuple[SearchHit, ...]:
+    def query(
+        self, tenant_id: str, question: str, vector: Sequence[float], document_ids: Sequence[str]
+    ) -> tuple[SearchHit, ...]:
         return self._hits
 
 
@@ -78,7 +83,15 @@ class AzureAnswerLanguageTests(unittest.TestCase):
         self.service._models = self.models
 
     def test_language_reaches_the_model_and_the_audit_trail(self) -> None:
-        hit = SearchHit("c1", "d1", "Handbuch", 12, "Betriebsdruck 210 bar", 0.9)
+        # Only a document released by a second person is evidence.
+        supervisor = UserPrincipal("sup", "tenant-a", "Sup", "supervisor", permissions=ROLE_PERMISSIONS["supervisor"])
+        upload = ValidatedUpload(str(uuid.uuid4()), "Handbuch.pdf", "a" * 64, b"")
+        document = self.repository.register_document(self.principal, upload)
+        self.repository.mark_document_indexed(self.principal, document.document_id, 20)
+        self.repository.release_document(
+            supervisor, document.document_id, review_due_at=datetime.now(UTC) + timedelta(days=90)
+        )
+        hit = SearchHit("c1", document.document_id, "Handbuch", 12, "Betriebsdruck 210 bar", 0.9)
         self.service._search = _FakeSearch((hit,))
         answer = self.service.ask(self.principal, "Operating pressure?", UseCase.MAINTENANCE_ASSISTANCE, "en")
         self.assertEqual(self.models.languages, ["en"])

@@ -33,6 +33,7 @@ ROLE_PERMISSIONS: Mapping[str, frozenset[str]] = {
             "incident:close",
             "review:write",
             "analysis:export",
+            "document:release",
         }
     ),
     "admin": frozenset({"*"}),

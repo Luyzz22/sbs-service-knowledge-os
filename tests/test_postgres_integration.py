@@ -125,6 +125,7 @@ class PostgresSecurityIntegrationTests(unittest.TestCase):
                 purged = cursor.fetchone()[0]
                 self.assertEqual(purged["audit_events"], 1)
                 self.assertEqual((purged["incident_events"], purged["incidents"]), (1, 1))
+                self.assertEqual((purged["document_events"], purged["documents"]), (0, 0))
 
         for statement in ("CREATE TABLE lifecycle_must_not_create(id int)", "DELETE FROM audit_events"):
             with self.assertRaises(InsufficientPrivilege):
@@ -436,6 +437,164 @@ class PostgresSecurityIntegrationTests(unittest.TestCase):
                 cursor.execute("SELECT set_config('app.tenant_id', %s, true)", (tenant,))
                 with self.assertRaises(InsufficientPrivilege):
                     cursor.execute("UPDATE privacy_requests SET request_type = 'access', requested_at = now()")
+
+    def test_document_control_release_flow_and_history(self) -> None:
+        from datetime import UTC, datetime, timedelta
+
+        from psycopg.errors import InsufficientPrivilege
+
+        from hydraulikdoc.auth import ROLE_PERMISSIONS, UserPrincipal
+        from hydraulikdoc.config import AppSettings
+        from hydraulikdoc.governance import AIProvenance, GroundedAnswer, SourceCitation, UseCase
+        from hydraulikdoc.repository import DocumentControl, PostgresRepository, require_document_deletion
+        from hydraulikdoc.security import ValidatedUpload
+
+        def repository_for(dsn: str) -> PostgresRepository:
+            return PostgresRepository(
+                AppSettings.from_environment(
+                    {
+                        "APP_ENV": "test",
+                        "PERSISTENCE_BACKEND": "postgres",
+                        "AUDIT_HMAC_KEY": "integration-audit-key-" + "x" * 16,
+                        "DATABASE_URL": dsn,
+                    }
+                )
+            )
+
+        def upload(name: str, digest: str) -> ValidatedUpload:
+            return ValidatedUpload(str(uuid.uuid4()), name, digest * 64, b"", "application/pdf")
+
+        def code(error: BaseException) -> str:
+            return str(error.args[0])
+
+        runtime, lifecycle = repository_for(self.app_dsn), repository_for(self.lifecycle_dsn)
+        runtime.check_schema()
+        tenant = f"{self.tenant_a}-docs"
+        supervisor = ROLE_PERMISSIONS["supervisor"]
+        author = UserPrincipal("author", tenant, "Author", "supervisor", permissions=supervisor)
+        approver = UserPrincipal("approver", tenant, "Approver", "supervisor", permissions=supervisor)
+        technician = UserPrincipal("tech", tenant, "Tech", "technician", permissions=ROLE_PERMISSIONS["technician"])
+        outsider = UserPrincipal("approver", f"{self.tenant_b}-docs", "Other", "supervisor", permissions=supervisor)
+        review = datetime.now(UTC) + timedelta(days=180)
+
+        first = runtime.register_document(author, upload("Handbuch.pdf", "d"), DocumentControl("1", "BA-HA-250"))
+        self.assertEqual((first.release_status, first.usable_for_answers), ("draft", False))
+        with self.assertRaises(ValueError) as not_indexed:
+            runtime.release_document(approver, first.document_id, review_due_at=review)
+        self.assertEqual(code(not_indexed.exception), "DOCUMENT_NOT_INDEXED")
+        runtime.mark_document_indexed(author, first.document_id, 12)
+        self.assertFalse(runtime.list_documents(approver)[0].usable_for_answers)
+
+        for principal, expected in ((technician, "DOCUMENT_RELEASE_REQUIRED"), (author, "FOUR_EYES_RELEASE_REQUIRED")):
+            with self.assertRaises(PermissionError) as denied:
+                runtime.release_document(principal, first.document_id, review_due_at=review)
+            self.assertEqual(code(denied.exception), expected)
+        with self.assertRaises(KeyError):
+            runtime.release_document(outsider, first.document_id, review_due_at=review)
+        with self.assertRaises(ValueError) as late:
+            runtime.release_document(approver, first.document_id, review_due_at=review + timedelta(days=400))
+        self.assertEqual(code(late.exception), "DOCUMENT_REVIEW_DATE_INVALID")
+
+        released = runtime.release_document(approver, first.document_id, review_due_at=review)
+        self.assertEqual((released.document.release_status, released.superseded), ("released", None))
+        stored = runtime.list_documents(author)[0]
+        self.assertEqual((stored.usable_for_answers, stored.release_recorded, stored.is_own), (True, True, True))
+        self.assertEqual((stored.revision, stored.document_number, stored.review_due_at), ("1", "BA-HA-250", review))
+        self.assertFalse(runtime.list_documents(approver)[0].is_own)
+        with self.assertRaises(PermissionError):
+            require_document_deletion(technician, runtime, first.document_id)
+
+        answer = GroundedAnswer.create(
+            text="Ölwechsel nach 4000 Betriebsstunden.",
+            citations=(SourceCitation(first.document_id, "Handbuch.pdf", 7, "chunk-1", 0.9, "1"),),
+            provenance=AIProvenance("azure-openai", "integration", "snapshot", "swedencentral"),
+            use_case=UseCase.MAINTENANCE_ASSISTANCE,
+        )
+        runtime.record_answer(technician, "Wann ist der Ölwechsel fällig?", answer)
+
+        with self.assertRaises(ValueError) as unchanged:
+            runtime.register_document(author, upload("Neu.pdf", "e"), DocumentControl("1", "", first.document_id))
+        self.assertEqual(code(unchanged.exception), "DOCUMENT_REVISION_UNCHANGED")
+        with self.assertRaises(ValueError) as foreign:
+            runtime.register_document(outsider, upload("Neu.pdf", "e"), DocumentControl("2", "", first.document_id))
+        self.assertEqual(code(foreign.exception), "DOCUMENT_SUPERSEDES_INVALID")
+        second = runtime.register_document(
+            approver, upload("Neu.pdf", "e"), DocumentControl("2", "", first.document_id)
+        )
+        self.assertEqual((second.document_number, second.supersedes_document_id), ("BA-HA-250", first.document_id))
+        with self.assertRaises(ValueError) as pending:
+            runtime.register_document(author, upload("Auch.pdf", "f"), DocumentControl("3", "", first.document_id))
+        self.assertEqual(code(pending.exception), "DOCUMENT_SUPERSEDES_PENDING")
+        runtime.mark_document_indexed(approver, second.document_id, 14)
+
+        replaced = runtime.release_document(author, second.document_id, review_due_at=review)
+        self.assertIsNotNone(replaced.superseded)
+        self.assertEqual(replaced.superseded.document_id, first.document_id)
+        self.assertEqual(replaced.superseded_answer_count, 1)
+        by_id = {item.document_id: item for item in runtime.list_documents(technician)}
+        self.assertEqual(
+            (by_id[first.document_id].release_status, by_id[first.document_id].withdrawal_reason),
+            ("withdrawn", "superseded"),
+        )
+        self.assertTrue(by_id[second.document_id].usable_for_answers)
+        with self.assertRaises(ValueError) as final:
+            runtime.release_document(approver, first.document_id, review_due_at=review)
+        self.assertEqual(code(final.exception), "DOCUMENT_WITHDRAWN")
+
+        later = review + timedelta(days=30)
+        self.assertEqual(
+            runtime.confirm_document_review(approver, second.document_id, review_due_at=later).review_due_at, later
+        )
+        history = runtime.list_document_events(approver, first.document_id)
+        self.assertEqual(
+            [(item.event_type, item.reason_code, item.is_own) for item in history],
+            [("uploaded", None, False), ("released", None, True), ("withdrawn", "superseded", False)],
+        )
+        self.assertEqual(runtime.list_document_events(outsider, first.document_id), ())
+        steps = runtime.subject_export(approver)["document_steps"]
+        self.assertEqual(sorted(item["event_type"] for item in steps), ["released", "review_confirmed", "uploaded"])
+
+        # A row from before document control: released without a release date, by nobody on record.
+        legacy = runtime.register_document(author, upload("Alt.pdf", "a"))
+        runtime.mark_document_indexed(author, legacy.document_id, 3)
+        with self.psycopg.connect(self.admin_dsn) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "UPDATE documents SET release_status='released', revision='' WHERE document_id=%s",
+                    (legacy.document_id,),
+                )
+        grandfathered = {item.document_id: item for item in runtime.list_documents(approver)}[legacy.document_id]
+        self.assertEqual((grandfathered.usable_for_answers, grandfathered.release_recorded), (True, False))
+        with self.assertRaises(ValueError) as unrecorded:
+            runtime.confirm_document_review(approver, legacy.document_id, review_due_at=review)
+        self.assertEqual(code(unrecorded.exception), "DOCUMENT_RELEASE_NOT_RECORDED")
+        formal = runtime.release_document(approver, legacy.document_id, review_due_at=review)
+        self.assertTrue(formal.document.release_recorded)
+
+        withdrawn = runtime.withdraw_document(approver, second.document_id, "safety_notice")
+        self.assertEqual((withdrawn.document.release_status, withdrawn.cited_answer_count), ("withdrawn", 0))
+        with self.assertRaises(ValueError) as invalid:
+            runtime.withdraw_document(approver, legacy.document_id, "superseded")
+        self.assertEqual(code(invalid.exception), "DOCUMENT_WITHDRAWAL_REASON_INVALID")
+
+        for statement in ("UPDATE document_events SET actor_role='admin'", "DELETE FROM document_events"):
+            with self.assertRaises(InsufficientPrivilege):
+                with self.psycopg.connect(self.app_dsn) as connection:
+                    with connection.cursor() as cursor:
+                        cursor.execute("SELECT set_config('app.tenant_id', %s, true)", (tenant,))
+                        cursor.execute(statement)
+        with self.psycopg.connect(self.app_dsn) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT set_config('app.tenant_id', %s, true)", (outsider.tenant_id,))
+                cursor.execute("SELECT count(*) FROM document_events")
+                self.assertEqual(cursor.fetchone()[0], 0)
+
+        # The history leaves with the document: first the events, then the row they point to.
+        runtime.delete_document(approver, first.document_id)
+        self.assertEqual(lifecycle.purge_expired_records(approver)["documents"], 1)
+        self.assertEqual(runtime.list_document_events(approver, first.document_id), ())
+        remaining = {item.document_id: item for item in runtime.list_documents(approver)}
+        self.assertIsNone(remaining[second.document_id].supersedes_document_id)
 
 
 if __name__ == "__main__":
