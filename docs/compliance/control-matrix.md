@@ -42,12 +42,12 @@ HydraulikDoc ist nach dokumentiertem Intended Purpose ein assistives System für
 | --- | --- | --- | --- |
 | Art. 4 AI Literacy | Implementiert + extern | versionierter Pflichtnutzerhinweis | Schulungsprogramm und Kompetenznachweise |
 | Art. 9 Risikomanagement | Unterstützt | Zweckklassifizierung, gesperrte Zwecke, heightened Safety Review, Incidentworkflow | instanzbezogene Risikoakte und Owner |
-| Art. 10 Daten-Governance | Unterstützt | Dokumentvalidierung, Tenantgrenze, Provenienz | Datenqualität und Repräsentativität freigeben |
+| Art. 10 Daten-Governance | Unterstützt | Dokumentvalidierung, Tenantgrenze, Provenienz; Dokumentenlenkung: nur von einer zweiten Person freigegebene Revisionen sind Quelle | Prüfkriterien für die Freigabe und Qualifikation der Freigebenden festlegen |
 | Art. 11 Technische Dokumentation | Unterstützt | Architektur, System Card, Modell-/Prompt-/Regionsevidenz | Betreiberakte vervollständigen |
 | Art. 12 Logging | Implementiert | automatische pseudonymisierte Ereignisse, HMAC-authentisierte Hashkette mit Verifikation (`ops/scripts/verify-audit-chain.py`, System-Seite für Admins), Retention | SIEM-Aufbewahrung der nächtlichen Anker genehmigen und Alarm bei `failure_count > 0` einrichten |
 | Art. 13 Transparenz | Implementiert | Quellen, Einschränkungen, Provider, Deployment, Snapshot, Promptversion, Reviewstatus | instanzbezogene Nutzerinformation |
 | Art. 14 Human Oversight | Implementiert | jeder Output Draft; Reviewrollen; nur akzeptierte Exporte; autonome Steuerung blockiert | Prüferqualifikation und Arbeitsanweisung |
-| Art. 15 Accuracy/Robustness/Cybersecurity | Technisch unterstützt + extern | Hybrid Retrieval, Temperature 0, Zitatgate, Prompt-Injection-Regeln, WAF, Scanpipeline, Eval-Harness und verpflichtende Eval-Evidence-ID | repräsentatives Goldset, Fachreview, Red Team und freigegebene Schwellen |
+| Art. 15 Accuracy/Robustness/Cybersecurity | Technisch unterstützt + extern | Hybrid Retrieval, Temperature 0, Zitatgate, Prompt-Injection-Regeln, Freigabe durch eine zweite Person gegen vergiftete Quellen, WAF, Scanpipeline, Eval-Harness und verpflichtende Eval-Evidence-ID | repräsentatives Goldset, Fachreview, Red Team und freigegebene Schwellen |
 | Art. 17 QMS | Externes Gate | CI, Review und Runbooks liefern Bausteine | freigegebenes QMS mit Rollen, CAPA, Lieferanten- und Änderungsprozess |
 | Art. 18 Aufbewahrung | Implementiert + extern | versionierte Provenienz und Retention | gesetzlich und fachlich korrekte Dauer genehmigen |
 | Art. 50 Transparenz | Implementiert | Hinweis vor erster KI-Nutzung und Kennzeichnung als KI-Entwurf | — |
@@ -75,7 +75,20 @@ Technischer Beitrag: herstellerneutrale CSV-Eingabe, JSON-Export persönlicher D
 
 ## Maschinenverordnung
 
-Primärquelle: [Verordnung (EU) 2023/1230](https://eur-lex.europa.eu/eli/reg/2023/1230/oj). HydraulikDoc ersetzt keine Herstellerbetriebsanleitung, Risikobeurteilung, CE-Unterlage oder LOTO-Vorgabe. Originaldokumente und Seiten bleiben als Quellen sichtbar; autonome Maschinenhandlungen sind gesperrt. Wenn HydraulikDoc künftig digitale Herstelleranleitungen ausliefert, müssen Downloadbarkeit, Druckbarkeit, Offline-Verfügbarkeit, Lebensdauer und Papierbereitstellung separat umgesetzt und nachgewiesen werden.
+Primärquelle: [Verordnung (EU) 2023/1230](https://eur-lex.europa.eu/eli/reg/2023/1230/oj). HydraulikDoc ersetzt keine Herstellerbetriebsanleitung, Risikobeurteilung, CE-Unterlage oder LOTO-Vorgabe. Originaldokumente, Seiten und Revisionsstand bleiben als Quellen sichtbar; zurückgezogene Revisionen werden nicht mehr zitiert, und autonome Maschinenhandlungen sind gesperrt. Wenn HydraulikDoc künftig digitale Herstelleranleitungen ausliefert, müssen Downloadbarkeit, Druckbarkeit, Offline-Verfügbarkeit, Lebensdauer und Papierbereitstellung separat umgesetzt und nachgewiesen werden.
+
+## Dokumentenlenkung (ISO 9001 / IATF 16949)
+
+Maßstab sind die Anforderungen an die Lenkung dokumentierter Information in ISO 9001 Abschnitt 7.5.3 und an technische Vorgaben in IATF 16949 Abschnitt 7.5.3.2. Die Zuordnung beschreibt, was die Anwendung technisch erzwingt; sie ist keine Konformitätsaussage und ersetzt weder das Dokumentenmanagement noch das QMS des Betreibers.
+
+| Kontrolle | Status | Technische Evidenz | Restnachweis |
+| --- | --- | --- | --- |
+| Freigabe vor Verwendung | Implementiert | Upload ist Entwurf; `release_document` verlangt `document:release`, abgeschlossene Indexierung und eine andere Person als die hochladende; Suche und Zitat nur über freigegebene Dokumente (`tests/test_document_control.py`, `tests/test_postgres_integration.py`) | Prüfkriterien und Qualifikation der Freigebenden im QMS |
+| Revisionsstand erkennbar | Implementiert | Revision und Dokumentnummer je Dokument, Revision im Zitat jeder Antwort | Nummernkreis und Revisionsschema des Betreibers |
+| Ungültige Dokumente gegen Verwendung gesichert | Implementiert | Rückzug mit Grund ist endgültig; Freigabe einer neuen Revision zieht die Vorgängerin in derselben Transaktion zurück; gespeicherte Antworten mit zurückgezogener Quelle werden gekennzeichnet | Umgang mit bereits exportierten Nachweisen und Papierkopien |
+| Regelmäßige Überprüfung | Implementiert + extern | Pflicht-Überprüfungstermin innerhalb eines Jahres, Mahnung im Leitstand, Bestätigung als Ereignis | Überprüfungsintervall je Dokumentart festlegen; überfällige Termine sperren die Quelle nicht |
+| Änderungsnachweis | Implementiert | `document_events` nur einfügbar, Auditereignisse in der Hashkette | Verlauf endet mit der Löschung des Dokuments; Aufbewahrung über das Auditprotokoll |
+| Verteilung und Kenntnisnahme | Externes Gate | – | Verteiler, Schulung und Kenntnisnahme neuer Revisionen |
 
 ## Barrierefreiheit
 

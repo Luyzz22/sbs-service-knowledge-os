@@ -89,10 +89,10 @@ class MessageTests(unittest.TestCase):
         self.assertEqual(translate("Nur auf Deutsch", "en"), "Nur auf Deutsch")
 
     def test_plural_selection(self) -> None:
-        singular, plural = "{n} Dokument bereit", "{n} Dokumente bereit"
-        self.assertEqual(translate_plural(1, singular, plural, "en"), "1 document ready")
-        self.assertEqual(translate_plural(3, singular, plural, "en"), "3 documents ready")
-        self.assertEqual(translate_plural(0, singular, plural, "de"), "0 Dokumente bereit")
+        singular, plural = "{n} Dokument freigegeben", "{n} Dokumente freigegeben"
+        self.assertEqual(translate_plural(1, singular, plural, "en"), "1 document released")
+        self.assertEqual(translate_plural(3, singular, plural, "en"), "3 documents released")
+        self.assertEqual(translate_plural(0, singular, plural, "de"), "0 Dokumente freigegeben")
 
 
 class LanguageSelectionTests(unittest.TestCase):

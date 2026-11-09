@@ -73,6 +73,7 @@ def main() -> None:
     tables = (
         "tenants",
         "documents",
+        "document_events",
         "assets",
         "analysis_runs",
         "analysis_reviews",

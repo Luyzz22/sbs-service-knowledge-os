@@ -248,21 +248,25 @@
   font-weight: 600;
 }
 
-.hd-status-new {
+.hd-status-new,
+.hd-status-withdrawn {
   background: #fff5f5;
   border-color: #b42318;
   color: #8f1c13;
 }
 
 .hd-status-acknowledged,
-.hd-status-in_progress {
+.hd-status-in_progress,
+.hd-status-draft,
+.hd-status-legacy {
   background: #fffaf0;
   border-color: #b7791f;
   color: #7a4f12;
 }
 
 .hd-status-resolved,
-.hd-status-closed {
+.hd-status-closed,
+.hd-status-released {
   background: #f1f7f3;
   border-color: #3f7d55;
   color: #2d5c3e;

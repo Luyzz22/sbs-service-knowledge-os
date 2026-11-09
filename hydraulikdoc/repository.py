@@ -35,6 +35,153 @@ class DocumentRecord:
     page_count: int
     created_at: datetime
     retention_until: datetime
+    release_status: str = "draft"
+    revision: str = ""
+    document_number: str = ""
+    released_at: datetime | None = None
+    review_due_at: datetime | None = None
+    withdrawn_at: datetime | None = None
+    withdrawal_reason: str = ""
+    supersedes_document_id: str | None = None
+    # True for the person who uploaded the document; they cannot release it themselves.
+    is_own: bool = False
+
+    @property
+    def usable_for_answers(self) -> bool:
+        """Only an indexed and released document may be retrieved as evidence."""
+        return self.status == "ready" and self.release_status == "released"
+
+    @property
+    def release_recorded(self) -> bool:
+        """False for documents that were in use before document control and still need a formal release."""
+        return self.release_status != "released" or self.released_at is not None
+
+    def review_overdue(self, now: datetime) -> bool:
+        return self.release_status == "released" and self.review_due_at is not None and self.review_due_at <= now
+
+
+@dataclass(frozen=True)
+class DocumentEventRecord:
+    event_id: str
+    document_id: str
+    event_type: str
+    reason_code: str | None
+    actor_role: str
+    occurred_at: datetime
+    is_own: bool = False
+
+
+@dataclass(frozen=True)
+class DocumentControl:
+    """Revision data entered with an upload."""
+
+    revision: str = "1"
+    document_number: str = ""
+    supersedes_document_id: str | None = None
+
+
+@dataclass(frozen=True)
+class DocumentRelease:
+    document: DocumentRecord
+    # The previous revision that this release took out of use, and how many stored answers cite it.
+    superseded: DocumentRecord | None = None
+    superseded_answer_count: int = 0
+
+
+@dataclass(frozen=True)
+class DocumentWithdrawal:
+    document: DocumentRecord
+    cited_answer_count: int
+
+
+DOCUMENT_RELEASE_PERMISSION = "document:release"
+DOCUMENT_REVISION_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,15}")
+DOCUMENT_NUMBER_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]{1,63}")
+DOCUMENT_WITHDRAWAL_REASONS = ("obsolete", "incorrect", "safety_notice", "no_longer_applicable")
+# Set by the system when a newer revision is released; it cannot be chosen by hand.
+DOCUMENT_SUPERSEDED_REASON = "superseded"
+# A released document must come up for review within a year; an overdue review does not block answers.
+DOCUMENT_MAX_REVIEW = timedelta(days=366)
+
+
+def _check_document_control(
+    control: DocumentControl, predecessor: DocumentRecord | None, successor_pending: bool
+) -> DocumentControl:
+    """Normalised revision data for a new upload; a replaced document must currently be in force."""
+    revision = control.revision.strip()
+    number = control.document_number.strip()
+    if not DOCUMENT_REVISION_PATTERN.fullmatch(revision):
+        raise ValueError("DOCUMENT_REVISION_INVALID")
+    if number and not DOCUMENT_NUMBER_PATTERN.fullmatch(number):
+        raise ValueError("DOCUMENT_NUMBER_INVALID")
+    if control.supersedes_document_id is None:
+        return DocumentControl(revision, number, None)
+    if predecessor is None or predecessor.release_status != "released":
+        raise ValueError("DOCUMENT_SUPERSEDES_INVALID")
+    if successor_pending:
+        raise ValueError("DOCUMENT_SUPERSEDES_PENDING")
+    if revision == predecessor.revision:
+        raise ValueError("DOCUMENT_REVISION_UNCHANGED")
+    return DocumentControl(revision, number or predecessor.document_number, predecessor.document_id)
+
+
+def _require_document_release(principal: UserPrincipal) -> None:
+    if not principal.can(DOCUMENT_RELEASE_PERMISSION):
+        raise PermissionError("DOCUMENT_RELEASE_REQUIRED")
+
+
+def _check_review_date(review_due_at: datetime, now: datetime) -> None:
+    if review_due_at.tzinfo is None or not now < review_due_at <= now + DOCUMENT_MAX_REVIEW:
+        raise ValueError("DOCUMENT_REVIEW_DATE_INVALID")
+
+
+def _check_document_release(document: DocumentRecord, review_due_at: datetime, now: datetime) -> None:
+    """Fail closed unless the document can be released by this person; withdrawal is final."""
+    if document.release_status == "withdrawn":
+        raise ValueError("DOCUMENT_WITHDRAWN")
+    if document.release_status == "released" and document.released_at is not None:
+        raise ValueError("DOCUMENT_ALREADY_RELEASED")
+    if document.status != "ready":
+        raise ValueError("DOCUMENT_NOT_INDEXED")
+    if document.is_own:
+        raise PermissionError("FOUR_EYES_RELEASE_REQUIRED")
+    _check_review_date(review_due_at, now)
+
+
+def _check_document_withdrawal(document: DocumentRecord, reason_code: str) -> None:
+    if reason_code not in DOCUMENT_WITHDRAWAL_REASONS:
+        raise ValueError("DOCUMENT_WITHDRAWAL_REASON_INVALID")
+    if document.release_status != "released":
+        raise ValueError("DOCUMENT_NOT_RELEASED")
+
+
+def _check_document_review(document: DocumentRecord, review_due_at: datetime, now: datetime) -> None:
+    if document.release_status != "released":
+        raise ValueError("DOCUMENT_NOT_RELEASED")
+    if document.released_at is None:
+        raise ValueError("DOCUMENT_RELEASE_NOT_RECORDED")
+    _check_review_date(review_due_at, now)
+
+
+def require_document_deletion(principal: UserPrincipal, repository: EnterpriseRepository, document_id: str) -> None:
+    """Taking a released document out of use is a release decision, not an upload right.
+
+    Drafts, withdrawn and failed documents stay deletable with the upload permission. An unknown id
+    passes so that a repeated deletion can still clean up search and storage.
+    """
+    if principal.can(DOCUMENT_RELEASE_PERMISSION):
+        return
+    for document in repository.list_documents(principal):
+        if document.document_id == document_id and document.release_status == "released":
+            raise PermissionError("DOCUMENT_RELEASE_REQUIRED")
+
+
+def _is_uuid(value: str) -> bool:
+    try:
+        uuid.UUID(value)
+    except (AttributeError, TypeError, ValueError):
+        return False
+    return True
 
 
 @dataclass(frozen=True)
@@ -295,7 +442,9 @@ class EnterpriseRepository(Protocol):
 
     def list_assets(self, principal: UserPrincipal) -> tuple[AssetRecord, ...]: ...
 
-    def register_document(self, principal: UserPrincipal, upload: ValidatedUpload) -> DocumentRecord: ...
+    def register_document(
+        self, principal: UserPrincipal, upload: ValidatedUpload, control: DocumentControl | None = None
+    ) -> DocumentRecord: ...
 
     def mark_document_indexed(self, principal: UserPrincipal, document_id: str, page_count: int) -> None: ...
 
@@ -304,6 +453,18 @@ class EnterpriseRepository(Protocol):
     def list_documents(self, principal: UserPrincipal) -> tuple[DocumentRecord, ...]: ...
 
     def delete_document(self, principal: UserPrincipal, document_id: str) -> None: ...
+
+    def release_document(
+        self, principal: UserPrincipal, document_id: str, *, review_due_at: datetime
+    ) -> DocumentRelease: ...
+
+    def withdraw_document(self, principal: UserPrincipal, document_id: str, reason_code: str) -> DocumentWithdrawal: ...
+
+    def confirm_document_review(
+        self, principal: UserPrincipal, document_id: str, *, review_due_at: datetime
+    ) -> DocumentRecord: ...
+
+    def list_document_events(self, principal: UserPrincipal, document_id: str) -> tuple[DocumentEventRecord, ...]: ...
 
     def record_answer(self, principal: UserPrincipal, question: str, answer: GroundedAnswer) -> None: ...
 
@@ -405,8 +566,19 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
-# v2 adds uploaded documents, given reviews and own incident steps (GDPR Art. 15 completeness).
-SUBJECT_EXPORT_SCHEMA = "hydraulikdoc.subject-export.v2"
+# v2 adds uploaded documents, given reviews and own incident steps (GDPR Art. 15 completeness);
+# v3 adds the person's own document control steps (upload, release, withdrawal, review).
+SUBJECT_EXPORT_SCHEMA = "hydraulikdoc.subject-export.v3"
+
+
+def _document_step(event: DocumentEventRecord) -> dict[str, Any]:
+    return {
+        "document_id": event.document_id,
+        "event_type": event.event_type,
+        "reason_code": event.reason_code,
+        "actor_role": event.actor_role,
+        "occurred_at": event.occurred_at.isoformat(),
+    }
 
 
 def _incident_step(event: IncidentEventRecord) -> dict[str, Any]:
@@ -538,6 +710,7 @@ class InMemoryRepository:
         self._reviews: dict[tuple[str, str], ReviewStatus] = {}
         self._incidents: dict[tuple[str, str], IncidentRecord] = {}
         self._incident_events: list[tuple[str, str, IncidentEventRecord]] = []
+        self._document_events: list[tuple[str, str, DocumentEventRecord]] = []
         self._acceptances: set[tuple[str, str, str, str]] = set()
         self._privacy_requests: dict[tuple[str, str], tuple[str, PrivacyRequestRecord]] = {}
         self._audit: list[tuple[AuditEvent, str]] = []
@@ -601,19 +774,64 @@ class InMemoryRepository:
         with self._lock:
             return tuple(item for (tenant, _), item in self._assets.items() if tenant == principal.tenant_id)
 
-    def register_document(self, principal: UserPrincipal, upload: ValidatedUpload) -> DocumentRecord:
-        created = _now()
-        record = DocumentRecord(
-            document_id=upload.document_id,
-            tenant_id=principal.tenant_id,
-            display_name=upload.display_name,
-            sha256=upload.sha256,
-            status="processing",
-            page_count=0,
-            created_at=created,
-            retention_until=self._retention.expires_at(RecordClass.UPLOADED_CONTENT, created),
+    def _find_document(self, tenant_id: str, document_id: str | None, actor: str | None) -> DocumentRecord | None:
+        current = self._documents.get((tenant_id, document_id or ""))
+        if current is None or current.status == "deleted":
+            return None
+        return replace(current, is_own=self._uploaders.get((tenant_id, current.document_id)) == actor)
+
+    def _append_document_event(
+        self,
+        principal: UserPrincipal,
+        actor: str,
+        document_id: str,
+        event_type: str,
+        reason_code: str | None,
+        occurred_at: datetime,
+    ) -> None:
+        event = DocumentEventRecord(
+            str(uuid.uuid4()), document_id, event_type, reason_code, principal.role[:40], occurred_at
         )
+        self._document_events.append((principal.tenant_id, actor, event))
+
+    def _citing_answers(self, tenant_id: str, document_id: str) -> int:
+        return sum(
+            1
+            for (tenant, _), (_, answer) in self._answers.items()
+            if tenant == tenant_id and any(item.document_id == document_id for item in answer.citations)
+        )
+
+    def register_document(
+        self, principal: UserPrincipal, upload: ValidatedUpload, control: DocumentControl | None = None
+    ) -> DocumentRecord:
+        created = _now()
+        actor = _principal_token(self._pseudonymizer, principal)
+        requested = control or DocumentControl()
+        replaced = requested.supersedes_document_id
         with self._lock:
+            predecessor = self._find_document(principal.tenant_id, replaced, actor) if replaced else None
+            pending = replaced is not None and any(
+                item.supersedes_document_id == replaced
+                and item.release_status == "draft"
+                and item.status not in ("deleted", "failed")
+                for (tenant, _), item in self._documents.items()
+                if tenant == principal.tenant_id
+            )
+            checked = _check_document_control(requested, predecessor, pending)
+            record = DocumentRecord(
+                document_id=upload.document_id,
+                tenant_id=principal.tenant_id,
+                display_name=upload.display_name,
+                sha256=upload.sha256,
+                status="processing",
+                page_count=0,
+                created_at=created,
+                retention_until=self._retention.expires_at(RecordClass.UPLOADED_CONTENT, created),
+                release_status="draft",
+                revision=checked.revision,
+                document_number=checked.document_number,
+                supersedes_document_id=checked.supersedes_document_id,
+            )
             duplicate = any(
                 item.sha256 == record.sha256 and item.status != "deleted"
                 for (tenant, _), item in self._documents.items()
@@ -622,10 +840,9 @@ class InMemoryRepository:
             if duplicate:
                 raise ValueError("Dieses Dokument wurde für den Mandanten bereits erfasst.")
             self._documents[(principal.tenant_id, record.document_id)] = record
-            self._uploaders[(principal.tenant_id, record.document_id)] = _principal_token(
-                self._pseudonymizer, principal
-            )
-        return record
+            self._uploaders[(principal.tenant_id, record.document_id)] = actor
+            self._append_document_event(principal, actor, record.document_id, "uploaded", None, created)
+        return replace(record, is_own=True)
 
     def mark_document_indexed(self, principal: UserPrincipal, document_id: str, page_count: int) -> None:
         key = (principal.tenant_id, document_id)
@@ -640,10 +857,11 @@ class InMemoryRepository:
             self._documents[key] = replace(current, status="failed", retention_until=_now())
 
     def list_documents(self, principal: UserPrincipal) -> tuple[DocumentRecord, ...]:
+        actor = self._pseudonymizer.token(principal.subject_id)
         with self._lock:
             return tuple(
-                item
-                for (tenant, _), item in self._documents.items()
+                replace(item, is_own=self._uploaders.get((tenant, document_id)) == actor)
+                for (tenant, document_id), item in self._documents.items()
                 if tenant == principal.tenant_id and item.status != "deleted"
             )
 
@@ -652,6 +870,79 @@ class InMemoryRepository:
         with self._lock:
             current = self._documents[key]
             self._documents[key] = replace(current, status="deleted")
+
+    def release_document(
+        self, principal: UserPrincipal, document_id: str, *, review_due_at: datetime
+    ) -> DocumentRelease:
+        _require_document_release(principal)
+        now = _now()
+        actor = _principal_token(self._pseudonymizer, principal)
+        tenant = principal.tenant_id
+        with self._lock:
+            current = self._find_document(tenant, document_id, actor)
+            if current is None:
+                raise KeyError(document_id)
+            _check_document_release(current, review_due_at, now)
+            released = replace(current, release_status="released", released_at=now, review_due_at=review_due_at)
+            self._documents[(tenant, document_id)] = replace(released, is_own=False)
+            self._append_document_event(principal, actor, document_id, "released", None, now)
+            superseded = None
+            cited = 0
+            previous = self._find_document(tenant, current.supersedes_document_id, actor)
+            if previous is not None and previous.release_status == "released":
+                superseded = replace(
+                    previous,
+                    release_status="withdrawn",
+                    withdrawn_at=now,
+                    withdrawal_reason=DOCUMENT_SUPERSEDED_REASON,
+                )
+                self._documents[(tenant, previous.document_id)] = replace(superseded, is_own=False)
+                self._append_document_event(
+                    principal, actor, previous.document_id, "withdrawn", DOCUMENT_SUPERSEDED_REASON, now
+                )
+                cited = self._citing_answers(tenant, previous.document_id)
+        return DocumentRelease(released, superseded, cited)
+
+    def withdraw_document(self, principal: UserPrincipal, document_id: str, reason_code: str) -> DocumentWithdrawal:
+        _require_document_release(principal)
+        now = _now()
+        actor = _principal_token(self._pseudonymizer, principal)
+        tenant = principal.tenant_id
+        with self._lock:
+            current = self._find_document(tenant, document_id, actor)
+            if current is None:
+                raise KeyError(document_id)
+            _check_document_withdrawal(current, reason_code)
+            withdrawn = replace(current, release_status="withdrawn", withdrawn_at=now, withdrawal_reason=reason_code)
+            self._documents[(tenant, document_id)] = replace(withdrawn, is_own=False)
+            self._append_document_event(principal, actor, document_id, "withdrawn", reason_code, now)
+            return DocumentWithdrawal(withdrawn, self._citing_answers(tenant, document_id))
+
+    def confirm_document_review(
+        self, principal: UserPrincipal, document_id: str, *, review_due_at: datetime
+    ) -> DocumentRecord:
+        _require_document_release(principal)
+        now = _now()
+        actor = _principal_token(self._pseudonymizer, principal)
+        tenant = principal.tenant_id
+        with self._lock:
+            current = self._find_document(tenant, document_id, actor)
+            if current is None:
+                raise KeyError(document_id)
+            _check_document_review(current, review_due_at, now)
+            confirmed = replace(current, review_due_at=review_due_at)
+            self._documents[(tenant, document_id)] = replace(confirmed, is_own=False)
+            self._append_document_event(principal, actor, document_id, "review_confirmed", None, now)
+            return confirmed
+
+    def list_document_events(self, principal: UserPrincipal, document_id: str) -> tuple[DocumentEventRecord, ...]:
+        subject = self._pseudonymizer.token(principal.subject_id)
+        with self._lock:
+            return tuple(
+                replace(event, is_own=actor == subject)
+                for tenant, actor, event in self._document_events
+                if tenant == principal.tenant_id and event.document_id == document_id
+            )
 
     def record_answer(self, principal: UserPrincipal, question: str, answer: GroundedAnswer) -> None:
         del question
@@ -964,6 +1255,11 @@ class InMemoryRepository:
                 for tenant, actor, event in self._incident_events
                 if tenant == principal.tenant_id and actor == subject
             ]
+            document_steps = [
+                _document_step(event)
+                for tenant, actor, event in self._document_events
+                if tenant == principal.tenant_id and actor == subject
+            ]
         return {
             "schema": SUBJECT_EXPORT_SCHEMA,
             "generated_at": _now().isoformat(),
@@ -974,6 +1270,7 @@ class InMemoryRepository:
             "reviews_given": reviews,
             "incidents_created": incidents,
             "incident_steps": steps,
+            "document_steps": document_steps,
             "privacy_requests": [item.__dict__ for item in self.list_privacy_requests(principal)],
         }
 
@@ -1110,6 +1407,7 @@ class PostgresRepository:
             "tenants",
             "assets",
             "documents",
+            "document_events",
             "analysis_runs",
             "analysis_reviews",
             "incidents",
@@ -1140,10 +1438,14 @@ class PostgresRepository:
                       AND column_name IN ('functional_location', 'equipment_number')"""
                 )
                 sap_columns = cursor.fetchone()[0]
+                cursor.execute(_COUNT_DOCUMENT_RELEASE_COLUMNS_SQL)
+                release_columns = cursor.fetchone()[0]
         if protected != required_tables or purge_function is None or tenant_function is None:
             raise RuntimeError("Database schema is missing required RLS or lifecycle controls")
         if sap_columns != 2:
             raise RuntimeError("Database schema is missing asset SAP reference columns; run the bootstrap migration")
+        if release_columns != 8:
+            raise RuntimeError("Database schema is missing document release columns; run the bootstrap migration")
 
     def upsert_asset(
         self,
@@ -1214,10 +1516,52 @@ class PostgresRepository:
                 )
                 return tuple(AssetRecord(*row) for row in cursor.fetchall())
 
-    def register_document(self, principal: UserPrincipal, upload: ValidatedUpload) -> DocumentRecord:
+    @staticmethod
+    def _locked_document(cursor, document_id: str | None, actor: str) -> DocumentRecord | None:
+        """Row-locked current state of a document that is not deleted, or None."""
+        if document_id is None or not _is_uuid(document_id):
+            return None
+        cursor.execute(_LOCK_DOCUMENT_SQL, (actor, document_id))
+        row = cursor.fetchone()
+        return None if row is None else DocumentRecord(*row)
+
+    def _insert_document_event(
+        self,
+        cursor,
+        principal: UserPrincipal,
+        actor: str,
+        document_id: str,
+        event_type: str,
+        reason_code: str | None,
+        occurred_at: datetime,
+    ) -> None:
+        cursor.execute(
+            _INSERT_DOCUMENT_EVENT_SQL,
+            (
+                str(uuid.uuid4()),
+                principal.tenant_id,
+                document_id,
+                event_type,
+                reason_code,
+                principal.role[:40],
+                actor,
+                occurred_at,
+            ),
+        )
+
+    @staticmethod
+    def _citing_answers(cursor, document_id: str) -> int:
+        cursor.execute(_COUNT_CITING_ANSWERS_SQL, (json.dumps([{"document_id": document_id}]),))
+        return int(cursor.fetchone()[0])
+
+    def register_document(
+        self, principal: UserPrincipal, upload: ValidatedUpload, control: DocumentControl | None = None
+    ) -> DocumentRecord:
         created = _now()
         expires = self._retention.expires_at(RecordClass.UPLOADED_CONTENT, created)
         actor = _principal_token(self._pseudonymizer, principal)
+        requested = control or DocumentControl()
+        replaced = requested.supersedes_document_id
         with self._connect() as connection:
             with connection.cursor() as cursor:
                 self._tenant(cursor, principal.tenant_id)
@@ -1225,11 +1569,15 @@ class PostgresRepository:
                     "INSERT INTO tenants (tenant_id, display_name) VALUES (%s,%s) ON CONFLICT DO NOTHING",
                     (principal.tenant_id, principal.tenant_id),
                 )
+                # Locking the replaced document serialises two uploads that try to replace it at once.
+                predecessor = self._locked_document(cursor, replaced, actor)
+                pending = False
+                if predecessor is not None:
+                    cursor.execute(_COUNT_PENDING_SUCCESSORS_SQL, (predecessor.document_id,))
+                    pending = cursor.fetchone()[0] > 0
+                checked = _check_document_control(requested, predecessor, pending)
                 cursor.execute(
-                    """INSERT INTO documents
-                    (document_id, tenant_id, display_name, sha256, status, page_count,
-                     created_by_token, created_at, retention_until)
-                    VALUES (%s, %s, %s, %s, 'processing', 0, %s, %s, %s)""",
+                    _INSERT_DOCUMENT_SQL,
                     (
                         upload.document_id,
                         principal.tenant_id,
@@ -1238,8 +1586,12 @@ class PostgresRepository:
                         actor,
                         created,
                         expires,
+                        checked.revision,
+                        checked.document_number,
+                        checked.supersedes_document_id,
                     ),
                 )
+                self._insert_document_event(cursor, principal, actor, upload.document_id, "uploaded", None, created)
         return DocumentRecord(
             upload.document_id,
             principal.tenant_id,
@@ -1249,6 +1601,11 @@ class PostgresRepository:
             0,
             created,
             expires,
+            release_status="draft",
+            revision=checked.revision,
+            document_number=checked.document_number,
+            supersedes_document_id=checked.supersedes_document_id,
+            is_own=True,
         )
 
     def mark_document_indexed(self, principal: UserPrincipal, document_id: str, page_count: int) -> None:
@@ -1277,11 +1634,7 @@ class PostgresRepository:
         with self._connect() as connection:
             with connection.cursor() as cursor:
                 self._tenant(cursor, principal.tenant_id)
-                cursor.execute(
-                    """SELECT document_id::text, tenant_id, display_name, sha256, status,
-                    page_count, created_at, retention_until FROM documents
-                    WHERE deleted_at IS NULL ORDER BY created_at DESC"""
-                )
+                cursor.execute(_SELECT_DOCUMENTS_SQL, (self._pseudonymizer.token(principal.subject_id),))
                 return tuple(DocumentRecord(*row) for row in cursor.fetchall())
 
     def delete_document(self, principal: UserPrincipal, document_id: str) -> None:
@@ -1295,6 +1648,85 @@ class PostgresRepository:
                 )
                 if cursor.rowcount != 1:
                     raise KeyError(document_id)
+
+    def release_document(
+        self, principal: UserPrincipal, document_id: str, *, review_due_at: datetime
+    ) -> DocumentRelease:
+        _require_document_release(principal)
+        now = _now()
+        actor = _principal_token(self._pseudonymizer, principal)
+        superseded = None
+        cited = 0
+        with self._connect() as connection:
+            with connection.cursor() as cursor:
+                self._tenant(cursor, principal.tenant_id)
+                current = self._locked_document(cursor, document_id, actor)
+                if current is None:
+                    raise KeyError(document_id)
+                _check_document_release(current, review_due_at, now)
+                cursor.execute(_RELEASE_DOCUMENT_SQL, (now, review_due_at, document_id))
+                self._insert_document_event(cursor, principal, actor, document_id, "released", None, now)
+                # The new revision takes its predecessor out of use in the same transaction.
+                previous = self._locked_document(cursor, current.supersedes_document_id, actor)
+                if previous is not None and previous.release_status == "released":
+                    cursor.execute(_WITHDRAW_DOCUMENT_SQL, (now, DOCUMENT_SUPERSEDED_REASON, previous.document_id))
+                    self._insert_document_event(
+                        cursor, principal, actor, previous.document_id, "withdrawn", DOCUMENT_SUPERSEDED_REASON, now
+                    )
+                    superseded = replace(
+                        previous,
+                        release_status="withdrawn",
+                        withdrawn_at=now,
+                        withdrawal_reason=DOCUMENT_SUPERSEDED_REASON,
+                    )
+                    cited = self._citing_answers(cursor, previous.document_id)
+        released = replace(current, release_status="released", released_at=now, review_due_at=review_due_at)
+        return DocumentRelease(released, superseded, cited)
+
+    def withdraw_document(self, principal: UserPrincipal, document_id: str, reason_code: str) -> DocumentWithdrawal:
+        _require_document_release(principal)
+        now = _now()
+        actor = _principal_token(self._pseudonymizer, principal)
+        with self._connect() as connection:
+            with connection.cursor() as cursor:
+                self._tenant(cursor, principal.tenant_id)
+                current = self._locked_document(cursor, document_id, actor)
+                if current is None:
+                    raise KeyError(document_id)
+                _check_document_withdrawal(current, reason_code)
+                cursor.execute(_WITHDRAW_DOCUMENT_SQL, (now, reason_code, document_id))
+                self._insert_document_event(cursor, principal, actor, document_id, "withdrawn", reason_code, now)
+                cited = self._citing_answers(cursor, document_id)
+        withdrawn = replace(current, release_status="withdrawn", withdrawn_at=now, withdrawal_reason=reason_code)
+        return DocumentWithdrawal(withdrawn, cited)
+
+    def confirm_document_review(
+        self, principal: UserPrincipal, document_id: str, *, review_due_at: datetime
+    ) -> DocumentRecord:
+        _require_document_release(principal)
+        now = _now()
+        actor = _principal_token(self._pseudonymizer, principal)
+        with self._connect() as connection:
+            with connection.cursor() as cursor:
+                self._tenant(cursor, principal.tenant_id)
+                current = self._locked_document(cursor, document_id, actor)
+                if current is None:
+                    raise KeyError(document_id)
+                _check_document_review(current, review_due_at, now)
+                cursor.execute(_CONFIRM_DOCUMENT_REVIEW_SQL, (review_due_at, document_id))
+                self._insert_document_event(cursor, principal, actor, document_id, "review_confirmed", None, now)
+        return replace(current, review_due_at=review_due_at)
+
+    def list_document_events(self, principal: UserPrincipal, document_id: str) -> tuple[DocumentEventRecord, ...]:
+        if not _is_uuid(document_id):
+            return ()
+        with self._connect() as connection:
+            with connection.cursor() as cursor:
+                self._tenant(cursor, principal.tenant_id)
+                cursor.execute(
+                    _SELECT_DOCUMENT_EVENTS_SQL, (self._pseudonymizer.token(principal.subject_id), document_id)
+                )
+                return tuple(DocumentEventRecord(*row) for row in cursor.fetchall())
 
     def record_answer(self, principal: UserPrincipal, question: str, answer: GroundedAnswer) -> None:
         actor = _principal_token(self._pseudonymizer, principal)
@@ -1709,6 +2141,8 @@ class PostgresRepository:
                     (subject,),
                 )
                 steps = [_incident_step(IncidentEventRecord(*row)) for row in cursor.fetchall()]
+                cursor.execute(_SELECT_OWN_DOCUMENT_EVENTS_SQL, (subject,))
+                document_steps = [_document_step(DocumentEventRecord(*row)) for row in cursor.fetchall()]
         return {
             "schema": SUBJECT_EXPORT_SCHEMA,
             "generated_at": _now().isoformat(),
@@ -1719,6 +2153,7 @@ class PostgresRepository:
             "reviews_given": reviews,
             "incidents_created": incidents,
             "incident_steps": steps,
+            "document_steps": document_steps,
             "privacy_requests": [item.__dict__ for item in self.list_privacy_requests(principal)],
         }
 
@@ -1732,14 +2167,7 @@ class PostgresRepository:
         with self._connect() as connection:
             with connection.cursor() as cursor:
                 self._tenant(cursor, principal.tenant_id)
-                cursor.execute(
-                    """SELECT document_id::text, tenant_id, display_name, sha256, status,
-                    page_count, created_at, retention_until FROM documents
-                    WHERE deleted_at IS NULL AND retention_until <= now()
-                      AND NOT EXISTS (SELECT 1 FROM legal_holds
-                        WHERE released_at IS NULL AND 'uploaded_content' = ANY(record_classes))
-                    ORDER BY retention_until"""
-                )
+                cursor.execute(_SELECT_EXPIRED_DOCUMENTS_SQL)
                 return tuple(DocumentRecord(*row) for row in cursor.fetchall())
 
     def purge_expired_records(self, principal: UserPrincipal) -> Mapping[str, int]:
@@ -1877,6 +2305,48 @@ class PostgresRepository:
                 cursor.execute(_SELECT_LEGAL_HOLDS_SQL)
                 return tuple(_legal_hold(row) for row in cursor.fetchall())
 
+
+# Column order matches DocumentRecord; the last column tells whether the caller uploaded the document.
+_SELECT_DOCUMENTS_SQL = """SELECT document_id::text, tenant_id, display_name, sha256, status, page_count, created_at,
+    retention_until, release_status, revision, document_number, released_at, review_due_at, withdrawn_at,
+    withdrawal_reason, supersedes_document_id::text, created_by_token = %s
+    FROM documents WHERE deleted_at IS NULL ORDER BY created_at DESC"""
+_LOCK_DOCUMENT_SQL = """SELECT document_id::text, tenant_id, display_name, sha256, status, page_count, created_at,
+    retention_until, release_status, revision, document_number, released_at, review_due_at, withdrawn_at,
+    withdrawal_reason, supersedes_document_id::text, created_by_token = %s
+    FROM documents WHERE document_id=%s AND deleted_at IS NULL FOR UPDATE"""
+# The retention job runs without a person, so no document counts as its own.
+_SELECT_EXPIRED_DOCUMENTS_SQL = """SELECT document_id::text, tenant_id, display_name, sha256, status, page_count,
+    created_at, retention_until, release_status, revision, document_number, released_at, review_due_at, withdrawn_at,
+    withdrawal_reason, supersedes_document_id::text, false
+    FROM documents WHERE deleted_at IS NULL AND retention_until <= now()
+      AND NOT EXISTS (SELECT 1 FROM legal_holds
+        WHERE released_at IS NULL AND 'uploaded_content' = ANY(record_classes))
+    ORDER BY retention_until"""
+_INSERT_DOCUMENT_SQL = """INSERT INTO documents
+    (document_id, tenant_id, display_name, sha256, status, page_count, created_by_token, created_at, retention_until,
+     release_status, revision, document_number, supersedes_document_id)
+    VALUES (%s, %s, %s, %s, 'processing', 0, %s, %s, %s, 'draft', %s, %s, %s)"""
+_COUNT_PENDING_SUCCESSORS_SQL = """SELECT count(*) FROM documents
+    WHERE supersedes_document_id=%s AND deleted_at IS NULL AND status <> 'failed' AND release_status='draft'"""
+_RELEASE_DOCUMENT_SQL = """UPDATE documents SET release_status='released', released_at=%s, review_due_at=%s
+    WHERE document_id=%s"""
+_WITHDRAW_DOCUMENT_SQL = """UPDATE documents SET release_status='withdrawn', withdrawn_at=%s, withdrawal_reason=%s
+    WHERE document_id=%s"""
+_CONFIRM_DOCUMENT_REVIEW_SQL = "UPDATE documents SET review_due_at=%s WHERE document_id=%s"
+_INSERT_DOCUMENT_EVENT_SQL = """INSERT INTO document_events
+    (event_id, tenant_id, document_id, event_type, reason_code, actor_role, actor_token, occurred_at)
+    VALUES (%s,%s,%s,%s,%s,%s,%s,%s)"""
+_SELECT_DOCUMENT_EVENTS_SQL = """SELECT event_id::text, document_id::text, event_type, reason_code, actor_role,
+    occurred_at, actor_token = %s FROM document_events WHERE document_id=%s ORDER BY occurred_at, event_id"""
+_SELECT_OWN_DOCUMENT_EVENTS_SQL = """SELECT event_id::text, document_id::text, event_type, reason_code, actor_role,
+    occurred_at, true FROM document_events WHERE actor_token=%s ORDER BY occurred_at, event_id"""
+# Stored answers keep their citations as JSON; containment finds every answer that cites the document.
+_COUNT_CITING_ANSWERS_SQL = "SELECT count(*) FROM analysis_runs WHERE citations @> %s::jsonb"
+_COUNT_DOCUMENT_RELEASE_COLUMNS_SQL = """SELECT count(*) FROM information_schema.columns
+    WHERE table_schema='public' AND table_name='documents'
+      AND column_name IN ('release_status', 'revision', 'document_number', 'released_at', 'review_due_at',
+                          'withdrawn_at', 'withdrawal_reason', 'supersedes_document_id')"""
 
 _SELECT_PRIVACY_QUEUE_SQL = """SELECT request_id::text, tenant_id, request_type, status, requested_at, due_at, completed_at,
     evidence_reference, decision_reason FROM privacy_requests ORDER BY requested_at DESC LIMIT 500"""

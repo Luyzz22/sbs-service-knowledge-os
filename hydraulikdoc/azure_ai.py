@@ -7,8 +7,9 @@ import hashlib
 import html
 import re
 import time
+import uuid
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 from urllib.parse import quote, urlparse
 
@@ -26,7 +27,7 @@ from .governance import (
     system_prompt,
 )
 from .i18n import DEFAULT_LANGUAGE
-from .repository import DocumentRecord, EnterpriseRepository
+from .repository import DocumentControl, DocumentRecord, EnterpriseRepository, require_document_deletion
 from .security import (
     ValidatedUpload,
     bounded_untrusted_text,
@@ -411,11 +412,18 @@ class AzureHybridSearch:
             if any(not item.get("status") for item in result):
                 raise AzureServiceError("At least one search document failed to index")
 
-    def query(self, tenant_id: str, question: str, vector: Sequence[float]) -> tuple[SearchHit, ...]:
+    def query(
+        self, tenant_id: str, question: str, vector: Sequence[float], document_ids: Sequence[str]
+    ) -> tuple[SearchHit, ...]:
+        """Hybrid search restricted to the tenant and to the given, released documents."""
+        if not document_ids:
+            return ()
+        # Only canonical UUIDs reach the filter expression; anything else is a programming error.
+        released = ",".join(str(uuid.UUID(document_id)) for document_id in document_ids)
         url = f"{self._endpoint}/indexes/{self._index}/docs/search?api-version={SEARCH_API_VERSION}"
         payload: dict[str, Any] = {
             "search": question,
-            "filter": f"tenant_id eq '{odata_literal(tenant_id)}'",
+            "filter": f"tenant_id eq '{odata_literal(tenant_id)}' and search.in(document_id, '{released}', ',')",
             "vectorQueries": [{"kind": "vector", "vector": list(vector), "fields": "content_vector", "k": 50}],
             "select": "chunk_id,document_id,display_name,page,content",
             "top": 8,
@@ -532,10 +540,13 @@ class AzureRAGService:
         self._blobs = AzureBlobStore(settings, credentials)
         self._search.ensure_index()
 
-    def ingest(self, principal: UserPrincipal, upload: ValidatedUpload) -> DocumentRecord:
+    def ingest(
+        self, principal: UserPrincipal, upload: ValidatedUpload, control: DocumentControl | None = None
+    ) -> DocumentRecord:
+        """Store and index an upload as a draft; it is cited only after a second person released it."""
         require_permission(principal, "knowledge:write")
         started = time.monotonic()
-        record = self._repository.register_document(principal, upload)
+        record = self._repository.register_document(principal, upload, control)
         try:
             self._blobs.put(principal.tenant_id, upload)
             self._blobs.wait_until_clean(principal.tenant_id, upload.document_id)
@@ -578,16 +589,7 @@ class AzureRAGService:
                     "region": self._settings.azure_region,
                 },
             )
-            return DocumentRecord(
-                record.document_id,
-                record.tenant_id,
-                record.display_name,
-                record.sha256,
-                "ready",
-                len(pages),
-                record.created_at,
-                record.retention_until,
-            )
+            return replace(record, status="ready", page_count=len(pages))
         except Exception:
             cleanup_completed = True
             try:
@@ -626,8 +628,18 @@ class AzureRAGService:
             raise PermissionError(decision.reason_code)
         cleaned = validate_question(question, self._settings.max_question_chars)
         started = time.monotonic()
-        vector = self._models.embeddings([cleaned])[0]
-        hits = self._search.query(principal.tenant_id, cleaned, vector)
+        # The database decides what counts as released. The index filter only narrows the search;
+        # every hit is checked against the released set again before it can reach the model.
+        released = {
+            document.document_id: document
+            for document in self._repository.list_documents(principal)
+            if document.usable_for_answers
+        }
+        hits: tuple[SearchHit, ...] = ()
+        if released:
+            vector = self._models.embeddings([cleaned])[0]
+            found = self._search.query(principal.tenant_id, cleaned, vector, tuple(released))
+            hits = tuple(hit for hit in found if hit.document_id in released)
         if not hits:
             text = NO_EVIDENCE_TEXT.get(language, NO_EVIDENCE_TEXT[DEFAULT_LANGUAGE])
         else:
@@ -640,7 +652,15 @@ class AzureRAGService:
             if not has_valid_source_citations(text, len(hits)):
                 raise AzureServiceError("Model output did not pass citation validation")
         citations = tuple(
-            SourceCitation(hit.document_id, hit.display_name, hit.page, hit.chunk_id, hit.score) for hit in hits
+            SourceCitation(
+                hit.document_id,
+                hit.display_name,
+                hit.page,
+                hit.chunk_id,
+                hit.score,
+                released[hit.document_id].revision,
+            )
+            for hit in hits
         )
         answer = GroundedAnswer.create(
             text=text,
@@ -677,6 +697,7 @@ class AzureRAGService:
 
     def delete_document(self, principal: UserPrincipal, document_id: str) -> None:
         require_permission(principal, "knowledge:write")
+        require_document_deletion(principal, self._repository, document_id)
         self._search.delete_document(principal.tenant_id, document_id)
         self._blobs.delete(principal.tenant_id, document_id)
         self._repository.delete_document(principal, document_id)

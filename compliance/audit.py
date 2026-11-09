@@ -22,6 +22,7 @@ class AuditOutcome(StrEnum):
 
 _ALLOWED_METADATA_KEYS = frozenset(
     {
+        "answer_count",
         "answer_language",
         "collection",
         "deletion_count",

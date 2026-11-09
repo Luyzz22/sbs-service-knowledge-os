@@ -33,13 +33,13 @@ Der Demo-Pfad (`AI_BACKEND=demo`) nutzt keinen der oben genannten Modellbestandt
 
 ## Input und Output
 
-Input: validierte PDF-Inhalte und eine Frage bis 2.000 Zeichen. PDF-Dateien durchlaufen statische Kontrolle und Azure Defender Malware Scanning. Source-Inhalte werden als nicht vertrauenswürdige Daten markiert.
+Input: validierte PDF-Inhalte und eine Frage bis 2.000 Zeichen. PDF-Dateien durchlaufen statische Kontrolle und Azure Defender Malware Scanning. Source-Inhalte werden als nicht vertrauenswürdige Daten markiert. Als Evidenz kommen nur Dokumente in Frage, die eine zweite Person freigegeben hat und die nicht zurückgezogen sind; Entwürfe sind indexiert, werden aber weder gesucht noch an das Modell übergeben.
 
-Output: ein KI-Entwurf mit `[Sx]`-Markern, einer separaten Liste aus Dokument, Seite, Chunk und Retrievalscore, Modell-/Deployment-/Region-/Promptprovenienz sowie Reviewstatus. Ungültige oder fehlende Quellenmarker führen zu einem Fehler; der Output wird nicht als Analyse gespeichert.
+Output: ein KI-Entwurf mit `[Sx]`-Markern, einer separaten Liste aus Dokument, Revision, Seite, Chunk und Retrievalscore, Modell-/Deployment-/Region-/Promptprovenienz sowie Reviewstatus. Ungültige oder fehlende Quellenmarker führen zu einem Fehler; der Output wird nicht als Analyse gespeichert.
 
 ## Human Oversight
 
-Jeder Output startet als `draft`. Technician, Supervisor oder Admin können reviewen. Nur Supervisor/Admin mit `analysis:export` können einen akzeptierten Output exportieren. Sicherheitsrelevante Diagnose ist als `heightened` markiert und verlangt qualifizierte Prüfung. Die UI weist vor der ersten Nutzung und beim Ergebnis auf Grenzen hin.
+Jeder Output startet als `draft`. Technician, Supervisor oder Admin können reviewen. Nur Supervisor/Admin mit `analysis:export` können einen akzeptierten Output exportieren. Sicherheitsrelevante Diagnose ist als `heightened` markiert und verlangt qualifizierte Prüfung. Die UI weist vor der ersten Nutzung und beim Ergebnis auf Grenzen hin. Der Aufsicht vorgelagert ist die Dokumentenlenkung: Supervisor oder Admin geben Quellen frei, nie den eigenen Upload, und können sie mit Grund zurückziehen. Zitiert eine gespeicherte Antwort eine inzwischen zurückgezogene Quelle, steht das beim Ergebnis.
 
 ## Daten- und Loggingkonzept
 
@@ -53,6 +53,7 @@ Jeder Output startet als `draft`. Technician, Supervisor oder Admin können revi
 
 - Retrieval kann relevante Seiten verfehlen oder irrelevante Passagen priorisieren.
 - Ein formal gültiges Zitat beweist nicht, dass die Aussage fachlich korrekt aus der Quelle abgeleitet wurde.
+- Die Freigabe eines Dokuments belegt die Prüfung durch eine zweite Person, nicht seine fachliche Richtigkeit oder Aktualität beim Hersteller. Ein überfälliger Überprüfungstermin sperrt die Quelle nicht.
 - Tabellen, Scans, Zeichnungen, alte Normstände und uneinheitliche Einheiten können falsch extrahiert werden.
 - Hersteller-, Anlagen- und Fluidgrenzen sind kontextspezifisch.
 - Das System besitzt keine Echtzeitkenntnis des Maschinenzustands, sofern Daten nicht explizit importiert werden.

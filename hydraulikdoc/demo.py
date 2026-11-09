@@ -28,10 +28,12 @@ from .i18n import DEFAULT_LANGUAGE, msg
 from .repository import (
     INCIDENT_ANALYSIS_FIELDS,
     INCIDENT_CLOSE_PERMISSION,
+    DocumentControl,
     DocumentRecord,
     EnterpriseRepository,
     IncidentRecord,
     InMemoryRepository,
+    require_document_deletion,
 )
 from .security import InputRejected, ValidatedUpload, validate_question
 
@@ -98,7 +100,52 @@ DEMO_DOCUMENTS: Mapping[str, Mapping[int, str]] = {
             "Nach der Filtration ist eine Kontrollprobe nach 50 Betriebsstunden zu entnehmen."
         ),
     },
+    # Revision 2 shortens the oil change interval. It is seeded as a draft, so answers keep citing
+    # revision 1 until a supervisor releases it; the release then withdraws revision 1.
+    "DEMO · Betriebsanleitung Hydraulikaggregat HA-250, Revision 2 (synthetisch)": {
+        12: (
+            "Kapitel 4.2 Betriebsgrenzen. Der zulässige Betriebsdruck beträgt 210 bar. "
+            "Das Druckbegrenzungsventil ist werkseitig auf 250 bar eingestellt. "
+            "Ein Prüfdruck von 300 bar darf nur im Rahmen der Abnahmeprüfung angefahren werden. "
+            "Bei Drücken über 250 bar im Betrieb ist das Aggregat stillzusetzen und das Druckbegrenzungsventil zu prüfen."
+        ),
+        18: (
+            "Kapitel 6.1 Fluidpflege. Verwendet wird Hydrauliköl HLP 46. "
+            "Die Öltemperatur soll im Betrieb zwischen 40 °C und 60 °C liegen. "
+            "Ab 70 °C Öltemperatur ist der Kühler zu prüfen, ab 85 °C ist das Aggregat abzuschalten. "
+            "Der Wassergehalt im Hydrauliköl darf 0,1 % nicht überschreiten. "
+            "Ein Ölwechsel ist nach 3000 Betriebsstunden oder bei Überschreitung der Grenzwerte erforderlich."
+        ),
+        24: (
+            "Kapitel 7.3 Filterwechsel. Der Rücklauffilter ist bei Ansprechen der Verschmutzungsanzeige, "
+            "spätestens nach 2000 Betriebsstunden, zu wechseln. "
+            "Vor Arbeiten am Hydrauliksystem ist das Aggregat drucklos zu machen und gegen Wiedereinschalten "
+            "zu sichern (LOTO)."
+        ),
+    },
 }
+
+
+@dataclass(frozen=True)
+class _DemoDocumentControl:
+    revision: str
+    document_number: str
+    released: bool = True
+    supersedes: str | None = None
+
+
+_HA_250_MANUAL = "DEMO · Betriebsanleitung Hydraulikaggregat HA-250 (synthetisch)"
+DEMO_DOCUMENT_CONTROL: Mapping[str, _DemoDocumentControl] = {
+    _HA_250_MANUAL: _DemoDocumentControl("1", "BA-HA-250"),
+    "DEMO · Wartungsplan Spritzgießmaschine SGM-80 (synthetisch)": _DemoDocumentControl("3", "WP-SGM-80"),
+    "DEMO · Betriebsanleitung Hydraulikaggregat HA-250, Revision 2 (synthetisch)": _DemoDocumentControl(
+        "2", "BA-HA-250", released=False, supersedes=_HA_250_MANUAL
+    ),
+}
+# Uploads in the seed come from this fictitious author, so the person loading the demo is the second
+# pair of eyes for every release, including the draft that is left open on purpose.
+DEMO_AUTHOR_SUBJECT = "demo:technische-redaktion"
+DEMO_REVIEW_INTERVAL = timedelta(days=365)
 
 DEMO_ASSETS = (
     {
@@ -253,10 +300,14 @@ def seed_demo_tenant(principal: UserPrincipal, repository: EnterpriseRepository)
         raise PermissionError(blockers[0])
     for asset in DEMO_ASSETS:
         repository.upsert_asset(principal, **asset)
+    now = datetime.now(UTC)
+    author = replace(principal, subject_id=DEMO_AUTHOR_SUBJECT, display_name="Technische Redaktion (Demo)", email=None)
+    registered: dict[str, str] = {}
     for display_name, pages in DEMO_DOCUMENTS.items():
+        control = DEMO_DOCUMENT_CONTROL[display_name]
         content = "\n".join(pages.values()).encode("utf-8")
         record = repository.register_document(
-            principal,
+            author,
             ValidatedUpload(
                 document_id=str(uuid.uuid4()),
                 display_name=display_name,
@@ -264,9 +315,16 @@ def seed_demo_tenant(principal: UserPrincipal, repository: EnterpriseRepository)
                 content=b"",
                 content_type="text/plain",
             ),
+            DocumentControl(
+                revision=control.revision,
+                document_number=control.document_number,
+                supersedes_document_id=registered.get(control.supersedes or ""),
+            ),
         )
-        repository.mark_document_indexed(principal, record.document_id, max(pages))
-    now = datetime.now(UTC)
+        registered[display_name] = record.document_id
+        repository.mark_document_indexed(author, record.document_id, max(pages))
+        if control.released:
+            repository.release_document(principal, record.document_id, review_due_at=now + DEMO_REVIEW_INTERVAL)
     for item in DEMO_INCIDENTS:
         created = now - timedelta(days=item.created_days_ago)
         with _staged(repository, principal, created):
@@ -439,12 +497,15 @@ class DemoRAGService:
         self._settings = settings
         self._repository = repository
 
-    def ingest(self, principal: UserPrincipal, upload: ValidatedUpload) -> DocumentRecord:
-        del principal, upload
+    def ingest(
+        self, principal: UserPrincipal, upload: ValidatedUpload, control: DocumentControl | None = None
+    ) -> DocumentRecord:
+        del principal, upload, control
         raise InputRejected("Im Demo-Modus können keine Dokumente hochgeladen werden.")
 
     def delete_document(self, principal: UserPrincipal, document_id: str) -> None:
         require_permission(principal, "knowledge:write")
+        require_document_deletion(principal, self._repository, document_id)
         self._repository.delete_document(principal, document_id)
         self._repository.emit_audit(
             principal,
@@ -460,7 +521,8 @@ class DemoRAGService:
         candidates: list[_Hit] = []
         for document in self._repository.list_documents(principal):
             pages = DEMO_DOCUMENTS.get(document.display_name)
-            if not pages or document.status != "ready":
+            # Drafts and withdrawn revisions are never evidence, exactly as on the Azure path.
+            if not pages or not document.usable_for_answers:
                 continue
             for page, text in pages.items():
                 for sentence in _sentences(text):
@@ -509,6 +571,7 @@ class DemoRAGService:
                 hit.page,
                 hashlib.sha256(f"{hit.document.document_id}:{hit.page}:{hit.sentence}".encode()).hexdigest(),
                 float(hit.score),
+                hit.document.revision,
             )
             for hit in hits
         )

@@ -83,6 +83,8 @@ class SourceCitation:
     page: int
     chunk_id: str
     score: float | None = None
+    # Revision of the released document at answer time; empty for answers stored before document control.
+    revision: str = ""
 
 
 @dataclass(frozen=True)
