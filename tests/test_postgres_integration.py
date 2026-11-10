@@ -596,6 +596,143 @@ class PostgresSecurityIntegrationTests(unittest.TestCase):
         remaining = {item.document_id: item for item in runtime.list_documents(approver)}
         self.assertIsNone(remaining[second.document_id].supersedes_document_id)
 
+    def test_review_queue_rules_question_retention_and_quality_records(self) -> None:
+        from datetime import UTC, datetime, timedelta
+
+        from hydraulikdoc.ai_quality import answer_quality
+        from hydraulikdoc.auth import ROLE_PERMISSIONS, UserPrincipal
+        from hydraulikdoc.config import AppSettings
+        from hydraulikdoc.governance import AIProvenance, GroundedAnswer, ReviewStatus, SourceCitation, UseCase
+        from hydraulikdoc.repository import DocumentControl, PostgresRepository
+        from hydraulikdoc.security import ValidatedUpload
+
+        runtime = PostgresRepository(
+            AppSettings.from_environment(
+                {
+                    "APP_ENV": "test",
+                    "PERSISTENCE_BACKEND": "postgres",
+                    "AUDIT_HMAC_KEY": "integration-audit-key-" + "x" * 16,
+                    "DATABASE_URL": self.app_dsn,
+                }
+            )
+        )
+        runtime.check_schema()
+        tenant = f"{self.tenant_a}-reviews"
+        technician = ROLE_PERMISSIONS["technician"]
+        asker = UserPrincipal("asker", tenant, "Asker", "technician", permissions=technician)
+        colleague = UserPrincipal("colleague", tenant, "Colleague", "technician", permissions=technician)
+        expert = UserPrincipal("expert", tenant, "Expert", "supervisor", permissions=ROLE_PERMISSIONS["supervisor"])
+        outsider = UserPrincipal(
+            "expert", f"{self.tenant_b}-reviews", "Other", "supervisor", permissions=ROLE_PERMISSIONS["supervisor"]
+        )
+
+        def code(error: BaseException) -> str:
+            return str(error.args[0])
+
+        document = runtime.register_document(
+            asker,
+            ValidatedUpload(str(uuid.uuid4()), "Handbuch.pdf", "e" * 64, b"", "application/pdf"),
+            DocumentControl("3", "BA-PU-7"),
+        )
+        runtime.mark_document_indexed(asker, document.document_id, 20)
+        runtime.release_document(expert, document.document_id, review_due_at=datetime.now(UTC) + timedelta(days=90))
+
+        def ask(use_case: UseCase, question: str, cited: bool = True) -> GroundedAnswer:
+            citations = (SourceCitation(document.document_id, "Handbuch.pdf", 4, "chunk-4", 0.8, "3"),) if cited else ()
+            answer = GroundedAnswer.create(
+                text="Der Betriebsdruck beträgt 210 bar [S1]." if cited else "Keine Evidenz.",
+                citations=citations,
+                provenance=AIProvenance("azure-openai", "integration", "snapshot", "swedencentral"),
+                use_case=use_case,
+            )
+            runtime.record_answer(asker, question, answer)
+            return answer
+
+        safety = ask(UseCase.SAFETY_RELEVANT_DIAGNOSIS, "  Darf die Pumpe mit 260 bar laufen?  ")
+        ordinary = ask(UseCase.MAINTENANCE_ASSISTANCE, "Welcher Betriebsdruck gilt?")
+        escalated = ask(UseCase.MAINTENANCE_ASSISTANCE, "Welches Öl ist zulässig?", cited=False)
+
+        # The asker sees all three; a colleague only the one that needs a second person, with its question.
+        own = {item.answer.answer_id: item for item in runtime.list_review_queue(asker)}
+        self.assertEqual(set(own), {safety.answer_id, ordinary.answer_id, escalated.answer_id})
+        self.assertTrue(all(item.is_own for item in own.values()))
+        self.assertEqual(own[safety.answer_id].question, "Darf die Pumpe mit 260 bar laufen?")
+        self.assertIsNone(own[ordinary.answer_id].question)
+        (waiting,) = runtime.list_review_queue(colleague)
+        self.assertEqual((waiting.answer.answer_id, waiting.is_own), (safety.answer_id, False))
+        self.assertEqual(waiting.answer.citations, safety.citations)
+        self.assertEqual(waiting.answer.provenance.model_snapshot, "snapshot")
+        self.assertEqual(runtime.list_review_queue(outsider), ())
+
+        with self.assertRaises(PermissionError) as four_eyes:
+            runtime.record_review(asker, safety.answer_id, ReviewStatus.ACCEPTED)
+        self.assertEqual(code(four_eyes.exception), "FOUR_EYES_REVIEW_REQUIRED")
+        with self.assertRaises(KeyError):
+            runtime.record_review(outsider, safety.answer_id, ReviewStatus.ACCEPTED)
+        with self.assertRaises(ValueError) as no_reason:
+            runtime.record_review(colleague, safety.answer_id, ReviewStatus.REJECTED, "TECHNICAL_REJECTION")
+        self.assertEqual(code(no_reason.exception), "REVIEW_REASON_REQUIRED")
+
+        # Escalation stores the question; only an expert decides, and the decision clears it.
+        runtime.record_review(
+            asker, escalated.answer_id, ReviewStatus.NEEDS_EXPERT, question="Welches Öl ist zulässig?"
+        )
+        with self.assertRaises(PermissionError) as needs_expert:
+            runtime.record_review(colleague, escalated.answer_id, ReviewStatus.REJECTED, "incomplete")
+        self.assertEqual(code(needs_expert.exception), "EXPERT_REVIEW_REQUIRED")
+        queue = {item.answer.answer_id: item for item in runtime.list_review_queue(expert)}
+        self.assertEqual(set(queue), {safety.answer_id, escalated.answer_id})
+        self.assertEqual(queue[escalated.answer_id].question, "Welches Öl ist zulässig?")
+        self.assertEqual(
+            [(item.status, item.reviewer_role, item.is_own) for item in queue[escalated.answer_id].reviews],
+            [(ReviewStatus.NEEDS_EXPERT, "technician", False)],
+        )
+        runtime.record_review(expert, escalated.answer_id, ReviewStatus.REJECTED, "incomplete")
+        with self.assertRaises(ValueError) as decided:
+            runtime.record_review(expert, escalated.answer_id, ReviewStatus.ACCEPTED)
+        self.assertEqual(code(decided.exception), "REVIEW_ALREADY_DECIDED")
+
+        # A withdrawn source can no longer back an accepted answer.
+        runtime.record_review(asker, ordinary.answer_id, ReviewStatus.ACCEPTED)
+        runtime.withdraw_document(expert, document.document_id, "incorrect")
+        with self.assertRaises(ValueError) as withdrawn:
+            runtime.record_review(colleague, safety.answer_id, ReviewStatus.ACCEPTED)
+        self.assertEqual(code(withdrawn.exception), "REVIEW_SOURCE_NOT_RELEASED")
+        runtime.record_review(colleague, safety.answer_id, ReviewStatus.REJECTED, "outdated_source")
+        self.assertEqual(runtime.list_review_queue(expert), ())
+
+        with self.psycopg.connect(self.admin_dsn) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT count(*) FROM analysis_runs WHERE tenant_id=%s AND review_question IS NOT NULL", (tenant,)
+                )
+                self.assertEqual(cursor.fetchone()[0], 0)
+
+        export = runtime.subject_export(colleague)
+        self.assertEqual(
+            [(item["status"], item["reason_code"], item["reviewer_role"]) for item in export["reviews_given"]],
+            [("rejected", "outdated_source", "technician")],
+        )
+        self.assertTrue(all(item["review_question"] is None for item in runtime.subject_export(asker)["analysis_runs"]))
+
+        since = datetime.now(UTC) - timedelta(days=1)
+        records = runtime.list_answer_quality(expert, since=since, limit=10)
+        by_id = {item.answer_id: item for item in records}
+        self.assertEqual(
+            {key: (item.review_status, item.rejection_reason, item.escalated) for key, item in by_id.items()},
+            {
+                safety.answer_id: ("rejected", "outdated_source", False),
+                ordinary.answer_id: ("accepted", None, False),
+                escalated.answer_id: ("rejected", "incomplete", True),
+            },
+        )
+        self.assertEqual(by_id[escalated.answer_id].document_ids, ())
+        self.assertTrue(all(item.decided_at is not None for item in records))
+        self.assertEqual(len(runtime.list_answer_quality(expert, since=since, limit=2)), 2)
+        self.assertEqual(runtime.list_answer_quality(outsider, since=since, limit=10), ())
+        quality = answer_quality(records, runtime.list_documents(expert))
+        self.assertEqual((quality.answers, quality.accepted, quality.rejected, quality.without_evidence), (3, 1, 2, 1))
+
 
 if __name__ == "__main__":
     unittest.main()

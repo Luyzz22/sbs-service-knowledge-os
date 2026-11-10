@@ -21,7 +21,7 @@ from compliance.retention import RecordClass, RetentionPolicy
 
 from .auth import UserPrincipal
 from .config import AppSettings, PersistenceBackend
-from .governance import GroundedAnswer, ReviewStatus
+from .governance import AIProvenance, GroundedAnswer, ReviewStatus, RiskClass, SourceCitation, UseCase
 from .security import ValidatedUpload
 
 
@@ -92,6 +92,153 @@ class DocumentRelease:
 class DocumentWithdrawal:
     document: DocumentRecord
     cited_answer_count: int
+
+
+REVIEW_WRITE_PERMISSION = "review:write"
+# Deciding an answer that a colleague escalated to an expert.
+REVIEW_EXPERT_PERMISSION = "review:expert"
+# Fixed codes instead of free text: they can be counted, and nobody writes names into a rejection.
+REVIEW_REJECTION_REASONS = (
+    "incorrect_value",
+    "wrong_source",
+    "incomplete",
+    "outdated_source",
+    "unsafe_recommendation",
+    "not_applicable",
+)
+REVIEW_ESCALATION_REASON = "EXPERT_REVIEW"
+REVIEW_QUEUE_LIMIT = 200
+REVIEW_QUESTION_MAX_CHARS = 2000
+
+
+@dataclass(frozen=True)
+class AnswerReviewRecord:
+    answer_id: str
+    status: ReviewStatus
+    reason_code: str | None
+    reviewer_role: str
+    reviewed_at: datetime
+    is_own: bool = False
+
+
+@dataclass(frozen=True)
+class StoredAnswer:
+    """An answer as a reviewer sees it: never who asked, only whether it was this person."""
+
+    answer: GroundedAnswer
+    is_own: bool
+    # Kept only while a second person still has to decide; cleared with the decision.
+    question: str | None = None
+    reviews: tuple[AnswerReviewRecord, ...] = ()
+
+    @property
+    def needs_second_person(self) -> bool:
+        status = self.answer.review_status
+        return status is ReviewStatus.NEEDS_EXPERT or (
+            status is ReviewStatus.DRAFT and self.answer.risk_class is RiskClass.HEIGHTENED
+        )
+
+    def decidable_by(self, principal: UserPrincipal) -> bool:
+        """Whether this person may reject or escalate; accepting an own heightened answer stays blocked."""
+        if not principal.can(REVIEW_WRITE_PERMISSION):
+            return False
+        if self.answer.review_status is ReviewStatus.NEEDS_EXPERT:
+            return principal.can(REVIEW_EXPERT_PERMISSION)
+        return self.answer.review_status is ReviewStatus.DRAFT
+
+    def acceptable_by(self, principal: UserPrincipal) -> bool:
+        return self.decidable_by(principal) and not (self.is_own and self.answer.risk_class is RiskClass.HEIGHTENED)
+
+
+@dataclass(frozen=True)
+class AnswerQualityRecord:
+    """One answer for quality monitoring. It carries no reference to the asking or reviewing person."""
+
+    answer_id: str
+    generated_at: datetime
+    use_case: str
+    risk_class: str
+    review_status: str
+    prompt_version: str
+    model_snapshot: str
+    deployment: str
+    document_ids: tuple[str, ...]
+    decided_at: datetime | None
+    rejection_reason: str | None
+    escalated: bool
+
+
+def _retained_question(question: str | None) -> str | None:
+    cleaned = (question or "").strip()
+    return cleaned[:REVIEW_QUESTION_MAX_CHARS] or None
+
+
+def _check_review(
+    principal: UserPrincipal,
+    status: ReviewStatus,
+    reason_code: str | None,
+    *,
+    current: ReviewStatus,
+    heightened: bool,
+    is_asker: bool,
+    sources_released: bool,
+) -> str | None:
+    """Validate a review step and return the reason code to store. A decision is final."""
+    if status is ReviewStatus.DRAFT:
+        raise ValueError("REVIEW_STATUS_INVALID")
+    if not principal.can(REVIEW_WRITE_PERMISSION):
+        raise PermissionError("REVIEW_PERMISSION_REQUIRED")
+    if current in (ReviewStatus.ACCEPTED, ReviewStatus.REJECTED):
+        raise ValueError("REVIEW_ALREADY_DECIDED")
+    if current is ReviewStatus.NEEDS_EXPERT:
+        if status is ReviewStatus.NEEDS_EXPERT:
+            raise ValueError("REVIEW_ALREADY_ESCALATED")
+        if not principal.can(REVIEW_EXPERT_PERMISSION):
+            raise PermissionError("EXPERT_REVIEW_REQUIRED")
+    if status is ReviewStatus.ACCEPTED:
+        if heightened and is_asker:
+            raise PermissionError("FOUR_EYES_REVIEW_REQUIRED")
+        if not sources_released:
+            # A withdrawn or deleted source can no longer back an accepted result.
+            raise ValueError("REVIEW_SOURCE_NOT_RELEASED")
+        return None
+    if status is ReviewStatus.NEEDS_EXPERT:
+        return REVIEW_ESCALATION_REASON
+    if reason_code not in REVIEW_REJECTION_REASONS:
+        raise ValueError("REVIEW_REASON_REQUIRED")
+    return reason_code
+
+
+def _stored_answer_row(row: tuple[Any, ...], reviews: tuple[AnswerReviewRecord, ...]) -> StoredAnswer:
+    citations = tuple(
+        SourceCitation(
+            str(item["document_id"]),
+            str(item["display_name"]),
+            int(item["page"]),
+            str(item["chunk_id"]),
+            item.get("score"),
+            str(item.get("revision") or ""),
+        )
+        for item in row[11]
+    )
+    answer = GroundedAnswer(
+        answer_id=row[0],
+        text=row[1],
+        citations=citations,
+        provenance=AIProvenance(row[5], row[6], row[7], row[8], row[9], row[10], row[12]),
+        use_case=UseCase(row[2]),
+        risk_class=RiskClass(row[3]),
+        review_status=ReviewStatus(row[4]),
+    )
+    return StoredAnswer(answer, bool(row[13]), row[14], reviews)
+
+
+def _uuid_list(values: Iterable[str]) -> list[str] | None:
+    """Canonical UUIDs, or None when a value is not one (answers stored before documents had UUIDs)."""
+    try:
+        return sorted({str(uuid.UUID(value)) for value in values})
+    except ValueError:
+        return None
 
 
 DOCUMENT_RELEASE_PERMISSION = "document:release"
@@ -474,9 +621,17 @@ class EnterpriseRepository(Protocol):
         answer_id: str,
         status: ReviewStatus,
         reason_code: str | None = None,
+        *,
+        question: str | None = None,
     ) -> None: ...
 
     def answer_review_status(self, principal: UserPrincipal, answer_id: str) -> ReviewStatus: ...
+
+    def list_review_queue(self, principal: UserPrincipal) -> tuple[StoredAnswer, ...]: ...
+
+    def list_answer_quality(
+        self, principal: UserPrincipal, *, since: datetime, limit: int
+    ) -> tuple[AnswerQualityRecord, ...]: ...
 
     def create_incident(
         self,
@@ -567,8 +722,9 @@ def _now() -> datetime:
 
 
 # v2 adds uploaded documents, given reviews and own incident steps (GDPR Art. 15 completeness);
-# v3 adds the person's own document control steps (upload, release, withdrawal, review).
-SUBJECT_EXPORT_SCHEMA = "hydraulikdoc.subject-export.v3"
+# v3 adds the person's own document control steps (upload, release, withdrawal, review);
+# v4 adds a question kept for an open review and the reason and role of given reviews.
+SUBJECT_EXPORT_SCHEMA = "hydraulikdoc.subject-export.v4"
 
 
 def _document_step(event: DocumentEventRecord) -> dict[str, Any]:
@@ -578,6 +734,16 @@ def _document_step(event: DocumentEventRecord) -> dict[str, Any]:
         "reason_code": event.reason_code,
         "actor_role": event.actor_role,
         "occurred_at": event.occurred_at.isoformat(),
+    }
+
+
+def _review_step(record: AnswerReviewRecord) -> dict[str, Any]:
+    return {
+        "answer_id": record.answer_id,
+        "status": record.status.value,
+        "reason_code": record.reason_code,
+        "reviewer_role": record.reviewer_role,
+        "reviewed_at": record.reviewed_at.isoformat(),
     }
 
 
@@ -717,7 +883,8 @@ class InMemoryRepository:
         self._scripted_times: dict[str, datetime] = {}
         # Pseudonyms of uploaders, reviewers and reporters, kept apart from the records like the database columns.
         self._uploaders: dict[tuple[str, str], str] = {}
-        self._review_log: list[tuple[str, str, str, ReviewStatus, datetime]] = []
+        self._review_log: list[tuple[str, str, AnswerReviewRecord]] = []
+        self._review_questions: dict[tuple[str, str], str] = {}
         self._reporters: dict[tuple[str, str], str] = {}
         self._legal_holds: dict[tuple[str, str], LegalHoldRecord] = {}
         self._lock = RLock()
@@ -945,10 +1112,13 @@ class InMemoryRepository:
             )
 
     def record_answer(self, principal: UserPrincipal, question: str, answer: GroundedAnswer) -> None:
-        del question
         actor = _principal_token(self._pseudonymizer, principal)
+        key = (principal.tenant_id, answer.answer_id)
+        retained = _retained_question(question) if answer.risk_class is RiskClass.HEIGHTENED else None
         with self._lock:
-            self._answers[(principal.tenant_id, answer.answer_id)] = (actor, answer)
+            self._answers[key] = (actor, answer)
+            if retained:
+                self._review_questions[key] = retained
 
     def record_review(
         self,
@@ -956,18 +1126,34 @@ class InMemoryRepository:
         answer_id: str,
         status: ReviewStatus,
         reason_code: str | None = None,
+        *,
+        question: str | None = None,
     ) -> None:
-        del reason_code
         reviewer = _principal_token(self._pseudonymizer, principal)
+        key = (principal.tenant_id, answer_id)
         with self._lock:
-            stored = self._answers.get((principal.tenant_id, answer_id))
+            stored = self._answers.get(key)
             if stored is None:
                 raise KeyError(answer_id)
             actor, answer = stored
-            if status is ReviewStatus.ACCEPTED and answer.risk_class.value == "heightened" and actor == reviewer:
-                raise PermissionError("FOUR_EYES_REVIEW_REQUIRED")
-            self._reviews[(principal.tenant_id, answer_id)] = status
-            self._review_log.append((principal.tenant_id, reviewer, answer_id, status, _now()))
+            sources = [self._documents.get((principal.tenant_id, item.document_id)) for item in answer.citations]
+            reason = _check_review(
+                principal,
+                status,
+                reason_code,
+                current=self._reviews.get(key, answer.review_status),
+                heightened=answer.risk_class is RiskClass.HEIGHTENED,
+                is_asker=actor == reviewer,
+                sources_released=all(item is not None and item.usable_for_answers for item in sources),
+            )
+            self._reviews[key] = status
+            if status is ReviewStatus.NEEDS_EXPERT:
+                if retained := self._review_questions.get(key) or _retained_question(question):
+                    self._review_questions[key] = retained
+            else:
+                self._review_questions.pop(key, None)
+            record = AnswerReviewRecord(answer_id, status, reason, principal.role[:40], self._incident_time(principal))
+            self._review_log.append((principal.tenant_id, reviewer, record))
 
     def answer_review_status(self, principal: UserPrincipal, answer_id: str) -> ReviewStatus:
         with self._lock:
@@ -975,6 +1161,63 @@ class InMemoryRepository:
             if stored is None:
                 raise KeyError(answer_id)
             return self._reviews.get((principal.tenant_id, answer_id), stored[1].review_status)
+
+    def list_review_queue(self, principal: UserPrincipal) -> tuple[StoredAnswer, ...]:
+        if not principal.can(REVIEW_WRITE_PERMISSION):
+            raise PermissionError("REVIEW_PERMISSION_REQUIRED")
+        subject = _principal_token(self._pseudonymizer, principal)
+        with self._lock:
+            items = []
+            for (tenant, answer_id), (actor, answer) in self._answers.items():
+                if tenant != principal.tenant_id:
+                    continue
+                status = self._reviews.get((tenant, answer_id), answer.review_status)
+                item = StoredAnswer(
+                    replace(answer, review_status=status),
+                    actor == subject,
+                    self._review_questions.get((tenant, answer_id)),
+                    tuple(
+                        replace(record, is_own=reviewer == subject)
+                        for owner, reviewer, record in self._review_log
+                        if owner == tenant and record.answer_id == answer_id
+                    ),
+                )
+                if item.needs_second_person or (status is ReviewStatus.DRAFT and item.is_own):
+                    items.append(item)
+        items.sort(key=lambda item: item.answer.provenance.generated_at)
+        return tuple(items[:REVIEW_QUEUE_LIMIT])
+
+    def list_answer_quality(
+        self, principal: UserPrincipal, *, since: datetime, limit: int
+    ) -> tuple[AnswerQualityRecord, ...]:
+        with self._lock:
+            records = []
+            for (tenant, answer_id), (_, answer) in self._answers.items():
+                if tenant != principal.tenant_id or answer.provenance.generated_at < since:
+                    continue
+                reviews = [
+                    record for owner, _, record in self._review_log if owner == tenant and record.answer_id == answer_id
+                ]
+                decisions = [item for item in reviews if item.status in (ReviewStatus.ACCEPTED, ReviewStatus.REJECTED)]
+                rejected = [item for item in decisions if item.status is ReviewStatus.REJECTED]
+                records.append(
+                    AnswerQualityRecord(
+                        answer_id,
+                        answer.provenance.generated_at,
+                        answer.use_case.value,
+                        answer.risk_class.value,
+                        self._reviews.get((tenant, answer_id), answer.review_status).value,
+                        answer.provenance.prompt_version,
+                        answer.provenance.model_snapshot,
+                        answer.provenance.deployment,
+                        tuple(sorted({item.document_id for item in answer.citations})),
+                        decisions[0].reviewed_at if decisions else None,
+                        rejected[-1].reason_code if rejected else None,
+                        any(item.status is ReviewStatus.NEEDS_EXPERT for item in reviews),
+                    )
+                )
+        records.sort(key=lambda item: item.generated_at, reverse=True)
+        return tuple(records[:limit])
 
     def create_incident(
         self,
@@ -1214,6 +1457,7 @@ class InMemoryRepository:
                     ).value,
                     "generated_at": answer.provenance.generated_at.isoformat(),
                     "provenance": answer.provenance.__dict__,
+                    "review_question": self._review_questions.get((principal.tenant_id, answer.answer_id)),
                 }
                 for (tenant, _), (actor, answer) in self._answers.items()
                 if tenant == principal.tenant_id and actor == subject
@@ -1233,8 +1477,8 @@ class InMemoryRepository:
                 if tenant == principal.tenant_id and self._uploaders.get((tenant, document_id)) == subject
             ]
             reviews = [
-                {"answer_id": answer_id, "status": status.value, "reviewed_at": reviewed_at.isoformat()}
-                for tenant, reviewer, answer_id, status, reviewed_at in self._review_log
+                _review_step(record)
+                for tenant, reviewer, record in self._review_log
                 if tenant == principal.tenant_id and reviewer == subject
             ]
             incidents = [
@@ -1440,12 +1684,16 @@ class PostgresRepository:
                 sap_columns = cursor.fetchone()[0]
                 cursor.execute(_COUNT_DOCUMENT_RELEASE_COLUMNS_SQL)
                 release_columns = cursor.fetchone()[0]
+                cursor.execute(_COUNT_REVIEW_QUEUE_COLUMNS_SQL)
+                review_columns = cursor.fetchone()[0]
         if protected != required_tables or purge_function is None or tenant_function is None:
             raise RuntimeError("Database schema is missing required RLS or lifecycle controls")
         if sap_columns != 2:
             raise RuntimeError("Database schema is missing asset SAP reference columns; run the bootstrap migration")
         if release_columns != 8:
             raise RuntimeError("Database schema is missing document release columns; run the bootstrap migration")
+        if review_columns != 2:
+            raise RuntimeError("Database schema is missing review queue columns; run the bootstrap migration")
 
     def upsert_asset(
         self,
@@ -1741,8 +1989,8 @@ class PostgresRepository:
                     (answer_id, tenant_id, actor_token, question_hash, answer_text,
                      use_case, risk_class, review_status, provider, deployment,
                      model_snapshot, region, prompt_key, prompt_version, citations,
-                     generated_at, retention_until)
-                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s,%s)""",
+                     generated_at, retention_until, review_question)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s,%s,%s)""",
                     (
                         answer.answer_id,
                         principal.tenant_id,
@@ -1761,35 +2009,101 @@ class PostgresRepository:
                         json.dumps(citations),
                         answer.provenance.generated_at,
                         expiry,
+                        _retained_question(question) if answer.risk_class is RiskClass.HEIGHTENED else None,
                     ),
                 )
 
     def record_review(
-        self, principal: UserPrincipal, answer_id: str, status: ReviewStatus, reason_code: str | None = None
+        self,
+        principal: UserPrincipal,
+        answer_id: str,
+        status: ReviewStatus,
+        reason_code: str | None = None,
+        *,
+        question: str | None = None,
     ) -> None:
         reviewer = _principal_token(self._pseudonymizer, principal)
         with self._connect() as connection:
             with connection.cursor() as cursor:
                 self._tenant(cursor, principal.tenant_id)
-                cursor.execute(
-                    "SELECT actor_token, risk_class FROM analysis_runs WHERE answer_id=%s FOR UPDATE",
-                    (answer_id,),
-                )
+                cursor.execute(_LOCK_ANSWER_SQL, (answer_id,))
                 answer = cursor.fetchone()
                 if answer is None:
                     raise KeyError(answer_id)
-                if status is ReviewStatus.ACCEPTED and answer[1] == "heightened" and answer[0] == reviewer:
-                    raise PermissionError("FOUR_EYES_REVIEW_REQUIRED")
-                cursor.execute(
-                    """INSERT INTO analysis_reviews
-                    (review_id, tenant_id, answer_id, reviewer_token, status, reason_code)
-                    VALUES (%s,%s,%s,%s,%s,%s)""",
-                    (str(uuid.uuid4()), principal.tenant_id, answer_id, reviewer, status.value, reason_code),
+                cited = {str(item["document_id"]) for item in answer[3]}
+                released = 0
+                if cited and (document_ids := _uuid_list(cited)) is not None:
+                    cursor.execute(_COUNT_RELEASED_SOURCES_SQL, (document_ids,))
+                    released = cursor.fetchone()[0]
+                reason = _check_review(
+                    principal,
+                    status,
+                    reason_code,
+                    current=ReviewStatus(answer[2]),
+                    heightened=answer[1] == RiskClass.HEIGHTENED.value,
+                    is_asker=answer[0] == reviewer,
+                    sources_released=released == len(cited),
                 )
+                retained = None
+                if status is ReviewStatus.NEEDS_EXPERT:
+                    retained = answer[4] or _retained_question(question)
                 cursor.execute(
-                    "UPDATE analysis_runs SET review_status=%s WHERE answer_id=%s",
-                    (status.value, answer_id),
+                    _INSERT_REVIEW_SQL,
+                    (
+                        str(uuid.uuid4()),
+                        principal.tenant_id,
+                        answer_id,
+                        reviewer,
+                        status.value,
+                        reason,
+                        principal.role[:40],
+                    ),
                 )
+                cursor.execute(_UPDATE_ANSWER_REVIEW_SQL, (status.value, retained, answer_id))
+
+    def list_review_queue(self, principal: UserPrincipal) -> tuple[StoredAnswer, ...]:
+        if not principal.can(REVIEW_WRITE_PERMISSION):
+            raise PermissionError("REVIEW_PERMISSION_REQUIRED")
+        subject = _principal_token(self._pseudonymizer, principal)
+        with self._connect() as connection:
+            with connection.cursor() as cursor:
+                self._tenant(cursor, principal.tenant_id)
+                cursor.execute(_SELECT_REVIEW_QUEUE_SQL, (subject, subject, REVIEW_QUEUE_LIMIT))
+                rows = cursor.fetchall()
+                reviews: dict[str, list[AnswerReviewRecord]] = {}
+                if rows:
+                    cursor.execute(_SELECT_ANSWER_REVIEWS_SQL, (subject, [row[0] for row in rows]))
+                    for item in cursor.fetchall():
+                        reviews.setdefault(item[0], []).append(
+                            AnswerReviewRecord(item[0], ReviewStatus(item[1]), item[2], item[3], item[4], item[5])
+                        )
+        return tuple(_stored_answer_row(row, tuple(reviews.get(row[0], ()))) for row in rows)
+
+    def list_answer_quality(
+        self, principal: UserPrincipal, *, since: datetime, limit: int
+    ) -> tuple[AnswerQualityRecord, ...]:
+        with self._connect() as connection:
+            with connection.cursor() as cursor:
+                self._tenant(cursor, principal.tenant_id)
+                cursor.execute(_SELECT_ANSWER_QUALITY_SQL, (since, limit))
+                rows = cursor.fetchall()
+        return tuple(
+            AnswerQualityRecord(
+                row[0],
+                row[1],
+                row[2],
+                row[3],
+                row[4],
+                row[5],
+                row[6],
+                row[7],
+                tuple(sorted({str(item["document_id"]) for item in row[8]})),
+                row[9],
+                row[10],
+                bool(row[11]),
+            )
+            for row in rows
+        )
 
     def answer_review_status(self, principal: UserPrincipal, answer_id: str) -> ReviewStatus:
         with self._connect() as connection:
@@ -2062,7 +2376,7 @@ class PostgresRepository:
                 cursor.execute(
                     """SELECT answer_id::text, question_hash, answer_text, use_case, risk_class,
                     review_status, provider, deployment, model_snapshot, region, prompt_key,
-                    prompt_version, citations, generated_at
+                    prompt_version, citations, generated_at, review_question
                     FROM analysis_runs WHERE actor_token=%s ORDER BY generated_at DESC""",
                     (subject,),
                 )
@@ -2082,6 +2396,7 @@ class PostgresRepository:
                         "prompt_version": row[11],
                         "citations": row[12],
                         "generated_at": row[13].isoformat(),
+                        "review_question": row[14],
                     }
                     for row in cursor.fetchall()
                 ]
@@ -2126,12 +2441,12 @@ class PostgresRepository:
                     for row in cursor.fetchall()
                 ]
                 cursor.execute(
-                    """SELECT answer_id::text, status, reviewed_at FROM analysis_reviews
+                    """SELECT answer_id::text, status, reason_code, reviewer_role, reviewed_at FROM analysis_reviews
                     WHERE reviewer_token=%s ORDER BY reviewed_at DESC""",
                     (subject,),
                 )
                 reviews = [
-                    {"answer_id": row[0], "status": row[1], "reviewed_at": row[2].isoformat()}
+                    _review_step(AnswerReviewRecord(row[0], ReviewStatus(row[1]), row[2], row[3], row[4]))
                     for row in cursor.fetchall()
                 ]
                 cursor.execute(
@@ -2343,6 +2658,38 @@ _SELECT_OWN_DOCUMENT_EVENTS_SQL = """SELECT event_id::text, document_id::text, e
     occurred_at, true FROM document_events WHERE actor_token=%s ORDER BY occurred_at, event_id"""
 # Stored answers keep their citations as JSON; containment finds every answer that cites the document.
 _COUNT_CITING_ANSWERS_SQL = "SELECT count(*) FROM analysis_runs WHERE citations @> %s::jsonb"
+_COUNT_REVIEW_QUEUE_COLUMNS_SQL = """SELECT count(*) FROM information_schema.columns
+    WHERE table_schema='public'
+      AND ((table_name='analysis_runs' AND column_name='review_question')
+        OR (table_name='analysis_reviews' AND column_name='reviewer_role'))"""
+_LOCK_ANSWER_SQL = """SELECT actor_token, risk_class, review_status, citations, review_question
+    FROM analysis_runs WHERE answer_id=%s FOR UPDATE"""
+_COUNT_RELEASED_SOURCES_SQL = """SELECT count(*) FROM documents
+    WHERE document_id = ANY(%s::uuid[]) AND deleted_at IS NULL AND status='ready' AND release_status='released'"""
+_INSERT_REVIEW_SQL = """INSERT INTO analysis_reviews
+    (review_id, tenant_id, answer_id, reviewer_token, status, reason_code, reviewer_role)
+    VALUES (%s,%s,%s,%s,%s,%s,%s)"""
+_UPDATE_ANSWER_REVIEW_SQL = "UPDATE analysis_runs SET review_status=%s, review_question=%s WHERE answer_id=%s"
+# Open answers that need a second person, plus the caller's own drafts. Nobody else's ordinary drafts appear.
+_SELECT_REVIEW_QUEUE_SQL = """SELECT answer_id::text, answer_text, use_case, risk_class, review_status, provider,
+    deployment, model_snapshot, region, prompt_key, prompt_version, citations, generated_at,
+    actor_token = %s, review_question
+    FROM analysis_runs
+    WHERE review_status = 'needs_expert'
+       OR (review_status = 'draft' AND (risk_class = 'heightened' OR actor_token = %s))
+    ORDER BY generated_at LIMIT %s"""
+_SELECT_ANSWER_REVIEWS_SQL = """SELECT answer_id::text, status, reason_code, reviewer_role, reviewed_at,
+    reviewer_token = %s
+    FROM analysis_reviews WHERE answer_id = ANY(%s::uuid[]) ORDER BY reviewed_at, review_id"""
+# Deliberately without actor or reviewer columns: quality is evaluated per release and document, never per person.
+_SELECT_ANSWER_QUALITY_SQL = """SELECT a.answer_id::text, a.generated_at, a.use_case, a.risk_class, a.review_status,
+    a.prompt_version, a.model_snapshot, a.deployment, a.citations,
+    (SELECT min(r.reviewed_at) FROM analysis_reviews r
+      WHERE r.answer_id = a.answer_id AND r.status IN ('accepted', 'rejected')),
+    (SELECT r.reason_code FROM analysis_reviews r
+      WHERE r.answer_id = a.answer_id AND r.status = 'rejected' ORDER BY r.reviewed_at DESC LIMIT 1),
+    EXISTS (SELECT 1 FROM analysis_reviews r WHERE r.answer_id = a.answer_id AND r.status = 'needs_expert')
+    FROM analysis_runs a WHERE a.generated_at >= %s ORDER BY a.generated_at DESC LIMIT %s"""
 _COUNT_DOCUMENT_RELEASE_COLUMNS_SQL = """SELECT count(*) FROM information_schema.columns
     WHERE table_schema='public' AND table_name='documents'
       AND column_name IN ('release_status', 'revision', 'document_number', 'released_at', 'review_due_at',

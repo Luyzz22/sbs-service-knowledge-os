@@ -32,6 +32,7 @@ ROLE_PERMISSIONS: Mapping[str, frozenset[str]] = {
             "incident:write",
             "incident:close",
             "review:write",
+            "review:expert",
             "analysis:export",
             "document:release",
         }

@@ -15,14 +15,14 @@ Die Grundsätze Zweckbindung, Datenminimierung, Speicherbegrenzung, Integrität 
 
 | Kontrolle | Status | Technische Evidenz | Restnachweis |
 | --- | --- | --- | --- |
-| Datenminimierung | Implementiert | keine Rohfragen in Logs; pseudonymisierte Akteure/Ressourcen; Metadaten-Allowlist | Felder im VVT und je Connector prüfen |
+| Datenminimierung | Implementiert | keine Rohfragen in Logs; Fragewortlaut in der Datenbank nur während einer offenen Prüfung durch eine zweite Person; pseudonymisierte Akteure/Ressourcen; Metadaten-Allowlist | Felder im VVT und je Connector prüfen |
 | Privacy by Default | Implementiert | AI lokal standardmäßig aus; Produktion fail-closed; private Container; kein Tracking | Tenant-Konfiguration abnehmen |
 | Zugriff/Rollen | Implementiert/konfiguriert | Entra App-Rollen, Berechtigungsprüfung, Idle Timeout, Easy Auth | Conditional Access, Joiner/Mover/Leaver, Break-glass |
 | Tenant-Isolation | Implementiert | PostgreSQL FORCE RLS einschließlich `tenants`; serverseitiger Azure-Search-Tenantfilter; getrennte Web-/Lifecycle-Rollen | Integrationstest gegen reale Azure-Instanz |
 | Verschlüsselung | Konfiguriert | TLS, Azure at rest, Infrastructure Encryption, private Endpunkte | Key-Lifecycle; CMK nur falls Risikoanalyse es verlangt |
 | Speicherbegrenzung | Implementiert | `retention_until`; genehmigungspflichtige Policy-ID; täglicher Propagationsjob; Legal Hold je Datenklasse mit Wiedervorlage, der den Löschlauf in der Datenbankfunktion aussetzt | fachlich/rechtlich genehmigte Fristen, Backup-Löschkonzept |
 | Betroffenenrechte | Teilimplementiert | subjektbezogener Export aller Felder mit Personenbezug außer Sicherheitsprotokoll (per Test gegen das Inventar geprüft), pseudonymisierte DSR-Warteschlange mit Bearbeitungsworkflow für Admins (begründete Entscheidung, Vorgangsnummer, Vier-Augen-Regel, Fristmahnung), interne 28-Tage-Zielfrist | Identitätsprüfung organisatorisch festlegen, Berichtigung/Löschung operativ umsetzen |
-| Mitbestimmung (§ 87 Abs. 1 Nr. 6 BetrVG) | Technisch implementiert + extern | [Technische Anlage](works-council-annex.md) aus `hydraulikdoc/personal_data.py`; CI-Gate gegen neue Personen-Spalten im Schema; Kennzahlen nur je Anlage; Übersicht für Beschäftigte in der Governance-Seite | Betriebsvereinbarung bzw. Beteiligung des Betriebsrats je Standort |
+| Mitbestimmung (§ 87 Abs. 1 Nr. 6 BetrVG) | Technisch implementiert + extern | [Technische Anlage](works-council-annex.md) aus `hydraulikdoc/personal_data.py`; CI-Gate gegen neue Personen-Spalten im Schema; Kennzahlen nur je Anlage, KI-Qualität nur je Version und Dokument; Übersicht für Beschäftigte in der Governance-Seite | Betriebsvereinbarung bzw. Beteiligung des Betriebsrats je Standort |
 | Auftragsverarbeitung | Externes Gate | Providerliste technisch Azure-only | AVV/DPA nach Art. 28, Unterauftragsverarbeiter, Weisungen |
 | Drittlandtransfer | Externes Gate | regionale Standard-Deployments, private Endpunkte, Datenminimierung | TIA, SCC/DPF-Bewertung, FISA/EO/CLOUD-Act, Abuse Monitoring |
 | DSFA | Bedingt/extern | Risikogates und Datenfluss dokumentiert | Art.-35-Schwellenprüfung, DSB-Freigabe, ggf. DSFA |
@@ -46,12 +46,12 @@ HydraulikDoc ist nach dokumentiertem Intended Purpose ein assistives System für
 | Art. 11 Technische Dokumentation | Unterstützt | Architektur, System Card, Modell-/Prompt-/Regionsevidenz | Betreiberakte vervollständigen |
 | Art. 12 Logging | Implementiert | automatische pseudonymisierte Ereignisse, HMAC-authentisierte Hashkette mit Verifikation (`ops/scripts/verify-audit-chain.py`, System-Seite für Admins), Retention | SIEM-Aufbewahrung der nächtlichen Anker genehmigen und Alarm bei `failure_count > 0` einrichten |
 | Art. 13 Transparenz | Implementiert | Quellen, Einschränkungen, Provider, Deployment, Snapshot, Promptversion, Reviewstatus | instanzbezogene Nutzerinformation |
-| Art. 14 Human Oversight | Implementiert | jeder Output Draft; Reviewrollen; nur akzeptierte Exporte; autonome Steuerung blockiert | Prüferqualifikation und Arbeitsanweisung |
+| Art. 14 Human Oversight | Implementiert | jeder Output Draft; Reviewrollen; Prüfwarteschlange für die zweite Person bei sicherheitsrelevanten und eskalierten Antworten; endgültige Entscheidung mit festem Ablehnungsgrund; nur akzeptierte Exporte; autonome Steuerung blockiert (`tests/test_review_queue.py`) | Prüferqualifikation, Arbeitsanweisung und Zielzeit für offene Prüfungen |
 | Art. 15 Accuracy/Robustness/Cybersecurity | Technisch unterstützt + extern | Hybrid Retrieval, Temperature 0, Zitatgate, Prompt-Injection-Regeln, Freigabe durch eine zweite Person gegen vergiftete Quellen, WAF, Scanpipeline, Eval-Harness und verpflichtende Eval-Evidence-ID | repräsentatives Goldset, Fachreview, Red Team und freigegebene Schwellen |
 | Art. 17 QMS | Externes Gate | CI, Review und Runbooks liefern Bausteine | freigegebenes QMS mit Rollen, CAPA, Lieferanten- und Änderungsprozess |
 | Art. 18 Aufbewahrung | Implementiert + extern | versionierte Provenienz und Retention | gesetzlich und fachlich korrekte Dauer genehmigen |
 | Art. 50 Transparenz | Implementiert | Hinweis vor erster KI-Nutzung und Kennzeichnung als KI-Entwurf | — |
-| Post-Market Monitoring | Teilimplementiert | Incidenterfassung, abgelehnter und Expert Review | Trendanalyse, Meldekriterien, Owner und Behördenprozess |
+| Post-Market Monitoring | Technisch implementiert + extern | Incidenterfassung; KI-Qualitätskennzahlen aus den Fachprüfungen je Prompt-/Modellversion und Dokument mit festen Signalschwellen, Hinweis im Leitstand und CSV-Export (`hydraulikdoc/ai_quality.py`) | Meldekriterien, Owner, Behördenprozess und Bewertung der Schwellen im QMS |
 
 Ein Produktionsrelease bleibt technisch blockiert, bis eine freigegebene `AI_EVALUATION_EVIDENCE_ID` aus dem [Eval-Harness](ai-evaluation.md) vorliegt. Der externe Prozess muss mit repräsentativen Hydraulikhandbüchern Grenzwerttreue, Citation Precision, Retrieval Recall, Halluzinationen, False Positives/Negatives und Prompt-Injection-Szenarien gegen das konkrete Modell-Snapshot bewerten.
 

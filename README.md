@@ -87,6 +87,13 @@ Die Wissensbasis führt Dokumente als gelenkte Dokumente, angelehnt an ISO 9001 
 
 Der Verlauf je Dokument zeigt Rolle und Zeitpunkt, keine Namen. Beim Update einer bestehenden Instanz gelten vorhandene Dokumente weiter als freigegeben, sind aber als „ohne dokumentierte Freigabe“ markiert, bis eine zweite Person sie formal freigibt. Die Regeln setzt das Repository durch; die Datenbank ist maßgeblich, der Suchindex wird nur zusätzlich gefiltert.
 
+### Prüfwarteschlange und KI-Qualität
+
+- **Prüfen:** Jeder KI-Entwurf wird akzeptiert, mit einem festen Grund abgelehnt oder an einen Experten eskaliert. Die Entscheidung ist endgültig.
+- **Zweite Person:** Sicherheitsrelevante Entwürfe darf die fragende Person nicht selbst akzeptieren. Sie und alle eskalierten Antworten stehen in der Wissensbasis unter „Prüfwarteschlange“; über Eskalationen entscheiden Supervisor oder Admin. Der Leitstand zeigt, wie viele Antworten auf die angemeldete Person warten und welche länger als 72 Stunden offen sind.
+- **Frage:** Der Wortlaut der Frage wird nur gespeichert, solange eine zweite Person entscheiden muss, und danach gelöscht. Wer gefragt hat, sieht die prüfende Person nicht.
+- **Auswertung:** Unter „Kennzahlen → KI-Qualität“ stehen Prüfquote, Ablehnungsquote und Ablehnungsgründe je Prompt- und Modellversion sowie Ablehnungen je Dokument, als CSV exportierbar für Supervisor und Admin. Es gibt keine Auswertung je Person.
+
 ### Demo-Mandant für Vorführungen
 
 Für Vertriebs- und Schulungsdemos ohne Azure und ohne Kundendaten zusätzlich `AI_BACKEND=demo` setzen:
@@ -95,7 +102,7 @@ Für Vertriebs- und Schulungsdemos ohne Azure und ohne Kundendaten zusätzlich `
 AI_BACKEND=demo streamlit run app.py
 ```
 
-Als Supervisor oder Admin anmelden und im Leitstand **Demodaten laden** wählen. Geladen werden vier fiktive Anlagen mit SAP-Referenzen, zwei freigegebene synthetische Handbücher, eine neue Revision der HA-250-Anleitung als Entwurf und fünf Incidents der letzten vier Wochen in allen Workflow-Zuständen („neu und kritisch“, „8D in Bearbeitung“, „wartet auf Abnahme“, „abgeschlossen“). Presse 05 überhitzt drei Wochen nach einer Kühlerreinigung erneut (Wiederholungsfehler), eine Leckage wurde einmal wiedereröffnet; so zeigen die Kennzahlen realistische Werte. Mit `PERSISTENCE_BACKEND=postgres` entsteht derselbe Datenbestand, aber zum Ladezeitpunkt, weil Zeitstempel dort nicht rückdatierbar sind. Condition Monitoring bietet eine synthetische 48-h-Messreihe ohne Upload.
+Als Supervisor oder Admin anmelden und im Leitstand **Demodaten laden** wählen. Geladen werden vier fiktive Anlagen mit SAP-Referenzen, zwei freigegebene synthetische Handbücher, eine neue Revision der HA-250-Anleitung als Entwurf, sieben bereits gestellte KI-Fragen fiktiver Kollegen (zwei warten in der Prüfwarteschlange) und fünf Incidents der letzten vier Wochen in allen Workflow-Zuständen („neu und kritisch“, „8D in Bearbeitung“, „wartet auf Abnahme“, „abgeschlossen“). Presse 05 überhitzt drei Wochen nach einer Kühlerreinigung erneut (Wiederholungsfehler), eine Leckage wurde einmal wiedereröffnet; so zeigen die Kennzahlen realistische Werte. Mit `PERSISTENCE_BACKEND=postgres` entsteht derselbe Datenbestand, aber zum Ladezeitpunkt, weil Zeitstempel dort nicht rückdatierbar sind. Condition Monitoring bietet eine synthetische 48-h-Messreihe ohne Upload.
 
 Der Demo-Pfad ruft kein Sprachmodell auf: Antworten bestehen aus unverändert extrahierten Sätzen der synthetischen Handbücher mit Seitenbeleg und durchlaufen dieselben Sperren, Reviews und Auditereignisse wie der Azure-Pfad. Ein Banner kennzeichnet jede Seite, alle Daten tragen das Präfix `DEMO`. `AI_BACKEND=demo` ist in Produktion und hinter Entra ID technisch gesperrt; die Demodaten werden nur in einen leeren Mandanten geladen. Empfohlene Fragen für die Vorführung:
 

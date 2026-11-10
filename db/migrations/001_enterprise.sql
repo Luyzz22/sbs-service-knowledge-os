@@ -97,6 +97,11 @@ CREATE TABLE IF NOT EXISTS analysis_reviews (
     reviewed_at timestamptz NOT NULL DEFAULT now()
 );
 
+-- Review queue: the role that decided is shown instead of the person, and the question text is kept
+-- only while a second person still has to decide on the answer.
+ALTER TABLE analysis_reviews ADD COLUMN IF NOT EXISTS reviewer_role text NOT NULL DEFAULT '';
+ALTER TABLE analysis_runs ADD COLUMN IF NOT EXISTS review_question text;
+
 CREATE TABLE IF NOT EXISTS incidents (
     incident_id uuid PRIMARY KEY,
     tenant_id text NOT NULL REFERENCES tenants(tenant_id),
@@ -214,6 +219,9 @@ CREATE INDEX IF NOT EXISTS documents_tenant_status_idx ON documents(tenant_id, s
 CREATE INDEX IF NOT EXISTS document_events_document_idx ON document_events(tenant_id, document_id, occurred_at);
 CREATE INDEX IF NOT EXISTS assets_tenant_site_idx ON assets(tenant_id, site, name);
 CREATE INDEX IF NOT EXISTS analysis_runs_tenant_generated_idx ON analysis_runs(tenant_id, generated_at DESC);
+CREATE INDEX IF NOT EXISTS analysis_runs_open_review_idx ON analysis_runs(tenant_id, generated_at)
+    WHERE review_status IN ('draft', 'needs_expert');
+CREATE INDEX IF NOT EXISTS analysis_reviews_answer_idx ON analysis_reviews(tenant_id, answer_id, reviewed_at);
 CREATE INDEX IF NOT EXISTS incidents_tenant_status_idx ON incidents(tenant_id, status, created_at DESC);
 CREATE INDEX IF NOT EXISTS incidents_tenant_created_idx ON incidents(tenant_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS incident_events_incident_idx ON incident_events(tenant_id, incident_id, occurred_at);

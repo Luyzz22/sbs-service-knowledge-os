@@ -39,6 +39,7 @@ Priorität: **P1** blockiert Pilot oder Security-Freigabe, **P2** senkt Akzeptan
 | D9 | Werk/Recht | Kein technischer Legal Hold: Bei Rechtsstreit, Behördenanfrage oder Gewährleistungsfall hätte der nächtliche Löschlauf Beweise vernichtet | P1 | umgesetzt: Hold je Datenklasse in der Datenbank-Löschfunktion, Pflicht-Wiedervorlage ohne automatische Aufhebung, nur für Admins, auditiert |
 | D10 | Werk/Datenschutz | Datenschutzanträge konnten gestellt, aber in der Anwendung nicht bearbeitet werden; Fristwahrung und Begründung waren nicht nachweisbar | P2 | umgesetzt: Bearbeitungsworkflow für Admins mit begründeter Entscheidung, Vorgangsnummer, Vier-Augen-Regel, Fristmahnung und Legal-Hold-Hinweis |
 | D11 | Werk/Qualität | Jedes hochgeladene PDF wurde sofort zur KI-Quelle: keine Freigabe, kein Revisionsstand, kein Rückzug. Eine veraltete oder manipulierte Anleitung wäre unbemerkt zitiert worden; gelenkte Dokumente (ISO 9001 Abschnitt 7.5.3, IATF 16949 Abschnitt 7.5.3.2) waren nicht abbildbar | P1 | umgesetzt: Dokumentenlenkung mit Entwurf, Freigabe durch eine zweite Person, Revision und Dokumentnummer, Rückzug mit Grund, Überprüfungstermin und Verlauf je Dokument; die KI zitiert nur freigegebene Revisionen |
+| D12 | Werk/KI-Aufsicht | Das Vier-Augen-Prinzip für sicherheitsrelevante KI-Antworten war nicht erfüllbar: Eine Antwort war nur in der Sitzung der fragenden Person sichtbar, „Experte erforderlich“ führte in keine Warteschlange, Ablehnungen hatten keinen Grund, und es gab keine Auswertung der Prüfergebnisse | P1 | umgesetzt: Prüfwarteschlange für die zweite Person, endgültige Entscheidungen mit festem Ablehnungsgrund, Prüfverlauf mit Rolle, KI-Qualitätskennzahlen je Prompt-/Modellversion und Dokument ohne Personenbezug |
 | S4 | ERP | Kein Live-Connector (S/4HANA OData, SAP BTP Integration Suite) | P3 | Roadmap, benötigt Bedrohungsmodell und Datenvertrag je Kunde |
 | S5 | ERP | Keine automatische Benutzer-/Gruppenprovisionierung (SCIM aus Entra ID) | P3 | Roadmap |
 | D5 | Werk/Sicherheit | TISAX-/ISO-27001-Evidenzpaket fehlt | P2 | externes Gate |
@@ -84,6 +85,15 @@ Priorität: **P1** blockiert Pilot oder Security-Freigabe, **P2** senkt Akzeptan
 - **Nachweis:** Tabelle `document_events` (Upload, Freigabe, Rückzug, Überprüfung) als Verlauf je Dokument mit Rolle statt Person; die Runtime-Rolle darf nur einfügen und lesen. Auditereignisse `knowledge.document.released`, `release_denied`, `withdrawn` und `review_confirmed`. Zitate tragen die Revision, damit ein Review erkennt, auf welchem Stand eine Antwort beruht.
 - **Altbestand:** Dokumente aus der Zeit vor der Einführung bleiben nutzbar, sind aber als „ohne dokumentierte Freigabe“ gekennzeichnet und im Leitstand als offene Aufgabe gezählt, bis eine zweite Person sie formal freigibt.
 
+## Umgesetzt: Prüfwarteschlange und KI-Qualität
+
+- **Zweite Person kann prüfen:** Sicherheitsrelevante Entwürfe und an Experten eskalierte Antworten stehen in der Wissensbasis in einer Prüfwarteschlange, zusammen mit den eigenen offenen Entwürfen. Über eine Eskalation entscheiden nur Supervisor oder Admin (`review:expert`). Wer gefragt hat, wird nicht angezeigt.
+- **Feste Regeln im Repository:** Eine Entscheidung ist endgültig. Eine Ablehnung verlangt einen von sechs festen Gründen statt Freitext. Eine Antwort, deren Quelle inzwischen zurückgezogen oder gelöscht ist, lässt sich nur noch ablehnen. Die Selbstfreigabe sicherheitsrelevanter Antworten bleibt gesperrt.
+- **Frage nur für die offene Prüfung:** Der Wortlaut der Frage wird ausschließlich gespeichert, solange eine zweite Person entscheiden muss (sicherheitsrelevante Diagnose oder Eskalation), und mit der Entscheidung gelöscht. Dauerhaft bleibt wie bisher nur der Hash. Die Oberfläche weist vor der Eingabe darauf hin.
+- **KI-Qualität:** Die Kennzahlen zeigen Prüfquote, Ablehnungsquote, Ablehnungsgründe und Zeit bis zur Entscheidung je Prompt- und Modellversion sowie Ablehnungen je Dokument. Auffällig ist eine Version ab 20 % Ablehnungen bei mindestens fünf Entscheidungen und ein freigegebenes Dokument ab zwei Ablehnungen wegen der Quelle; beides erscheint im Leitstand und führt zur Dokumentenlenkung.
+- **Nie je Person:** Die Auswertung erhält weder die fragende noch die prüfende Person; ein Test stellt sicher, dass der Datensatz kein solches Feld bekommt. Der Prüfverlauf zeigt die Rolle.
+- **Demo:** Der Demo-Mandant enthält sieben Antworten fiktiver Kollegen. Zwei warten auf die ladende Person, zwei Ablehnungen wegen „Quelle veraltet“ zeigen auf Revision 1 der HA-250-Anleitung, deren Revision 2 zur Freigabe bereitliegt.
+
 ## Bewusste Grenzen
 
 - Die SAP-Übergabe ist eine Datei, keine Schnittstelle. Feldnamen orientieren sich an den klassischen SAP-PM-Feldern der Meldung; Upload-Weg (z. B. LSMW, BTP-Flow), Meldungsart, Prioritätsschema und Pflichtfelder legt das SAP-Team des Kunden fest.
@@ -92,6 +102,8 @@ Priorität: **P1** blockiert Pilot oder Security-Freigabe, **P2** senkt Akzeptan
 - Die Dokumentenlenkung ersetzt kein Dokumentenmanagementsystem. Sie kennt keine Verteiler, keine Kenntnisnahme-Bestätigung, keinen mehrstufigen Freigabeworkflow und keinen Abgleich mit dem Hersteller, ob eine neuere Revision existiert. Die Freigabe bestätigt, dass eine berechtigte zweite Person das Dokument geprüft hat; die fachliche Richtigkeit bleibt deren Verantwortung.
 - Der Verlauf eines Dokuments wird mit dem Dokument gelöscht. Dauerhafter Nachweis ist das Auditprotokoll mit seiner eigenen Frist. Bereits akzeptierte Antworten werden beim Rückzug einer Quelle nicht automatisch widerrufen, sondern gekennzeichnet.
 - Vier Augen sind eine Regel der Anwendung, keine Spaltenberechtigung der Datenbank: Die Runtime-Rolle darf `documents` ändern. Ein Angreifer mit Datenbankzugang der Anwendung wird durch das Auditprotokoll und dessen Kettenprüfung erkannt, nicht verhindert.
+- Die KI-Qualitätskennzahlen beschreiben nur geprüfte Antworten und reichen so weit zurück wie die Aufbewahrungsfrist für KI-Interaktionen (Standard 90 Tage). Sie ersetzen keine Evaluation mit Goldset; die Schwellen sind feste Produktwerte und noch nicht je Mandant einstellbar. Antworten aus der Zeit vor dieser Änderung tragen keinen Ablehnungsgrund und zählen als „Ohne Angabe“.
+- In der Prüfwarteschlange fehlt bei gewöhnlichen eigenen Entwürfen der Wortlaut der Frage, weil er dafür nicht gespeichert wird.
 
 ## Empfohlene nächste Schritte
 
@@ -102,3 +114,4 @@ Priorität: **P1** blockiert Pilot oder Security-Freigabe, **P2** senkt Akzeptan
 5. ~~Instandhaltungskennzahlen~~ (D6): umgesetzt, einschließlich gestaffeltem Demo-Verlauf.
 6. **Live-Connector-Pilot** (S4) erst nach Datenvertrag und Bedrohungsmodell mit einem konkreten Kunden.
 7. ~~Dokumentenlenkung~~ (D11): umgesetzt. Offen für einen Folgeschritt: Kenntnisnahme neuer Revisionen durch die betroffenen Teams und eine Erinnerung vor Ablauf des Überprüfungstermins per E-Mail oder Teams.
+8. ~~Prüfwarteschlange und KI-Qualität~~ (D12): umgesetzt. Offen: Schwellen je Mandant, Benachrichtigung der Prüfberechtigten und die Übernahme der Kennzahlen in den Post-Market-Monitoring-Bericht des Betreibers.

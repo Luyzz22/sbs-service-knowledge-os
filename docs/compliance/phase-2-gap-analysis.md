@@ -8,7 +8,7 @@ Stand: 14. August 2026. Das frühere Demo-Gap-Register wurde mit der Enterprise-
 | --- | --- |
 | MD5-Demokennwörter / öffentlicher Fallback | Produktion erzwingt Entra Easy Auth und App-Rollen; lokal ausschließlich Argon2id ohne Defaultnutzer |
 | LlamaParse/OpenAI/Vertex als unkontrollierte Prozessoren | aus Runtime, Container und Requirements entfernt; Azure-only Produktionspfad mit regionalen Standarddeployments |
-| Rohfragen in Logs | keine Inhaltslogs; SHA-256 nur in Fachdatenbank; Auditmetadaten-Allowlist |
+| Rohfragen in Logs | keine Inhaltslogs; in der Fachdatenbank SHA-256, Wortlaut nur während einer offenen Prüfung durch eine zweite Person; Auditmetadaten-Allowlist |
 | Filename/Username in Vector Metadata | Tenant stammt aus Entra; Searchfilter verpflichtend; Akteure in Auditdaten HMAC-pseudonymisiert |
 | In-memory Qdrant | Azure AI Search für Retrieval und PostgreSQL mit FORCE RLS für Fachdaten |
 | Session-lokale Löschung | Search-, Blob- und DB-Propagation plus täglicher Retention-Job |

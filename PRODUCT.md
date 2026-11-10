@@ -22,7 +22,7 @@ HydraulikDoc ist die evidenzorientierte Arbeitsoberfläche zwischen technischer 
 4. Hybrid Retrieval liefert tenant-gefilterte Evidenz ausschließlich aus freigegebenen Revisionen. Das Modell darf ausschließlich diese Evidenz verwenden.
 5. Ein Output ohne gültige `[S1]`-Quellenmarke wird verworfen und nicht persistiert.
 6. Der Entwurf wird mit Modell-, Deployment-, Region-, Prompt-, Zeit-, Nutzer- und Quellenprovenienz gespeichert.
-7. Ein berechtigter Mensch akzeptiert, verwirft oder eskaliert. Nur akzeptierte Ergebnisse sind exportierbar.
+7. Ein berechtigter Mensch akzeptiert, verwirft mit festem Grund oder eskaliert. Sicherheitsrelevante und eskalierte Antworten entscheidet eine zweite Person aus der Prüfwarteschlange. Nur akzeptierte Ergebnisse sind exportierbar.
 8. Dokumentlöschung und Fristablauf werden über Blob, AI Search und PostgreSQL propagiert und auditiert.
 
 ## Capability Contract
@@ -35,6 +35,7 @@ HydraulikDoc ist die evidenzorientierte Arbeitsoberfläche zwischen technischer 
 | Implementiert | Dokumentenlenkung: Entwurf, Freigabe durch eine zweite Person, Revisionen, Rückzug, Überprüfungstermin und Verlauf je Dokument | `hydraulikdoc/repository.py`, `document_events`, `tests/test_document_control.py` |
 | Implementiert | KI-Zitatvalidierung und Prompt-Injection-Abwehr | `hydraulikdoc/governance.py`, `hydraulikdoc/azure_ai.py` |
 | Implementiert | Human Review und rollenbegrenzter Export | `hydraulikdoc/ui.py`, `hydraulikdoc/repository.py` |
+| Implementiert | Prüfwarteschlange für die zweite Person und KI-Qualitätskennzahlen je Prompt-/Modellversion und Dokument, ohne Personenbezug | `hydraulikdoc/repository.py`, `hydraulikdoc/ai_quality.py`, `tests/test_review_queue.py` |
 | Implementiert | Deterministische Condition-/Fluid-Vorbewertung | `hydraulikdoc/condition_monitoring.py`, `fluid_advisor.py` |
 | Implementiert | Datenschutz-Self-Service und DSR-Warteschlange | `hydraulikdoc/ui.py`, `privacy_requests` |
 | Implementiert | Incident-Workflow mit Rollenprüfung, Abnahme durch Supervisor und Schutz vor veralteten Statuswechseln | `hydraulikdoc/repository.py`, `hydraulikdoc/ui.py` |

@@ -8,7 +8,8 @@ import html
 import io
 import json
 import time
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
+from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -19,6 +20,19 @@ from compliance.audit import AuditOutcome
 from compliance.retention import RetentionPolicy
 from fluid_advisor import FLUID_STATUS_LABELS, FluidLimits, FluidSample, assess_fluid
 
+from .ai_quality import (
+    QUALITY_ANSWER_LIMIT,
+    QUALITY_EXPORT_COLUMNS,
+    QUALITY_WINDOW_DAYS,
+    REVIEW_TARGET,
+    SIGNAL_MIN_DECISIONS,
+    SIGNAL_REJECTION_SHARE,
+    UNKNOWN_REASON,
+    AnswerQuality,
+    answer_quality,
+    overdue_reviews,
+    quality_export_rows,
+)
 from .auth import (
     AuthenticationError,
     UserPrincipal,
@@ -35,7 +49,7 @@ from .condition_monitoring import (
 )
 from .config import AppSettings, AuthMode, ConfigurationError, get_settings
 from .demo import DemoRAGService, demo_seed_blockers, demo_sensor_csv, seed_demo_tenant, tenant_has_data
-from .governance import GroundedAnswer, ReviewStatus, UseCase, evaluate_use_case
+from .governance import ReviewStatus, RiskClass, UseCase, evaluate_use_case
 from .i18n import DEFAULT_LANGUAGE, LANGUAGES, msg, preferred_language, translate, translate_plural
 from .interop import (
     ASSET_ID_PATTERN,
@@ -75,6 +89,8 @@ from .repository import (
     PRIVACY_MANAGE_PERMISSION,
     PRIVACY_OPEN_STATUSES,
     PRIVACY_REQUEST_TRANSITIONS,
+    REVIEW_REJECTION_REASONS,
+    REVIEW_WRITE_PERMISSION,
     AssetRecord,
     AuditChainReport,
     DocumentControl,
@@ -84,6 +100,7 @@ from .repository import (
     IncidentTransitionRejected,
     PrivacyRequestRecord,
     PrivacyTransitionRejected,
+    StoredAnswer,
     get_repository,
     missing_analysis_fields,
 )
@@ -186,6 +203,26 @@ REVIEW_STATUS_LABELS = {
     "needs_expert": msg("Experte erforderlich"),
     "rejected": msg("Abgelehnt"),
     "draft": msg("Entwurf"),
+}
+REVIEW_REASON_LABELS = {
+    "incorrect_value": msg("Wert oder Grenzwert falsch wiedergegeben"),
+    "wrong_source": msg("Falsche oder unpassende Quelle"),
+    "incomplete": msg("Unvollständig"),
+    "outdated_source": msg("Quelle veraltet"),
+    "unsafe_recommendation": msg("Sicherheitskritische Empfehlung"),
+    "not_applicable": msg("Trifft die Frage nicht"),
+    UNKNOWN_REASON: msg("Ohne Angabe"),
+}
+REVIEW_ERRORS = {
+    "FOUR_EYES_REVIEW_REQUIRED": msg("Für sicherheitsrelevante Analysen gilt das Vier-Augen-Prinzip."),
+    "EXPERT_REVIEW_REQUIRED": msg("Über eskalierte Antworten entscheidet die Rolle Supervisor oder Admin."),
+    "REVIEW_ALREADY_DECIDED": msg("Über diese Antwort wurde bereits entschieden."),
+    "REVIEW_ALREADY_ESCALATED": msg("Diese Antwort ist bereits an einen Experten eskaliert."),
+    "REVIEW_REASON_REQUIRED": msg("Ablehnungsgrund auswählen."),
+    "REVIEW_SOURCE_NOT_RELEASED": msg(
+        "Mindestens eine zitierte Quelle ist nicht mehr freigegeben; die Antwort kann nur abgelehnt werden."
+    ),
+    "REVIEW_PERMISSION_REQUIRED": msg("Diese Funktion ist für Ihre App-Rolle nicht freigegeben."),
 }
 ROLE_LABELS = {
     "viewer": msg("Leser"),
@@ -652,6 +689,7 @@ def _overview(principal: UserPrincipal, repository: EnterpriseRepository, settin
             )
             st.button(tr("Zu den Datenschutzanträgen"), on_click=_go_to, args=("Governance",), key="overview-privacy")
     _render_document_actions(principal, documents, now)
+    _render_review_notices(principal, repository, documents, now)
     _render_setup_progress(principal, repository, settings, assets, documents)
     st.subheader(tr("Freigabegrenzen"))
     st.warning(tr("Keine autonome Maschinensteuerung. Keine automatische Sicherheitsfreigabe."))
@@ -712,6 +750,54 @@ def _render_document_actions(principal: UserPrincipal, documents: tuple[Document
         st.warning(text)
     if notices:
         st.button(tr("Zur Dokumentenlenkung"), on_click=_go_to, args=("Wissensbasis",), key="overview-documents")
+
+
+def _load_answer_quality(
+    principal: UserPrincipal, repository: EnterpriseRepository, documents: Sequence[DocumentRecord], since: datetime
+) -> tuple[AnswerQuality, bool]:
+    """Quality figures for the window and whether the answer limit cut the input."""
+    records = repository.list_answer_quality(principal, since=since, limit=QUALITY_ANSWER_LIMIT + 1)
+    return answer_quality(records[:QUALITY_ANSWER_LIMIT], documents), len(records) > QUALITY_ANSWER_LIMIT
+
+
+def _render_review_notices(
+    principal: UserPrincipal, repository: EnterpriseRepository, documents: tuple[DocumentRecord, ...], now: datetime
+) -> None:
+    """AI answers waiting for this person as second reviewer, and review outcomes that need attention."""
+    if not principal.can(REVIEW_WRITE_PERMISSION):
+        return
+    waiting = [
+        item
+        for item in repository.list_review_queue(principal)
+        if item.needs_second_person and item.acceptable_by(principal)
+    ]
+    if waiting:
+        text = tr_plural(
+            len(waiting),
+            "{n} KI-Antwort wartet auf Ihre Prüfung als zweite Person.",
+            "{n} KI-Antworten warten auf Ihre Prüfung als zweite Person.",
+        )
+        if late := len(overdue_reviews(waiting, now)):
+            text += " " + tr_plural(
+                late,
+                "{n} davon seit mehr als {hours} Stunden.",
+                "{n} davon seit mehr als {hours} Stunden.",
+                hours=int(REVIEW_TARGET / timedelta(hours=1)),
+            )
+        st.warning(text)
+        st.button(tr("Zur Prüfwarteschlange"), on_click=_go_to, args=("Wissensbasis",), key="overview-review-queue")
+    if not principal.can("analysis:export"):
+        return
+    quality, _ = _load_answer_quality(principal, repository, documents, now - timedelta(days=OVERVIEW_KPI_DAYS))
+    if quality.release_signals or quality.document_signals:
+        st.warning(
+            tr(
+                "KI-Qualität: Die Fachprüfungen der letzten {days} Tage zeigen auffällig viele Ablehnungen. "
+                "Ursache in den Kennzahlen prüfen.",
+                days=OVERVIEW_KPI_DAYS,
+            )
+        )
+        st.button(tr("Zur KI-Qualität"), on_click=_go_to, args=("Kennzahlen",), key="overview-ai-quality")
 
 
 def _render_demo_seed(principal: UserPrincipal, repository: EnterpriseRepository) -> None:
@@ -957,16 +1043,132 @@ def _assets(principal: UserPrincipal, repository: EnterpriseRepository) -> None:
                 st.rerun()
 
 
-def _render_answer(
-    answer: GroundedAnswer,
+def _record_review(
     principal: UserPrincipal,
     repository: EnterpriseRepository,
+    item: StoredAnswer,
+    status: ReviewStatus,
+    key: str,
+    reason: str | None = None,
 ) -> None:
+    answer = item.answer
+    try:
+        repository.record_review(principal, answer.answer_id, status, reason, question=item.question)
+    except (PermissionError, ValueError) as error:
+        code = str(error.args[0]) if error.args else ""
+        repository.emit_audit(
+            principal,
+            action="analysis.review.denied",
+            outcome=AuditOutcome.DENIED,
+            resource_type="analysis",
+            resource_id=answer.answer_id,
+            metadata={"reason_code": code, "risk_class": answer.risk_class.value},
+        )
+        st.error(label(REVIEW_ERRORS, code) if code in REVIEW_ERRORS else tr_error(error))
+        return
+    metadata = {"review_status": status.value, "risk_class": answer.risk_class.value}
+    if reason:
+        metadata["reason_code"] = reason
+    repository.emit_audit(
+        principal,
+        action="analysis.review.recorded",
+        outcome=AuditOutcome.SUCCESS,
+        resource_type="analysis",
+        resource_id=answer.answer_id,
+        metadata=metadata,
+    )
+    st.session_state.review_notice = (
+        key,
+        tr("Prüfschritt dokumentiert: {status}", status=label(REVIEW_STATUS_LABELS, status.value)),
+    )
+    st.rerun()
+
+
+def _review_history(item: StoredAnswer) -> None:
+    if not item.reviews:
+        return
+    entries = []
+    for review in item.reviews:
+        text = label(REVIEW_STATUS_LABELS, review.status.value)
+        if review.status is ReviewStatus.REJECTED:
+            reason = review.reason_code if review.reason_code in REVIEW_REJECTION_REASONS else UNKNOWN_REASON
+            text = f"{text}: {label(REVIEW_REASON_LABELS, reason)}"
+        actor = label(ROLE_LABELS, review.reviewer_role) if review.reviewer_role else tr("Rolle nicht erfasst")
+        if review.is_own:
+            actor = tr("{role} (Sie)", role=actor)
+        entries.append(
+            f'<li><time datetime="{review.reviewed_at.isoformat()}">{fmt_datetime(review.reviewed_at)} UTC</time>'
+            f"<span>{html.escape(text)}</span><small>{html.escape(actor)}</small></li>"
+        )
+    st.markdown(f"#### {tr('Prüfverlauf')}")
+    st.markdown(f'<ol class="hd-timeline">{"".join(entries)}</ol>', unsafe_allow_html=True)
+
+
+def _review_actions(principal: UserPrincipal, repository: EnterpriseRepository, item: StoredAnswer, key: str) -> None:
+    answer = item.answer
+    status = answer.review_status
+    if status in (ReviewStatus.ACCEPTED, ReviewStatus.REJECTED):
+        st.info(tr("Dokumentierter Reviewstatus: {status}", status=label(REVIEW_STATUS_LABELS, status.value)))
+        return
+    if not principal.can(REVIEW_WRITE_PERMISSION):
+        return
+    if not item.decidable_by(principal):
+        st.info(tr("Diese Antwort ist eskaliert und wartet auf die Entscheidung durch Supervisor oder Admin."))
+        return
+    st.write(tr("Fachprüfung"))
+    acceptable = item.acceptable_by(principal)
+    if not acceptable:
+        st.caption(
+            tr(
+                "Sicherheitsrelevante Antwort auf Ihre eigene Frage: Akzeptieren kann nur eine zweite Person "
+                "(Vier-Augen-Prinzip). Die Antwort steht dafür in der Prüfwarteschlange."
+            )
+        )
+    accept, expert = st.columns(2)
+    if accept.button(
+        tr("Geprüft und akzeptiert"), key=f"accept:{key}:{answer.answer_id}", width="stretch", disabled=not acceptable
+    ):
+        _record_review(principal, repository, item, ReviewStatus.ACCEPTED, key)
+    if status is ReviewStatus.DRAFT:
+        if expert.button(tr("Experte erforderlich"), key=f"expert:{key}:{answer.answer_id}", width="stretch"):
+            _record_review(principal, repository, item, ReviewStatus.NEEDS_EXPERT, key)
+        if answer.risk_class is not RiskClass.HEIGHTENED and item.question:
+            st.caption(
+                tr(
+                    "Mit „Experte erforderlich“ wird Ihre Frage bis zur Entscheidung für Prüfberechtigte "
+                    "gespeichert, ohne Ihren Namen."
+                )
+            )
+    reason = st.selectbox(
+        tr("Ablehnungsgrund"),
+        REVIEW_REJECTION_REASONS,
+        index=None,
+        placeholder=tr("Grund auswählen"),
+        format_func=lambda option: label(REVIEW_REASON_LABELS, option),
+        key=f"reject-reason:{key}:{answer.answer_id}",
+    )
+    if st.button(tr("Ablehnen"), key=f"reject:{key}:{answer.answer_id}", disabled=reason is None):
+        _record_review(principal, repository, item, ReviewStatus.REJECTED, key, reason)
+
+
+def _render_answer(
+    item: StoredAnswer,
+    principal: UserPrincipal,
+    repository: EnterpriseRepository,
+    key: str = "current",
+) -> None:
+    answer = item.answer
     st.markdown(
         f'<div class="hd-notice"><strong>{html.escape(tr("KI-Entwurf"))}</strong><br>'
         f"{html.escape(tr('Vor jeder technischen Handlung fachlich prüfen.'))}</div>",
         unsafe_allow_html=True,
     )
+    if key != "current":
+        if item.question:
+            st.markdown(f"**{tr('Frage')}**")
+            st.text(item.question)
+        else:
+            st.caption(tr("Der Wortlaut der Frage wird nur für Antworten gespeichert, die eine zweite Person prüft."))
     st.markdown(answer.text)
     st.subheader(tr("Evidenz"))
     if answer.citations:
@@ -1013,60 +1215,9 @@ def _render_answer(
                 "limitations": answer.limitations,
             }
         )
-    review = st.session_state.get(f"review:{answer.answer_id}")
-    if principal.can("review:write") and not review:
-        st.write(tr("Fachprüfung"))
-        accept, expert, reject = st.columns(3)
-        if accept.button(tr("Geprüft und akzeptiert"), key=f"accept:{answer.answer_id}", width="stretch"):
-            try:
-                repository.record_review(principal, answer.answer_id, ReviewStatus.ACCEPTED)
-                repository.emit_audit(
-                    principal,
-                    action="analysis.review.recorded",
-                    outcome=AuditOutcome.SUCCESS,
-                    resource_type="analysis",
-                    resource_id=answer.answer_id,
-                    metadata={"review_status": ReviewStatus.ACCEPTED.value, "risk_class": answer.risk_class.value},
-                )
-                st.session_state[f"review:{answer.answer_id}"] = ReviewStatus.ACCEPTED.value
-                st.rerun()
-            except PermissionError:
-                repository.emit_audit(
-                    principal,
-                    action="analysis.review.denied",
-                    outcome=AuditOutcome.DENIED,
-                    resource_type="analysis",
-                    resource_id=answer.answer_id,
-                    metadata={"reason_code": "FOUR_EYES_REVIEW_REQUIRED", "risk_class": answer.risk_class.value},
-                )
-                st.error(tr("Für sicherheitsrelevante Analysen gilt das Vier-Augen-Prinzip."))
-        if expert.button(tr("Experte erforderlich"), key=f"expert:{answer.answer_id}", width="stretch"):
-            repository.record_review(principal, answer.answer_id, ReviewStatus.NEEDS_EXPERT, "EXPERT_REVIEW")
-            repository.emit_audit(
-                principal,
-                action="analysis.review.recorded",
-                outcome=AuditOutcome.SUCCESS,
-                resource_type="analysis",
-                resource_id=answer.answer_id,
-                metadata={"review_status": ReviewStatus.NEEDS_EXPERT.value, "risk_class": answer.risk_class.value},
-            )
-            st.session_state[f"review:{answer.answer_id}"] = ReviewStatus.NEEDS_EXPERT.value
-            st.rerun()
-        if reject.button(tr("Ablehnen"), key=f"reject:{answer.answer_id}", width="stretch"):
-            repository.record_review(principal, answer.answer_id, ReviewStatus.REJECTED, "TECHNICAL_REJECTION")
-            repository.emit_audit(
-                principal,
-                action="analysis.review.recorded",
-                outcome=AuditOutcome.SUCCESS,
-                resource_type="analysis",
-                resource_id=answer.answer_id,
-                metadata={"review_status": ReviewStatus.REJECTED.value, "risk_class": answer.risk_class.value},
-            )
-            st.session_state[f"review:{answer.answer_id}"] = ReviewStatus.REJECTED.value
-            st.rerun()
-    if review:
-        st.info(tr("Dokumentierter Reviewstatus: {status}", status=label(REVIEW_STATUS_LABELS, review)))
-    persisted_review = repository.answer_review_status(principal, answer.answer_id)
+    _review_history(item)
+    _review_actions(principal, repository, item, key)
+    persisted_review = answer.review_status
     if persisted_review is ReviewStatus.ACCEPTED and principal.can("analysis:export"):
         payload = {
             "answer_id": answer.answer_id,
@@ -1080,6 +1231,7 @@ def _render_answer(
             json.dumps(payload, default=str, ensure_ascii=False, indent=2),
             file_name=f"hydraulikdoc-analysis-{answer.answer_id}.json",
             mime="application/json",
+            key=f"evidence:{key}:{answer.answer_id}",
         )
         if exported:
             repository.emit_audit(
@@ -1471,6 +1623,52 @@ def _document_withdrawal_form(
     st.rerun()
 
 
+def _queue_state(item: StoredAnswer) -> str:
+    if item.answer.review_status is ReviewStatus.NEEDS_EXPERT:
+        return tr("Experte erforderlich")
+    if item.answer.risk_class is RiskClass.HEIGHTENED:
+        return tr("Sicherheitsrelevant, zweite Person nötig")
+    return tr("Eigener Entwurf")
+
+
+def _queue_label(item: StoredAnswer, now: datetime) -> str:
+    parts = [fmt_datetime(item.answer.provenance.generated_at), _queue_state(item)]
+    if item.is_own:
+        parts.append(tr("Ihre Frage"))
+    if overdue_reviews((item,), now):
+        parts.append(tr("überfällig"))
+    preview = (item.question or "").strip()
+    if preview:
+        parts.append(preview if len(preview) <= 70 else preview[:67] + "…")
+    return " · ".join(parts)
+
+
+def _render_review_queue(principal: UserPrincipal, repository: EnterpriseRepository, notice: str | None) -> None:
+    st.divider()
+    st.subheader(tr("Prüfwarteschlange"))
+    st.caption(
+        tr(
+            "Sicherheitsrelevante und an Experten eskalierte Antworten warten hier auf eine zweite Person, dazu Ihre "
+            "eigenen offenen Entwürfe. Wer gefragt hat, wird nicht angezeigt; eine Entscheidung ist endgültig."
+        )
+    )
+    if notice:
+        st.success(notice)
+    queue = repository.list_review_queue(principal)
+    if not queue:
+        st.info(tr("Keine KI-Antwort wartet auf eine Prüfung."))
+        return
+    now = datetime.now(UTC)
+    by_id = {item.answer.answer_id: item for item in queue}
+    selected = st.selectbox(
+        tr("Antwort"),
+        tuple(by_id),
+        format_func=lambda option: _queue_label(by_id[option], now),
+        key="review-queue-select",
+    )
+    _render_answer(by_id[selected], principal, repository, key="queue")
+
+
 def _knowledge(principal: UserPrincipal, repository: EnterpriseRepository, settings: AppSettings) -> None:
     st.title(tr("Wissensbasis"))
     if settings.demo_mode:
@@ -1521,6 +1719,13 @@ def _knowledge(principal: UserPrincipal, repository: EnterpriseRepository, setti
                 "Was ist bei hoher Partikelzahl zu tun?"
             )
         )
+    if decision.risk_class is RiskClass.HEIGHTENED:
+        st.caption(
+            tr(
+                "Sicherheitsrelevante Diagnose: Die Frage wird gespeichert, bis eine zweite Person über die Antwort "
+                "entschieden hat, und danach gelöscht. Keine Personennamen eintragen."
+            )
+        )
     if not any(item.usable_for_answers for item in documents):
         st.info(tr("Noch kein Dokument ist freigegeben; bis dahin findet die KI keine zitierfähige Evidenz."))
     disabled = not accepted or not settings.ai_ready or not decision.allowed
@@ -1530,15 +1735,27 @@ def _knowledge(principal: UserPrincipal, repository: EnterpriseRepository, setti
                 st.session_state.current_answer = _rag(settings, repository).ask(
                     principal, question, use_case, language=_language()
                 )
+                st.session_state.current_question = question.strip()
         except (InputRejected, PermissionError, AuthenticationError) as error:
             st.error(tr_error(error))
         except Exception as error:
             st.error(tr("Abfrage fehlgeschlagen. Referenz {reference}", reference=public_error_code(error)))
+    review_key, review_notice = st.session_state.pop("review_notice", (None, None))
     answer = st.session_state.get("current_answer")
     if answer:
-        _render_answer(answer, principal, repository)
+        if review_notice and review_key == "current":
+            st.success(review_notice)
+        try:
+            current = replace(answer, review_status=repository.answer_review_status(principal, answer.answer_id))
+        except KeyError:
+            # The stored answer has reached its retention date or belongs to an earlier process.
+            st.session_state.pop("current_answer", None)
+        else:
+            _render_answer(StoredAnswer(current, True, st.session_state.get("current_question")), principal, repository)
     if not accepted:
         st.info(tr("Der KI-Nutzerhinweis muss im Bereich Governance bestätigt werden."))
+    if principal.can(REVIEW_WRITE_PERMISSION):
+        _render_review_queue(principal, repository, review_notice if review_key == "queue" else None)
 
 
 def _parse_optional_float(row: dict[str, str], key: str) -> float | None:
@@ -2199,7 +2416,193 @@ def _render_kpi_tiles(kpis: MaintenanceKpis) -> None:
 
 
 def _kpis(principal: UserPrincipal, repository: EnterpriseRepository) -> None:
-    st.title(tr("Instandhaltungskennzahlen"))
+    st.title(tr("Kennzahlen"))
+    maintenance, quality = st.tabs((tr("Instandhaltung"), tr("KI-Qualität")))
+    with maintenance:
+        _maintenance_kpis(principal, repository)
+    with quality:
+        _ai_quality(principal, repository)
+
+
+def _render_quality_tiles(quality: AnswerQuality) -> None:
+    tiles = (
+        (
+            tr("KI-Antworten"),
+            tr("{n} erzeugt, {empty} ohne Evidenz", n=quality.answers, empty=quality.without_evidence),
+        ),
+        (
+            tr("Geprüft"),
+            tr("{share} · {n} entschieden", share=_format_share(quality.review_coverage), n=quality.decided),
+        ),
+        (
+            tr("Ablehnungsquote"),
+            tr("{share} · {n} abgelehnt", share=_format_share(quality.rejection_share), n=quality.rejected),
+        ),
+        (
+            tr("Offen für zweite Person"),
+            tr("{n} offen, {escalated} eskaliert", n=quality.open_second_person, escalated=quality.escalated),
+        ),
+        (tr("Median bis zur Entscheidung"), _format_duration(quality.median_decision_time)),
+    )
+    st.markdown(
+        '<div class="hd-state hd-state-wide">'
+        + "".join(f"<div><strong>{html.escape(title)}</strong>{html.escape(text)}</div>" for title, text in tiles)
+        + "</div>",
+        unsafe_allow_html=True,
+    )
+
+
+def _ai_quality(principal: UserPrincipal, repository: EnterpriseRepository) -> None:
+    st.caption(
+        tr(
+            "Ergebnis der dokumentierten Fachprüfungen je Prompt- und Modellversion und je Dokument. Wer gefragt "
+            "oder geprüft hat, fließt nicht ein; eine Auswertung je Person ist nicht vorgesehen."
+        )
+    )
+    days = st.radio(
+        tr("Zeitraum"),
+        QUALITY_WINDOW_DAYS,
+        index=len(QUALITY_WINDOW_DAYS) - 1,
+        format_func=lambda option: tr("Letzte {n} Tage", n=option),
+        horizontal=True,
+        key="quality-window",
+    )
+    now = datetime.now(UTC)
+    documents = repository.list_documents(principal)
+    quality, truncated = _load_answer_quality(principal, repository, documents, now - timedelta(days=days))
+    if truncated:
+        st.warning(
+            tr(
+                "Im Zeitraum liegen mehr als {limit} KI-Antworten. Ausgewertet werden die {limit} jüngsten.",
+                limit=QUALITY_ANSWER_LIMIT,
+            )
+        )
+    if not quality.answers:
+        st.info(tr("Im gewählten Zeitraum wurden keine KI-Antworten gespeichert."))
+        return
+    _render_quality_tiles(quality)
+    for release in quality.release_signals:
+        st.markdown(
+            '<div class="hd-notice hd-blocked">'
+            + html.escape(
+                tr(
+                    "Ablehnungsquote {share} für Prompt {prompt} auf Modell {model} ({rejected} von {decided} "
+                    "Entscheidungen). Regressionstest und Freigabe dieser Version prüfen.",
+                    share=_format_share(release.rejection_share),
+                    prompt=release.prompt_version,
+                    model=release.model_snapshot,
+                    rejected=release.rejected,
+                    decided=release.decided,
+                )
+            )
+            + "</div>",
+            unsafe_allow_html=True,
+        )
+    for document in quality.document_signals:
+        name = document.display_name
+        if document.revision:
+            name = tr("{name} · Revision {revision}", name=name, revision=document.revision)
+        st.markdown(
+            '<div class="hd-notice hd-blocked">'
+            + html.escape(
+                tr(
+                    "{document}: {n} Antworten wurden wegen der Quelle abgelehnt. Dokument überprüfen, zurückziehen "
+                    "oder eine neue Revision freigeben.",
+                    document=name,
+                    n=document.source_rejections,
+                )
+            )
+            + "</div>",
+            unsafe_allow_html=True,
+        )
+    if quality.document_signals:
+        st.button(tr("Zur Dokumentenlenkung"), on_click=_go_to, args=("Wissensbasis",), key="quality-documents")
+    if quality.rejection_reasons:
+        st.subheader(tr("Ablehnungsgründe"))
+        st.dataframe(
+            [
+                {tr("Grund"): label(REVIEW_REASON_LABELS, reason), tr("Anzahl"): count}
+                for reason, count in sorted(quality.rejection_reasons.items(), key=lambda entry: (-entry[1], entry[0]))
+            ],
+            width="stretch",
+            hide_index=True,
+        )
+    st.subheader(tr("Je Prompt- und Modellversion"))
+    st.dataframe(
+        [
+            {
+                tr("Prompt"): item.prompt_version,
+                tr("Modell"): item.model_snapshot,
+                tr("Deployment"): item.deployment,
+                tr("Antworten"): item.answers,
+                tr("Ohne Evidenz"): item.without_evidence,
+                tr("Akzeptiert"): item.accepted,
+                tr("Abgelehnt"): item.rejected,
+                tr("Eskaliert"): item.escalated,
+                tr("Offen"): item.open,
+                tr("Ablehnungsquote"): _format_share(item.rejection_share),
+            }
+            for item in quality.releases
+        ],
+        width="stretch",
+        hide_index=True,
+    )
+    if quality.documents:
+        st.subheader(tr("Je Dokument"))
+        st.dataframe(
+            [
+                {
+                    tr("Dokument"): item.display_name or tr("Gelöschtes Dokument"),
+                    tr("Revision"): item.revision or "–",
+                    tr("Status"): label(DOCUMENT_RELEASE_LABELS, item.release_status)
+                    if item.release_status
+                    else tr("gelöscht"),
+                    tr("Antworten"): item.answers,
+                    tr("Abgelehnt"): item.rejected,
+                    tr("davon wegen der Quelle"): item.source_rejections,
+                }
+                for item in quality.documents
+            ],
+            width="stretch",
+            hide_index=True,
+        )
+    with st.expander(tr("Berechnungsgrundlage")):
+        st.markdown(
+            tr(
+                "- **Grundlage** sind die gespeicherten KI-Antworten des Zeitraums und ihre Fachprüfungen. Antworten "
+                "werden nach der Aufbewahrungsfrist für KI-Interaktionen gelöscht; ältere Zeiträume sind daher "
+                "nicht auswertbar.\n"
+                "- **Ablehnungsquote:** abgelehnte Antworten im Verhältnis zu allen entschiedenen. Als auffällig "
+                "gilt eine Version ab {share} bei mindestens {minimum} Entscheidungen.\n"
+                "- **Wegen der Quelle abgelehnt:** Gründe „Wert oder Grenzwert falsch wiedergegeben“, „Falsche oder "
+                "unpassende Quelle“ und „Quelle veraltet“. Ab zwei solchen Ablehnungen wird ein freigegebenes "
+                "Dokument zur Überprüfung gemeldet.\n"
+                "- **Ohne Evidenz:** Antworten, für die keine zitierfähige Quelle gefunden wurde.\n"
+                "- Die Zahlen beschreiben geprüfte Antworten, nicht die Richtigkeit ungeprüfter Antworten.",
+                share=_format_share(SIGNAL_REJECTION_SHARE),
+                minimum=SIGNAL_MIN_DECISIONS,
+            )
+        )
+    if principal.can("analysis:export"):
+        rows = quality_export_rows(quality)
+        exported = st.download_button(
+            tr("KI-Qualität je Version als CSV herunterladen"),
+            to_spreadsheet_csv(rows, QUALITY_EXPORT_COLUMNS),
+            file_name=f"hydraulikdoc-ki-qualitaet-{days}d-{now:%Y%m%d-%H%M}.csv",
+            mime="text/csv",
+            key="quality-export",
+        )
+        if exported:
+            repository.emit_audit(
+                principal,
+                action="analysis.quality_export.generated",
+                outcome=AuditOutcome.SUCCESS,
+                resource_type="analysis",
+                metadata={"source_count": len(rows), "window_days": days},
+            )
+
+
+def _maintenance_kpis(principal: UserPrincipal, repository: EnterpriseRepository) -> None:
     st.caption(
         tr(
             "Reaktions- und Behebungszeiten je Anlage aus dem dokumentierten Incident-Verlauf. Kennzahlen werden nur "

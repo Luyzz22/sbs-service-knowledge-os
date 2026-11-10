@@ -78,6 +78,7 @@ Die Pipeline gibt die öffentliche Application-Gateway-IP aus. DNS A/AAAA-Konfig
 - EICAR in einem isolierten Testtenant verwenden, um das Malware-Gate zu prüfen;
 - je Mandant mindestens zwei Konten zuweisen, von denen eines `document:release` besitzt (Supervisor oder Admin); ohne zweite Person bleibt jeder Upload ein Entwurf;
 - ein freigegebenes Testhandbuch hochladen, als zweite Person freigeben, Quellen-/Zitatgate und Reviewexport prüfen; vor der Freigabe darf dieselbe Frage keine Quelle liefern;
+- eine sicherheitsrelevante Testfrage stellen und mit einem zweiten Konto aus der Prüfwarteschlange entscheiden; danach darf `analysis_runs.review_question` für diese Antwort leer sein;
 - Dokument löschen und Search/Blob/PostgreSQL-Propagation nachweisen;
 - WAF-, Defender-, Entra- und Container-Logs in das SIEM aufnehmen;
 - Backup-/Restore-Drill durchführen.

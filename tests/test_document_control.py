@@ -372,6 +372,9 @@ class DemoRevisionTests(unittest.TestCase):
         documents = self.repository.list_documents(self.supervisor)
         self.draft = next(item for item in documents if item.release_status == "draft")
         self.first = next(item for item in documents if item.document_id == self.draft.supersedes_document_id)
+        # The seed already contains reviewed answers that cite revision 1.
+        seeded = self.repository.list_answer_quality(self.supervisor, since=datetime.min.replace(tzinfo=UTC), limit=100)
+        self.seeded_citing = sum(1 for item in seeded if self.first.document_id in item.document_ids)
 
     def test_answers_follow_the_released_revision(self) -> None:
         before = self.service.ask(self.supervisor, self.QUESTION, UseCase.MAINTENANCE_ASSISTANCE)
@@ -383,7 +386,7 @@ class DemoRevisionTests(unittest.TestCase):
         result = self.repository.release_document(self.supervisor, self.draft.document_id, review_due_at=_review())
         assert result.superseded is not None
         self.assertEqual(result.superseded.document_id, self.first.document_id)
-        self.assertEqual(result.superseded_answer_count, 1)
+        self.assertEqual(result.superseded_answer_count, self.seeded_citing + 1)
 
         after = self.service.ask(self.supervisor, self.QUESTION, UseCase.MAINTENANCE_ASSISTANCE)
         self.assertIn("3000 Betriebsstunden", after.text)
@@ -393,7 +396,7 @@ class DemoRevisionTests(unittest.TestCase):
     def test_withdrawn_document_is_no_longer_cited(self) -> None:
         self.service.ask(self.supervisor, self.QUESTION, UseCase.MAINTENANCE_ASSISTANCE)
         result = self.repository.withdraw_document(self.supervisor, self.first.document_id, "incorrect")
-        self.assertEqual(result.cited_answer_count, 1)
+        self.assertEqual(result.cited_answer_count, self.seeded_citing + 1)
         answer = self.service.ask(self.supervisor, self.QUESTION, UseCase.MAINTENANCE_ASSISTANCE)
         self.assertNotIn(self.first.document_id, {citation.document_id for citation in answer.citations})
         self.assertNotIn("4000 Betriebsstunden", answer.text)

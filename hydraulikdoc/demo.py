@@ -21,9 +21,9 @@ from datetime import UTC, datetime, timedelta
 
 from compliance.audit import AuditOutcome
 
-from .auth import UserPrincipal, require_permission
+from .auth import ROLE_PERMISSIONS, UserPrincipal, require_permission
 from .config import AppSettings
-from .governance import AIProvenance, GroundedAnswer, SourceCitation, UseCase, evaluate_use_case
+from .governance import AIProvenance, GroundedAnswer, ReviewStatus, SourceCitation, UseCase, evaluate_use_case
 from .i18n import DEFAULT_LANGUAGE, msg
 from .repository import (
     INCIDENT_ANALYSIS_FIELDS,
@@ -325,6 +325,7 @@ def seed_demo_tenant(principal: UserPrincipal, repository: EnterpriseRepository)
         repository.mark_document_indexed(author, record.document_id, max(pages))
         if control.released:
             repository.release_document(principal, record.document_id, review_due_at=now + DEMO_REVIEW_INTERVAL)
+    _seed_reviewed_answers(principal, repository, now)
     for item in DEMO_INCIDENTS:
         created = now - timedelta(days=item.created_days_ago)
         with _staged(repository, principal, created):
@@ -355,6 +356,78 @@ def seed_demo_tenant(principal: UserPrincipal, repository: EnterpriseRepository)
         metadata={"source_count": len(DEMO_ASSETS) + len(DEMO_DOCUMENTS) + len(DEMO_INCIDENTS)},
     )
     return DemoSeedResult(len(DEMO_ASSETS), len(DEMO_DOCUMENTS), len(DEMO_INCIDENTS))
+
+
+@dataclass(frozen=True)
+class _DemoReviewedAnswer:
+    question: str
+    asked_hours_ago: float
+    use_case: UseCase = UseCase.MAINTENANCE_ASSISTANCE
+    review: ReviewStatus | None = None
+    reason_code: str | None = None
+    reviewed_after_hours: float = 2
+
+
+# A short review history so the queue and the quality figures tell a story: revision 1 of the HA-250
+# manual is rejected twice as outdated, which is exactly what releasing the waiting revision 2 resolves.
+DEMO_REVIEWED_ANSWERS = (
+    _DemoReviewedAnswer("Welcher Betriebsdruck gilt für HA-250?", 12 * 24, review=ReviewStatus.ACCEPTED),
+    _DemoReviewedAnswer("Wie hoch darf der Wassergehalt sein?", 10 * 24, review=ReviewStatus.ACCEPTED),
+    _DemoReviewedAnswer("Wann ist der Rücklauffilter zu wechseln?", 9 * 24, review=ReviewStatus.ACCEPTED),
+    _DemoReviewedAnswer(
+        "Nach wie vielen Betriebsstunden ist ein Ölwechsel erforderlich?",
+        8 * 24,
+        review=ReviewStatus.REJECTED,
+        reason_code="outdated_source",
+    ),
+    _DemoReviewedAnswer(
+        "Welches Intervall gilt für den Ölwechsel am HA-250?",
+        6 * 24,
+        review=ReviewStatus.REJECTED,
+        reason_code="outdated_source",
+        reviewed_after_hours=5,
+    ),
+    _DemoReviewedAnswer(
+        "Ab welcher Öltemperatur ist das Aggregat abzuschalten?", 5 * 24, UseCase.SAFETY_RELEVANT_DIAGNOSIS
+    ),
+    _DemoReviewedAnswer(
+        "Was ist bei hoher Partikelzahl zu tun?", 30, review=ReviewStatus.NEEDS_EXPERT, reviewed_after_hours=1
+    ),
+)
+DEMO_SHIFT_SUBJECT = "demo:instandhaltung-schicht-a"
+DEMO_REVIEWER_SUBJECT = "demo:schichtleitung"
+
+
+def _seed_reviewed_answers(principal: UserPrincipal, repository: EnterpriseRepository, now: datetime) -> None:
+    """Answers asked and reviewed by fictitious colleagues, so the person loading the demo is the second reviewer."""
+    asker = replace(
+        principal,
+        subject_id=DEMO_SHIFT_SUBJECT,
+        display_name="Instandhaltung Schicht A (Demo)",
+        email=None,
+        role="technician",
+        permissions=ROLE_PERMISSIONS["technician"],
+    )
+    reviewer = replace(
+        principal,
+        subject_id=DEMO_REVIEWER_SUBJECT,
+        display_name="Schichtleitung (Demo)",
+        email=None,
+        role="supervisor",
+        permissions=ROLE_PERMISSIONS["supervisor"],
+    )
+    # Only the development backend can stage history; on PostgreSQL everything happens at load time.
+    staged = isinstance(repository, InMemoryRepository)
+    for item in DEMO_REVIEWED_ANSWERS:
+        asked = now - timedelta(hours=item.asked_hours_ago) if staged else now
+        answer = _extractive_answer(repository, asker, item.question, item.use_case, DEFAULT_LANGUAGE, asked)
+        repository.record_answer(asker, item.question, answer)
+        if item.review is None:
+            continue
+        # The shift escalates its own answer; decisions come from the shift lead.
+        actor = asker if item.review is ReviewStatus.NEEDS_EXPERT else reviewer
+        with _staged(repository, actor, asked + timedelta(hours=item.reviewed_after_hours)):
+            repository.record_review(actor, answer.answer_id, item.review, item.reason_code, question=item.question)
 
 
 def _staged(repository: EnterpriseRepository, principal: UserPrincipal, at: datetime) -> AbstractContextManager[None]:
@@ -517,30 +590,7 @@ class DemoRAGService:
         )
 
     def _retrieve(self, principal: UserPrincipal, question: str) -> tuple[_Hit, ...]:
-        wanted = _words(question)
-        candidates: list[_Hit] = []
-        for document in self._repository.list_documents(principal):
-            pages = DEMO_DOCUMENTS.get(document.display_name)
-            # Drafts and withdrawn revisions are never evidence, exactly as on the Azure path.
-            if not pages or not document.usable_for_answers:
-                continue
-            for page, text in pages.items():
-                for sentence in _sentences(text):
-                    score, covered = _match(wanted, sentence)
-                    # One exact word or two stem matches; a single stem overlap is noise.
-                    if score >= 2:
-                        candidates.append(_Hit(document, page, sentence, score, covered))
-        # Greedy coverage: further sentences must answer a part of the question not covered yet.
-        selected: list[_Hit] = []
-        answered: set[str] = set()
-        # Ties prefer the longer, usually more specific sentence.
-        for hit in sorted(candidates, key=lambda item: (-item.score, -len(item.sentence), item.page)):
-            if hit.covered - answered:
-                selected.append(hit)
-                answered |= hit.covered
-            if len(selected) == _MAX_HITS:
-                break
-        return tuple(selected)
+        return _retrieve(self._repository, principal, question)
 
     def ask(
         self, principal: UserPrincipal, question: str, use_case: UseCase, language: str = DEFAULT_LANGUAGE
@@ -557,33 +607,7 @@ class DemoRAGService:
             raise PermissionError(decision.reason_code)
         cleaned = validate_question(question, self._settings.max_question_chars)
         started = time.monotonic()
-        hits = self._retrieve(principal, cleaned)
-        texts = _DEMO_ANSWER_TEXTS.get(language, _DEMO_ANSWER_TEXTS[DEFAULT_LANGUAGE])
-        if hits:
-            lines = "\n".join(f"- {hit.sentence} [S{index}]" for index, hit in enumerate(hits, start=1))
-            text = texts["answer"].format(lines=lines)
-        else:
-            text = texts["no_evidence"]
-        citations = tuple(
-            SourceCitation(
-                hit.document.document_id,
-                hit.document.display_name,
-                hit.page,
-                hashlib.sha256(f"{hit.document.document_id}:{hit.page}:{hit.sentence}".encode()).hexdigest(),
-                float(hit.score),
-                hit.document.revision,
-            )
-            for hit in hits
-        )
-        answer = GroundedAnswer.create(
-            text=text,
-            citations=citations,
-            provenance=AIProvenance(
-                provider=DEMO_PROVIDER, deployment="demo-extractive", model_snapshot="none", region="local"
-            ),
-            use_case=use_case,
-        )
-        answer = replace(answer, limitations=(DEMO_LIMITATION, *answer.limitations))
+        answer = _extractive_answer(self._repository, principal, cleaned, use_case, language)
         self._repository.record_answer(principal, cleaned, answer)
         self._repository.emit_audit(
             principal,
@@ -593,7 +617,7 @@ class DemoRAGService:
             resource_id=answer.answer_id,
             metadata={
                 "duration_ms": int((time.monotonic() - started) * 1000),
-                "source_count": len(citations),
+                "source_count": len(answer.citations),
                 "provider": "demo",
                 "answer_language": language,
                 "risk_class": answer.risk_class.value,
@@ -601,3 +625,71 @@ class DemoRAGService:
             },
         )
         return answer
+
+
+def _retrieve(repository: EnterpriseRepository, principal: UserPrincipal, question: str) -> tuple[_Hit, ...]:
+    wanted = _words(question)
+    candidates: list[_Hit] = []
+    for document in repository.list_documents(principal):
+        pages = DEMO_DOCUMENTS.get(document.display_name)
+        # Drafts and withdrawn revisions are never evidence, exactly as on the Azure path.
+        if not pages or not document.usable_for_answers:
+            continue
+        for page, text in pages.items():
+            for sentence in _sentences(text):
+                score, covered = _match(wanted, sentence)
+                # One exact word or two stem matches; a single stem overlap is noise.
+                if score >= 2:
+                    candidates.append(_Hit(document, page, sentence, score, covered))
+    # Greedy coverage: further sentences must answer a part of the question not covered yet.
+    selected: list[_Hit] = []
+    answered: set[str] = set()
+    # Ties prefer the longer, usually more specific sentence.
+    for hit in sorted(candidates, key=lambda item: (-item.score, -len(item.sentence), item.page)):
+        if hit.covered - answered:
+            selected.append(hit)
+            answered |= hit.covered
+        if len(selected) == _MAX_HITS:
+            break
+    return tuple(selected)
+
+
+def _extractive_answer(
+    repository: EnterpriseRepository,
+    principal: UserPrincipal,
+    cleaned: str,
+    use_case: UseCase,
+    language: str,
+    generated_at: datetime | None = None,
+) -> GroundedAnswer:
+    hits = _retrieve(repository, principal, cleaned)
+    texts = _DEMO_ANSWER_TEXTS.get(language, _DEMO_ANSWER_TEXTS[DEFAULT_LANGUAGE])
+    if hits:
+        lines = "\n".join(f"- {hit.sentence} [S{index}]" for index, hit in enumerate(hits, start=1))
+        text = texts["answer"].format(lines=lines)
+    else:
+        text = texts["no_evidence"]
+    citations = tuple(
+        SourceCitation(
+            hit.document.document_id,
+            hit.document.display_name,
+            hit.page,
+            hashlib.sha256(f"{hit.document.document_id}:{hit.page}:{hit.sentence}".encode()).hexdigest(),
+            float(hit.score),
+            hit.document.revision,
+        )
+        for hit in hits
+    )
+    answer = GroundedAnswer.create(
+        text=text,
+        citations=citations,
+        provenance=AIProvenance(
+            provider=DEMO_PROVIDER,
+            deployment="demo-extractive",
+            model_snapshot="none",
+            region="local",
+            generated_at=generated_at or datetime.now(UTC),
+        ),
+        use_case=use_case,
+    )
+    return replace(answer, limitations=(DEMO_LIMITATION, *answer.limitations))

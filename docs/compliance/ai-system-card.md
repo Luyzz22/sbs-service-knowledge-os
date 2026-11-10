@@ -39,12 +39,12 @@ Output: ein KI-Entwurf mit `[Sx]`-Markern, einer separaten Liste aus Dokument, R
 
 ## Human Oversight
 
-Jeder Output startet als `draft`. Technician, Supervisor oder Admin können reviewen. Nur Supervisor/Admin mit `analysis:export` können einen akzeptierten Output exportieren. Sicherheitsrelevante Diagnose ist als `heightened` markiert und verlangt qualifizierte Prüfung. Die UI weist vor der ersten Nutzung und beim Ergebnis auf Grenzen hin. Der Aufsicht vorgelagert ist die Dokumentenlenkung: Supervisor oder Admin geben Quellen frei, nie den eigenen Upload, und können sie mit Grund zurückziehen. Zitiert eine gespeicherte Antwort eine inzwischen zurückgezogene Quelle, steht das beim Ergebnis.
+Jeder Output startet als `draft`. Technician, Supervisor oder Admin können reviewen; eine Entscheidung ist endgültig, und eine Ablehnung trägt einen festen Grund. Sicherheitsrelevante und eskalierte Antworten erscheinen für eine zweite Person in der Prüfwarteschlange; über Eskalationen entscheiden Supervisor oder Admin. Nur Supervisor/Admin mit `analysis:export` können einen akzeptierten Output exportieren. Sicherheitsrelevante Diagnose ist als `heightened` markiert und verlangt qualifizierte Prüfung. Die UI weist vor der ersten Nutzung und beim Ergebnis auf Grenzen hin. Der Aufsicht vorgelagert ist die Dokumentenlenkung: Supervisor oder Admin geben Quellen frei, nie den eigenen Upload, und können sie mit Grund zurückziehen. Zitiert eine gespeicherte Antwort eine inzwischen zurückgezogene Quelle, steht das beim Ergebnis.
 
 ## Daten- und Loggingkonzept
 
 - Rohfragen werden nicht in technische Logs geschrieben.
-- Die Datenbank speichert einen SHA-256 der Frage, den Antwortentwurf und die notwendige Provenienz.
+- Die Datenbank speichert einen SHA-256 der Frage, den Antwortentwurf und die notwendige Provenienz. Den Wortlaut der Frage speichert sie nur, solange eine zweite Person über eine sicherheitsrelevante oder eskalierte Antwort entscheiden muss, und löscht ihn mit der Entscheidung.
 - Akteur- und Ressourcenkennungen werden in Auditdaten HMAC-pseudonymisiert.
 - Prompts/Outputs werden über regionale Standarddeployments verarbeitet; die Anbieter-/Transferbewertung bleibt externes Gate.
 - Fristen werden pro Record Class gesetzt und täglich über Search, Blob und PostgreSQL propagiert.
@@ -74,4 +74,4 @@ Ausführung, privacy-preserving Reportformat und Produktionsgate sind in [AI-Eva
 
 ## Monitoring und Incident
 
-Auditereignisse erfassen Dauer, Quellenanzahl, Modell, Promptversion, Risikoklasse und Reviewstatus ohne Rohinhalt. Abgelehnte und eskalierte Reviews sowie Incidents bilden den Eingang für Post-Market Monitoring. Schwellenwerte, Owner, CAPA und externe Meldepflichten müssen im QMS definiert werden.
+Auditereignisse erfassen Dauer, Quellenanzahl, Modell, Promptversion, Risikoklasse und Reviewstatus ohne Rohinhalt. Abgelehnte und eskalierte Reviews sowie Incidents bilden den Eingang für Post-Market Monitoring. Die Kennzahlenseite wertet die Fachprüfungen je Prompt- und Modellversion und je Dokument aus (Prüfquote, Ablehnungsquote, Gründe) und meldet Auffälligkeiten im Leitstand; die Auswertung enthält keine Personen und reicht so weit zurück wie die Aufbewahrungsfrist der Antworten. Schwellenwerte, Owner, CAPA und externe Meldepflichten müssen im QMS definiert werden.
