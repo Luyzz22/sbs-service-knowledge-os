@@ -33,6 +33,7 @@ _ALLOWED_METADATA_KEYS = frozenset(
         "evidence_id",
         "failure_count",
         "incident_status",
+        "limits_version",
         "model",
         "page_count",
         "previous_status",

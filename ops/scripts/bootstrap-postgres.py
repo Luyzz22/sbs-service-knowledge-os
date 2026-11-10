@@ -82,6 +82,7 @@ def main() -> None:
         "notice_acceptances",
         "privacy_requests",
         "legal_holds",
+        "operating_limits",
         "audit_events",
     )
     mutable_tables = tables[:-1]
@@ -142,6 +143,13 @@ def main() -> None:
             cursor.execute(
                 sql.SQL(
                     "GRANT UPDATE (released_by_token, released_at, retention_until) ON TABLE legal_holds TO {}"
+                ).format(sql.Identifier(app_user))
+            )
+            # Limit values are immutable once recorded; release, supersession and rejection only move the status.
+            cursor.execute(
+                sql.SQL(
+                    "GRANT UPDATE (status, decided_by_token, decided_at, decision_reason, superseded_at, "
+                    "retention_until) ON TABLE operating_limits TO {}"
                 ).format(sql.Identifier(app_user))
             )
             cursor.execute(sql.SQL("GRANT SELECT, INSERT ON TABLE audit_events TO {}").format(sql.Identifier(app_user)))

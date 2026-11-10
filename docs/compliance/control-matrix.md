@@ -90,6 +90,19 @@ Maßstab sind die Anforderungen an die Lenkung dokumentierter Information in ISO
 | Änderungsnachweis | Implementiert | `document_events` nur einfügbar, Auditereignisse in der Hashkette | Verlauf endet mit der Löschung des Dokuments; Aufbewahrung über das Auditprotokoll |
 | Verteilung und Kenntnisnahme | Externes Gate | – | Verteiler, Schulung und Kenntnisnahme neuer Revisionen |
 
+## Betriebsgrenzen je Anlage
+
+Grenzwerte für Condition Monitoring und Fluidbewertung sind fachliche Vorgaben des Betreibers. Die Anwendung erzwingt, dass eine verwendete Fassung eine Quelle nennt und von einer zweiten Person freigegeben wurde; ob die Werte zur Anlage passen, bleibt die Verantwortung der Freigebenden.
+
+| Kontrolle | Status | Technische Evidenz | Restnachweis |
+| --- | --- | --- | --- |
+| Freigabe vor Verwendung | Implementiert | Vorschlag ist Entwurf; `release_operating_limits` verlangt `limits:release` und eine andere Person als die vorschlagende; Bewertungen verwenden nur die freigegebene Fassung (`tests/test_operating_limits.py`, `tests/test_postgres_integration.py`) | Qualifikation der Freigebenden; Prüfkriterien je Anlagentyp |
+| Eindeutig gültige Fassung | Implementiert | Je Asset höchstens eine freigegebene Fassung und ein offener Vorschlag (eindeutige Teilindizes); Ablösung in derselben Transaktion | – |
+| Unveränderlichkeit | Implementiert | Runtime-Rolle darf nur Statusspalten von `operating_limits` ändern und nichts löschen | Datenbankadministration nach Berechtigungskonzept |
+| Rückverfolgbarkeit | Implementiert | Version, Quelle und Freigabedatum in Bewertung, Auditereignis und Incident; Auditereignisse in der Hashkette | Messwerte selbst werden nicht gespeichert |
+| Quellenänderung erkannt | Implementiert | Rückzug oder Ablösung des verknüpften Dokuments markiert die Fassung im Leitstand und sperrt die Freigabe offener Vorschläge | Abgleich mit Herstellermitteilungen außerhalb der Wissensbasis |
+| Ad-hoc-Grenzen | Bewusst zugelassen | Ohne freigegebene Fassung bleibt die Eingabe für eine einzelne Prüfung mit Bestätigung möglich und wird im Incident als „nicht freigegeben“ vermerkt | Betreiber entscheidet, ob Ad-hoc-Prüfungen zulässig sind |
+
 ## Barrierefreiheit
 
 Maßstab ist WCAG 2.2 Stufe AA, wie sie EN 301 549 und BITV 2.0 referenzieren. Ob das Barrierefreiheitsstärkungsgesetz für ein B2B-Instandhaltungswerkzeug greift, hängt von Vermarktung und Kundenkreis ab; öffentliche Auftraggeber und Konzerneinkauf fordern die Konformität regelmäßig vertraglich.
