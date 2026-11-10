@@ -70,6 +70,17 @@ from .maintenance_kpis import (
     kpi_export_rows,
     maintenance_kpis,
 )
+from .operating_limits import (
+    LIMIT_FIELDS,
+    LIMIT_REJECTION_REASONS,
+    LIMIT_SOURCE_REFERENCE_MAX,
+    LIMITS_PROPOSE_PERMISSION,
+    LIMITS_RELEASE_PERMISSION,
+    LimitValues,
+    OperatingLimitSet,
+    pending_limits,
+    released_limits,
+)
 from .personal_data import EXCLUDED_EVALUATIONS, PERSONAL_DATA_FIELDS
 from .repository import (
     AUDIT_VERIFY_PERMISSION,
@@ -242,6 +253,51 @@ ASSET_STATUS_LABELS = {
     "maintenance": msg("In Wartung"),
     "out_of_service": msg("Außer Betrieb"),
     "retired": msg("Stillgelegt"),
+}
+LIMIT_STATUS_LABELS = {
+    "draft": msg("Vorschlag"),
+    "released": msg("Freigegeben"),
+    "superseded": msg("Abgelöst"),
+    "rejected": msg("Abgelehnt"),
+}
+LIMIT_REJECTION_LABELS = {
+    "value_incorrect": msg("Wert falsch übernommen"),
+    "source_insufficient": msg("Quelle belegt die Werte nicht"),
+    "not_applicable": msg("Gilt nicht für dieses Asset"),
+    "replaced_by_proposal": msg("Wird durch einen neuen Vorschlag ersetzt"),
+}
+LIMIT_FIELD_LABELS = {
+    "pressure_warning_bar": msg("Druckwarnung (bar)"),
+    "pressure_critical_bar": msg("Druck-Prüfgrenze (bar)"),
+    "temperature_warning_c": msg("Temperaturwarnung (°C)"),
+    "temperature_critical_c": msg("Temperatur-Prüfgrenze (°C)"),
+    "minimum_flow_l_min": msg("Mindestvolumenstrom (l/min)"),
+    "particle_warning": msg("Partikelwarnung (#/ml)"),
+    "water_warning_pct": msg("Wasserwarnung (%)"),
+    "water_critical_pct": msg("Wasser-Prüfgrenze (%)"),
+}
+CONDITION_LIMIT_FIELDS = LIMIT_FIELDS[:7]
+FLUID_LIMIT_FIELDS = ("particle_warning", "water_critical_pct")
+LIMIT_ERRORS = {
+    "OPERATING_LIMITS_PROPOSE_REQUIRED": msg("Betriebsgrenzen vorschlagen dürfen Techniker, Supervisor und Admin."),
+    "OPERATING_LIMITS_RELEASE_REQUIRED": msg("Betriebsgrenzen gibt die Rolle Supervisor oder Admin frei."),
+    "OPERATING_LIMITS_ASSET_UNKNOWN": msg("Das Asset ist nicht erfasst."),
+    "OPERATING_LIMITS_PENDING": msg("Für dieses Asset wartet bereits ein Vorschlag auf Entscheidung."),
+    "OPERATING_LIMITS_SOURCE_REFERENCE_INVALID": msg(
+        "Quelle mit 3 bis 160 Zeichen angeben, zum Beispiel Dokumentnummer, Revision und Kapitel."
+    ),
+    "OPERATING_LIMITS_SOURCE_NOT_RELEASED": msg(
+        "Das verknüpfte Dokument ist nicht oder nicht mehr freigegeben. Vorschlag ablehnen und mit der gültigen "
+        "Revision neu vorschlagen."
+    ),
+    "OPERATING_LIMITS_SOURCE_PAGE_INVALID": msg("Die Seite liegt nicht im verknüpften Dokument."),
+    "OPERATING_LIMITS_VALUES_INVALID": msg(
+        "Grenzwerte prüfen: Warngrenzen liegen unter den Prüfgrenzen, die Wasserwarnung nicht über der "
+        "Wasser-Prüfgrenze, alle Werte sind nicht negativ."
+    ),
+    "OPERATING_LIMITS_NOT_DRAFT": msg("Über diesen Vorschlag wurde bereits entschieden."),
+    "OPERATING_LIMITS_REASON_INVALID": msg("Grund der Ablehnung auswählen."),
+    "FOUR_EYES_LIMITS_REQUIRED": msg("Eigene Vorschläge gibt eine zweite Person frei (Vier-Augen-Prinzip)."),
 }
 NAV_PAGES = (
     "Leitstand",
@@ -689,6 +745,7 @@ def _overview(principal: UserPrincipal, repository: EnterpriseRepository, settin
             )
             st.button(tr("Zu den Datenschutzanträgen"), on_click=_go_to, args=("Governance",), key="overview-privacy")
     _render_document_actions(principal, documents, now)
+    _render_limit_actions(principal, repository)
     _render_review_notices(principal, repository, documents, now)
     _render_setup_progress(principal, repository, settings, assets, documents)
     st.subheader(tr("Freigabegrenzen"))
@@ -752,6 +809,45 @@ def _render_document_actions(principal: UserPrincipal, documents: tuple[Document
         st.button(tr("Zur Dokumentenlenkung"), on_click=_go_to, args=("Wissensbasis",), key="overview-documents")
 
 
+def _render_limit_actions(principal: UserPrincipal, repository: EnterpriseRepository) -> None:
+    """Limit proposals waiting for a second person, and limits whose source is no longer released."""
+    sets = repository.list_operating_limits(principal)
+    drafts = [item for item in sets if item.status == "draft"]
+    notices: list[str] = []
+    if principal.can(LIMITS_RELEASE_PERMISSION):
+        if releasable := [item for item in drafts if not item.is_own]:
+            notices.append(
+                tr_plural(
+                    len(releasable),
+                    "{n} Vorschlag für Betriebsgrenzen wartet auf Ihre Freigabe.",
+                    "{n} Vorschläge für Betriebsgrenzen warten auf Ihre Freigabe.",
+                )
+            )
+    if own := [item for item in drafts if item.is_own]:
+        notices.append(
+            tr_plural(
+                len(own),
+                "{n} eigener Vorschlag für Betriebsgrenzen wartet auf die Freigabe durch eine zweite Person.",
+                "{n} eigene Vorschläge für Betriebsgrenzen warten auf die Freigabe durch eine zweite Person.",
+            )
+        )
+    if principal.can(LIMITS_PROPOSE_PERMISSION):
+        if stale := [item for item in sets if item.status == "released" and item.source_withdrawn]:
+            notices.append(
+                tr_plural(
+                    len(stale),
+                    "Die Quelle von {n} freigegebenen Betriebsgrenzen ist nicht mehr freigegeben. Werte prüfen und "
+                    "eine neue Version vorschlagen.",
+                    "Die Quelle von {n} freigegebenen Betriebsgrenzen ist nicht mehr freigegeben. Werte prüfen und "
+                    "neue Versionen vorschlagen.",
+                )
+            )
+    for text in notices:
+        st.warning(text)
+    if notices:
+        st.button(tr("Zu den Betriebsgrenzen"), on_click=_go_to, args=("Assets",), key="overview-limits")
+
+
 def _load_answer_quality(
     principal: UserPrincipal, repository: EnterpriseRepository, documents: Sequence[DocumentRecord], since: datetime
 ) -> tuple[AnswerQuality, bool]:
@@ -810,9 +906,9 @@ def _render_demo_seed(principal: UserPrincipal, repository: EnterpriseRepository
     st.write(
         tr(
             "Lädt vier fiktive Anlagen mit SAP-Referenzen, zwei freigegebene synthetische Handbücher, eine neue "
-            "Revision als Entwurf zur Freigabe und fünf Incidents der letzten vier Wochen in allen "
-            "Workflow-Zuständen, darunter ein Wiederholungsfehler und ein wiedereröffneter Incident für die "
-            "Kennzahlen."
+            "Revision als Entwurf zur Freigabe, freigegebene Betriebsgrenzen für Presse 04 und einen Vorschlag "
+            "für Presse 05 sowie fünf Incidents der letzten vier Wochen in allen Workflow-Zuständen, darunter "
+            "ein Wiederholungsfehler und ein wiedereröffneter Incident für die Kennzahlen."
         )
     )
     if blockers:
@@ -831,6 +927,7 @@ def _render_demo_seed(principal: UserPrincipal, repository: EnterpriseRepository
 SETUP_STEPS = {
     "assets": msg("Assets erfasst"),
     "sap": msg("SAP-Referenz je Asset gepflegt"),
+    "limits": msg("Betriebsgrenzen je Asset freigegeben"),
     "documents": msg("Herstellerunterlagen freigegeben"),
     "ai_notice": msg("KI-Nutzerhinweis bestätigt"),
     "privacy": msg("Datenschutzhinweis zur Kenntnis genommen"),
@@ -847,6 +944,8 @@ def _render_setup_progress(
     st.subheader(tr("Einrichtung"))
     linked = sum(1 for item in assets if item.functional_location or item.equipment_number)
     ready_documents = sum(1 for item in documents if item.usable_for_answers)
+    limit_sets = repository.list_operating_limits(principal)
+    with_limits = sum(1 for item in assets if released_limits(limit_sets, item.asset_id))
     steps = (
         (
             "assets",
@@ -859,6 +958,12 @@ def _render_setup_progress(
             bool(assets) and linked == len(assets),
             "Assets",
             tr("{linked} von {total} mit Technischem Platz oder Equipment", linked=linked, total=len(assets)),
+        ),
+        (
+            "limits",
+            bool(assets) and with_limits == len(assets),
+            "Assets",
+            tr("{released} von {total} mit freigegebenen Betriebsgrenzen", released=with_limits, total=len(assets)),
         ),
         (
             "documents",
@@ -900,6 +1005,296 @@ def _render_setup_progress(
         )
 
 
+def _limit_error(error: BaseException) -> str:
+    code = error.args[0] if error.args and isinstance(error.args[0], str) else ""
+    return label(LIMIT_ERRORS, code) if code in LIMIT_ERRORS else tr_error(error)
+
+
+def _limit_source(item: OperatingLimitSet) -> str:
+    if item.source_document_id and item.source_document_name:
+        return tr(
+            "{reference} · {document}, Revision {revision}, Seite {page}",
+            reference=item.source_reference,
+            document=item.source_document_name,
+            revision=item.source_revision or "–",
+            page=item.source_page,
+        )
+    return item.source_reference
+
+
+def _limits_note(item: OperatingLimitSet | None) -> str:
+    """Line for an incident created from an assessment: which limits the assessment used."""
+    if item is None or item.decided_at is None:
+        return msg("Betriebsgrenzen: nur für diese Prüfung eingegeben, nicht freigegeben")
+    return msg(
+        "Betriebsgrenzen: Version {version}, freigegeben am {date}; Quelle: {source}",
+        version=item.version,
+        date=item.decided_at.date().isoformat(),
+        source=item.source_reference,
+    )
+
+
+def _limit_table(columns: Mapping[str, LimitValues], fields: Sequence[str] = LIMIT_FIELDS) -> None:
+    st.dataframe(
+        [
+            {
+                tr("Grenze"): label(LIMIT_FIELD_LABELS, field),
+                **{heading: getattr(values, field) for heading, values in columns.items()},
+            }
+            for field in fields
+        ],
+        width="stretch",
+        hide_index=True,
+    )
+
+
+def _render_limits_in_force(item: OperatingLimitSet, fields: Sequence[str]) -> None:
+    """Released limits as used by an assessment: read-only, with version and source."""
+    st.markdown(
+        tr(
+            "**Freigegebene Betriebsgrenzen** · Version {version} vom {date}",
+            version=item.version,
+            date=fmt_date(item.decided_at) if item.decided_at else "–",
+        )
+    )
+    st.caption(tr("Quelle: {source}", source=_limit_source(item)))
+    if item.source_withdrawn:
+        st.warning(
+            tr(
+                "Die Quelle dieser Betriebsgrenzen ist nicht mehr freigegeben. Die Werte gelten weiter, bis eine "
+                "neue Version freigegeben ist; Werte prüfen und eine neue Version vorschlagen."
+            )
+        )
+    _limit_table({tr("Wert"): item.values}, fields)
+
+
+def _render_operating_limits(
+    principal: UserPrincipal, repository: EnterpriseRepository, assets: tuple[AssetRecord, ...]
+) -> None:
+    st.subheader(tr("Betriebsgrenzen"))
+    st.caption(
+        tr(
+            "Grenzwerte je Asset für Condition Monitoring und Fluidbewertung. Ein Vorschlag nennt seine Quelle und "
+            "gilt erst, wenn eine zweite Person ihn freigibt; eine neue Version löst die bisherige bei der "
+            "Freigabe ab."
+        )
+    )
+    if notice := st.session_state.pop("limits_notice", None):
+        st.success(notice)
+    if not assets:
+        st.caption(tr("Betriebsgrenzen lassen sich pflegen, sobald ein Asset erfasst ist."))
+        return
+    all_sets = repository.list_operating_limits(principal)
+    with_limits = sum(1 for item in assets if released_limits(all_sets, item.asset_id))
+    st.caption(tr("{released} von {total} mit freigegebenen Betriebsgrenzen", released=with_limits, total=len(assets)))
+    names = {item.asset_id: item.name for item in assets}
+    asset_id = st.selectbox(
+        tr("Asset"),
+        tuple(names),
+        format_func=lambda option: f"{names[option]} · {option}",
+        key="limits-asset",
+    )
+    sets = [item for item in all_sets if item.asset_id == asset_id]
+    current = released_limits(sets, asset_id)
+    draft = pending_limits(sets, asset_id)
+    if current is not None:
+        _render_limits_in_force(current, LIMIT_FIELDS)
+    else:
+        st.info(tr("Für dieses Asset sind noch keine Betriebsgrenzen freigegeben."))
+    if draft is not None:
+        _render_limit_draft(principal, repository, draft, current)
+    elif principal.can(LIMITS_PROPOSE_PERMISSION):
+        _limit_proposal_form(principal, repository, asset_id, current)
+    if sets:
+        with st.expander(tr("Versionen")):
+            st.dataframe(
+                [
+                    {
+                        tr("Version"): item.version,
+                        tr("Status"): label(LIMIT_STATUS_LABELS, item.status),
+                        tr("Vorgeschlagen"): fmt_datetime(item.proposed_at),
+                        tr("Entschieden"): fmt_datetime(item.decided_at) if item.decided_at else "",
+                        tr("Grund"): label(LIMIT_REJECTION_LABELS, item.decision_reason)
+                        if item.decision_reason
+                        else "",
+                        tr("Quelle"): _limit_source(item),
+                        tr("Ihr Vorschlag"): tr("Ja") if item.is_own else "",
+                    }
+                    for item in sets
+                ],
+                width="stretch",
+                hide_index=True,
+            )
+            st.caption(
+                tr("Der Verlauf zeigt keine Namen; wer vorgeschlagen und entschieden hat, belegt das Auditprotokoll.")
+            )
+
+
+def _render_limit_draft(
+    principal: UserPrincipal,
+    repository: EnterpriseRepository,
+    draft: OperatingLimitSet,
+    current: OperatingLimitSet | None,
+) -> None:
+    st.markdown(
+        tr(
+            "**Vorschlag Version {version}** vom {date}",
+            version=draft.version,
+            date=fmt_date(draft.proposed_at),
+        )
+    )
+    st.caption(tr("Quelle: {source}", source=_limit_source(draft)))
+    columns = {tr("In Kraft"): current.values} if current else {}
+    _limit_table({**columns, tr("Vorschlag"): draft.values})
+    can_release = principal.can(LIMITS_RELEASE_PERMISSION)
+    if draft.source_withdrawn:
+        st.warning(label(LIMIT_ERRORS, "OPERATING_LIMITS_SOURCE_NOT_RELEASED"))
+    elif draft.is_own:
+        st.info(label(LIMIT_ERRORS, "FOUR_EYES_LIMITS_REQUIRED"))
+    elif not can_release:
+        st.caption(tr("Der Vorschlag wartet auf die Freigabe durch einen Supervisor."))
+    else:
+        checked = st.checkbox(
+            tr("Ich habe die Werte gegen die genannte Quelle geprüft und gebe sie für dieses Asset frei."),
+            key=f"limits-checked-{draft.limit_set_id}",
+        )
+        if st.button(
+            tr("Betriebsgrenzen freigeben"),
+            type="primary",
+            disabled=not checked,
+            key=f"limits-release-{draft.limit_set_id}",
+        ):
+            try:
+                result = repository.release_operating_limits(principal, draft.limit_set_id)
+            except (PermissionError, ValueError, KeyError) as error:
+                repository.emit_audit(
+                    principal,
+                    action="asset.limits.release_denied",
+                    outcome=AuditOutcome.DENIED,
+                    resource_type="asset",
+                    resource_id=draft.asset_id,
+                    metadata={"reason_code": str(error.args[0]) if error.args else "UNKNOWN"},
+                )
+                st.error(_limit_error(error))
+            else:
+                repository.emit_audit(
+                    principal,
+                    action="asset.limits.released",
+                    outcome=AuditOutcome.SUCCESS,
+                    resource_type="asset",
+                    resource_id=draft.asset_id,
+                    metadata={"limits_version": result.limits.version},
+                )
+                st.session_state.limits_notice = tr(
+                    "Betriebsgrenzen Version {version} sind freigegeben und gelten ab sofort für {asset}.",
+                    version=result.limits.version,
+                    asset=draft.asset_id,
+                )
+                st.rerun()
+    if not (can_release or draft.is_own):
+        return
+    with st.expander(tr("Vorschlag ablehnen")):
+        reason = st.selectbox(
+            tr("Grund"),
+            LIMIT_REJECTION_REASONS,
+            format_func=lambda option: label(LIMIT_REJECTION_LABELS, option),
+            key=f"limits-reason-{draft.limit_set_id}",
+        )
+        if st.button(tr("Ablehnen"), key=f"limits-reject-{draft.limit_set_id}"):
+            try:
+                rejected = repository.reject_operating_limits(principal, draft.limit_set_id, reason)
+            except (PermissionError, ValueError, KeyError) as error:
+                st.error(_limit_error(error))
+            else:
+                repository.emit_audit(
+                    principal,
+                    action="asset.limits.rejected",
+                    outcome=AuditOutcome.SUCCESS,
+                    resource_type="asset",
+                    resource_id=draft.asset_id,
+                    metadata={"limits_version": rejected.version, "reason_code": reason},
+                )
+                st.session_state.limits_notice = tr("Der Vorschlag wurde abgelehnt.")
+                st.rerun()
+
+
+def _limit_proposal_form(
+    principal: UserPrincipal,
+    repository: EnterpriseRepository,
+    asset_id: str,
+    current: OperatingLimitSet | None,
+) -> None:
+    base = current.values if current else LimitValues()
+    sources = {item.document_id: item for item in repository.list_documents(principal) if item.usable_for_answers}
+    with st.expander(tr("Neue Version vorschlagen") if current else tr("Betriebsgrenzen vorschlagen")):
+        with st.form(f"limits-proposal-{asset_id}"):
+            st.caption(
+                tr(
+                    "Werte aus Herstellerunterlage, Freigabeschreiben oder Engineering-Entscheidung übernehmen. "
+                    "Gelten wird der Vorschlag erst nach Freigabe durch eine zweite Person."
+                )
+            )
+            columns = st.columns(2)
+            entered: dict[str, float] = {}
+            for index, field in enumerate(LIMIT_FIELDS):
+                percent = field.endswith("_pct")
+                entered[field] = columns[index % 2].number_input(
+                    label(LIMIT_FIELD_LABELS, field),
+                    min_value=0.0,
+                    max_value=100.0 if percent else None,
+                    value=float(getattr(base, field)),
+                    step=0.01 if percent else 1.0,
+                    format="%.2f" if percent else "%.1f",
+                    key=f"limits-{asset_id}-{field}",
+                )
+            source_document = st.selectbox(
+                tr("Freigegebenes Dokument (optional)"),
+                (None, *sources),
+                format_func=lambda option: (
+                    tr("Ohne Dokument in der Wissensbasis") if option is None else _document_title(sources[option])
+                ),
+                key=f"limits-{asset_id}-document",
+            )
+            source_page = st.number_input(
+                tr("Seite im Dokument"), min_value=1, value=1, step=1, key=f"limits-{asset_id}-page"
+            )
+            source_reference = st.text_input(
+                tr("Quelle"),
+                max_chars=LIMIT_SOURCE_REFERENCE_MAX,
+                placeholder=tr("z. B. BA-HA-250 Rev. 1, Kapitel 4.2"),
+                key=f"limits-{asset_id}-reference",
+            )
+            submitted = st.form_submit_button(tr("Zur Freigabe vorschlagen"), type="primary")
+        if not submitted:
+            return
+        try:
+            values = LimitValues(**entered)
+            proposal = repository.propose_operating_limits(
+                principal,
+                asset_id,
+                values,
+                source_reference=source_reference,
+                source_document_id=source_document,
+                source_page=int(source_page) if source_document else None,
+            )
+        except (PermissionError, ValueError) as error:
+            st.error(_limit_error(error))
+            return
+        repository.emit_audit(
+            principal,
+            action="asset.limits.proposed",
+            outcome=AuditOutcome.SUCCESS,
+            resource_type="asset",
+            resource_id=asset_id,
+            metadata={"limits_version": proposal.version},
+        )
+        st.session_state.limits_notice = tr(
+            "Version {version} ist vorgeschlagen und wartet auf die Freigabe durch eine zweite Person.",
+            version=proposal.version,
+        )
+        st.rerun()
+
+
 def _assets(principal: UserPrincipal, repository: EnterpriseRepository) -> None:
     st.title(tr("Asset Register"))
     st.caption(tr("OEM-neutrale Anlagen- und Komponentenreferenz für Dokumente, Messwerte und Incidents."))
@@ -938,8 +1333,12 @@ def _assets(principal: UserPrincipal, repository: EnterpriseRepository) -> None:
             )
     else:
         st.info(tr("Noch keine Assets erfasst. Einzelne Anlagen unten anlegen oder den Stammdatenimport nutzen."))
-    if not principal.can("asset:write"):
-        return
+    if principal.can("asset:write"):
+        _render_asset_forms(principal, repository)
+    _render_operating_limits(principal, repository, assets)
+
+
+def _render_asset_forms(principal: UserPrincipal, repository: EnterpriseRepository) -> None:
     with st.expander(tr("Asset anlegen oder aktualisieren")):
         with st.form("asset-form"):
             asset_id = st.text_input(tr("Asset-ID"), placeholder="WERK1-PRESSE-04-HYD")
@@ -1822,14 +2221,24 @@ def _condition_monitoring(principal: UserPrincipal, repository: EnterpriseReposi
     assets = repository.list_assets(principal)
     asset_ids = [item.asset_id for item in assets]
     asset_id = st.selectbox(tr("Asset"), asset_ids) if asset_ids else st.text_input(tr("Asset-ID"))
-    with st.expander(tr("Betriebsgrenzen"), expanded=True):
-        c1, c2, c3 = st.columns(3)
-        pressure_warning = c1.number_input(tr("Druckwarnung (bar)"), min_value=0.0, value=250.0)
-        pressure_critical = c1.number_input(tr("Druck-Prüfgrenze (bar)"), min_value=0.0, value=300.0)
-        temperature_warning = c2.number_input(tr("Temperaturwarnung (°C)"), min_value=0.0, value=70.0)
-        temperature_critical = c2.number_input(tr("Temperatur-Prüfgrenze (°C)"), min_value=0.0, value=85.0)
-        minimum_flow = c3.number_input(tr("Mindestvolumenstrom (l/min)"), min_value=0.0, value=5.0)
-        particle_warning = c3.number_input(tr("Partikelwarnung (#/ml)"), min_value=0.0, value=1000.0)
+    limits = released_limits(repository.list_operating_limits(principal, asset_id), asset_id) if asset_ids else None
+    if limits is not None:
+        _render_limits_in_force(limits, CONDITION_LIMIT_FIELDS)
+    else:
+        st.info(
+            tr(
+                "Für dieses Asset sind keine Betriebsgrenzen freigegeben. Die Werte unten gelten nur für diese "
+                "Prüfung; dauerhaft freigeben lassen unter Assets → Betriebsgrenzen."
+            )
+        )
+        with st.expander(tr("Betriebsgrenzen"), expanded=True):
+            c1, c2, c3 = st.columns(3)
+            pressure_warning = c1.number_input(tr("Druckwarnung (bar)"), min_value=0.0, value=250.0)
+            pressure_critical = c1.number_input(tr("Druck-Prüfgrenze (bar)"), min_value=0.0, value=300.0)
+            temperature_warning = c2.number_input(tr("Temperaturwarnung (°C)"), min_value=0.0, value=70.0)
+            temperature_critical = c2.number_input(tr("Temperatur-Prüfgrenze (°C)"), min_value=0.0, value=85.0)
+            minimum_flow = c3.number_input(tr("Mindestvolumenstrom (l/min)"), min_value=0.0, value=5.0)
+            particle_warning = c3.number_input(tr("Partikelwarnung (#/ml)"), min_value=0.0, value=1000.0)
     uploaded = st.file_uploader(
         tr("Messdaten-CSV"),
         type=["csv"],
@@ -1839,7 +2248,8 @@ def _condition_monitoring(principal: UserPrincipal, repository: EnterpriseReposi
         tr("Synthetische Beispiel-Messreihe verwenden (48 h, steigender Druck und Temperatur)"),
         key="condition-demo-sample",
     )
-    limits_confirmed = st.checkbox(
+    # Released limits need no confirmation: a second person already confirmed them for this asset.
+    limits_confirmed = limits is not None or st.checkbox(
         tr("Ich bestätige, dass diese Betriebsgrenzen für das ausgewählte Asset fachlich freigegeben sind."),
         key="condition-limits-confirmed",
     )
@@ -1847,17 +2257,22 @@ def _condition_monitoring(principal: UserPrincipal, repository: EnterpriseReposi
         try:
             content = demo_sensor_csv() if use_sample or uploaded is None else uploaded.getvalue()
             readings = _parse_sensor_csv(content)
-            envelope = OperatingEnvelope(
-                pressure_warning_bar=pressure_warning,
-                pressure_critical_bar=pressure_critical,
-                temperature_warning_c=temperature_warning,
-                temperature_critical_c=temperature_critical,
-                minimum_flow_l_min=minimum_flow,
-                particle_warning=particle_warning,
+            envelope = (
+                limits.values.envelope()
+                if limits is not None
+                else OperatingEnvelope(
+                    pressure_warning_bar=pressure_warning,
+                    pressure_critical_bar=pressure_critical,
+                    temperature_warning_c=temperature_warning,
+                    temperature_critical_c=temperature_critical,
+                    minimum_flow_l_min=minimum_flow,
+                    particle_warning=particle_warning,
+                )
             )
             computed_assessment = assess_condition(readings, envelope)
             st.session_state.condition_assessment = computed_assessment
             st.session_state.condition_asset_id = asset_id
+            st.session_state.condition_limits_note = _limits_note(limits)
             repository.emit_audit(
                 principal,
                 action="condition.series.assessed",
@@ -1867,6 +2282,8 @@ def _condition_monitoring(principal: UserPrincipal, repository: EnterpriseReposi
                 metadata={
                     "source_count": computed_assessment.sample_count,
                     "reason_code": computed_assessment.severity.value,
+                    # 0 marks limits entered for this assessment only.
+                    "limits_version": limits.version if limits is not None else 0,
                 },
             )
         except Exception as error:
@@ -1907,7 +2324,12 @@ def _condition_monitoring(principal: UserPrincipal, repository: EnterpriseReposi
                 asset_id=st.session_state.get("condition_asset_id") or "unassigned",
                 title=f"Condition-Monitoring {assessment.severity.value}",
                 severity=assessment.severity.value,
-                details="\n".join(f"{signal.code}: {signal.message}" for signal in assessment.signals),
+                details="\n".join(
+                    [
+                        *(f"{signal.code}: {signal.message}" for signal in assessment.signals),
+                        str(st.session_state.get("condition_limits_note") or _limits_note(None)),
+                    ]
+                ),
             )
             st.success(tr("Incident {incident_id} wurde angelegt.", incident_id=incident.incident_id))
 
@@ -1921,14 +2343,26 @@ def _fluid(principal: UserPrincipal, repository: EnterpriseRepository) -> None:
         if assets
         else st.text_input(tr("Asset-ID"), key="fluid-asset-text")
     )
+    limits = released_limits(repository.list_operating_limits(principal, asset_id), asset_id) if assets else None
     left, right = st.columns(2)
     particle_count = left.number_input(tr("Partikelzahl (#/ml)"), min_value=0.0, value=0.0)
     water_content = right.number_input(tr("Wassergehalt (%)"), min_value=0.0, max_value=100.0, value=0.0, step=0.01)
-    particle_warning = left.number_input(tr("Freigegebene Partikelwarngrenze (#/ml)"), min_value=0.0, value=1000.0)
-    water_critical = right.number_input(
-        tr("Freigegebene Wasser-Prüfgrenze (%)"), min_value=0.0, max_value=100.0, value=0.1, step=0.01
-    )
-    limits_confirmed = st.checkbox(
+    if limits is not None:
+        _render_limits_in_force(limits, FLUID_LIMIT_FIELDS)
+        fluid_limits = limits.values.fluid_limits()
+    else:
+        st.info(
+            tr(
+                "Für dieses Asset sind keine Fluidgrenzen freigegeben. Die Werte unten gelten nur für diese "
+                "Bewertung; dauerhaft freigeben lassen unter Assets → Betriebsgrenzen."
+            )
+        )
+        particle_warning = left.number_input(tr("Freigegebene Partikelwarngrenze (#/ml)"), min_value=0.0, value=1000.0)
+        water_critical = right.number_input(
+            tr("Freigegebene Wasser-Prüfgrenze (%)"), min_value=0.0, max_value=100.0, value=0.1, step=0.01
+        )
+        fluid_limits = FluidLimits(particle_warning=particle_warning, water_critical_pct=water_critical)
+    limits_confirmed = limits is not None or st.checkbox(
         tr("Ich bestätige, dass die Fluidgrenzen für dieses Asset fachlich freigegeben sind."),
         key="fluid-limits-confirmed",
     )
@@ -1940,8 +2374,9 @@ def _fluid(principal: UserPrincipal, repository: EnterpriseRepository) -> None:
                 particle_count=particle_count or None,
                 water_content=water_content or None,
             ),
-            FluidLimits(particle_warning=particle_warning, water_critical_pct=water_critical),
+            fluid_limits,
         )
+        st.session_state.fluid_limits_note = _limits_note(limits)
     assessment = st.session_state.get("fluid_assessment")
     if assessment:
         st.metric(
@@ -1959,7 +2394,9 @@ def _fluid(principal: UserPrincipal, repository: EnterpriseRepository) -> None:
                 asset_id=assessment.asset_id,
                 title=assessment.summary,
                 severity="critical" if assessment.status == "KRITISCH" else "warning",
-                details="\n".join(assessment.recommendations),
+                details="\n".join(
+                    [*assessment.recommendations, str(st.session_state.get("fluid_limits_note") or _limits_note(None))]
+                ),
             )
             st.success(tr("Incident {incident_id} wurde angelegt.", incident_id=incident.incident_id))
 

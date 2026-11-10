@@ -22,6 +22,15 @@ from compliance.retention import RecordClass, RetentionPolicy
 from .auth import UserPrincipal
 from .config import AppSettings, PersistenceBackend
 from .governance import AIProvenance, GroundedAnswer, ReviewStatus, RiskClass, SourceCitation, UseCase
+from .operating_limits import (
+    LimitValues,
+    OperatingLimitRelease,
+    OperatingLimitSet,
+    check_limit_proposal,
+    check_limit_rejection,
+    check_limit_release,
+    released_limits,
+)
 from .security import ValidatedUpload
 
 
@@ -716,6 +725,27 @@ class EnterpriseRepository(Protocol):
 
     def list_legal_holds(self, principal: UserPrincipal) -> tuple[LegalHoldRecord, ...]: ...
 
+    def propose_operating_limits(
+        self,
+        principal: UserPrincipal,
+        asset_id: str,
+        values: LimitValues,
+        *,
+        source_reference: str,
+        source_document_id: str | None = None,
+        source_page: int | None = None,
+    ) -> OperatingLimitSet: ...
+
+    def release_operating_limits(self, principal: UserPrincipal, limit_set_id: str) -> OperatingLimitRelease: ...
+
+    def reject_operating_limits(
+        self, principal: UserPrincipal, limit_set_id: str, reason_code: str
+    ) -> OperatingLimitSet: ...
+
+    def list_operating_limits(
+        self, principal: UserPrincipal, asset_id: str | None = None
+    ) -> tuple[OperatingLimitSet, ...]: ...
+
 
 def _now() -> datetime:
     return datetime.now(UTC)
@@ -723,8 +753,9 @@ def _now() -> datetime:
 
 # v2 adds uploaded documents, given reviews and own incident steps (GDPR Art. 15 completeness);
 # v3 adds the person's own document control steps (upload, release, withdrawal, review);
-# v4 adds a question kept for an open review and the reason and role of given reviews.
-SUBJECT_EXPORT_SCHEMA = "hydraulikdoc.subject-export.v4"
+# v4 adds a question kept for an open review and the reason and role of given reviews;
+# v5 adds operating limit sets the person proposed, released or rejected.
+SUBJECT_EXPORT_SCHEMA = "hydraulikdoc.subject-export.v5"
 
 
 def _document_step(event: DocumentEventRecord) -> dict[str, Any]:
@@ -745,6 +776,20 @@ def _review_step(record: AnswerReviewRecord) -> dict[str, Any]:
         "reviewer_role": record.reviewer_role,
         "reviewed_at": record.reviewed_at.isoformat(),
     }
+
+
+def _limit_step(item: OperatingLimitSet, step: str, occurred_at: datetime) -> dict[str, Any]:
+    return {
+        "limit_set_id": item.limit_set_id,
+        "asset_id": item.asset_id,
+        "version": item.version,
+        "step": step,
+        "occurred_at": occurred_at.isoformat(),
+    }
+
+
+def _limit_decision_step(item: OperatingLimitSet) -> str:
+    return "rejected" if item.status == "rejected" else "released"
 
 
 def _incident_step(event: IncidentEventRecord) -> dict[str, Any]:
@@ -887,6 +932,9 @@ class InMemoryRepository:
         self._review_questions: dict[tuple[str, str], str] = {}
         self._reporters: dict[tuple[str, str], str] = {}
         self._legal_holds: dict[tuple[str, str], LegalHoldRecord] = {}
+        self._limit_sets: dict[tuple[str, str], OperatingLimitSet] = {}
+        # Pseudonyms of the proposing and the deciding person per limit set.
+        self._limit_actors: dict[tuple[str, str], tuple[str, str | None]] = {}
         self._lock = RLock()
 
     @contextmanager
@@ -1504,6 +1552,7 @@ class InMemoryRepository:
                 for tenant, actor, event in self._document_events
                 if tenant == principal.tenant_id and actor == subject
             ]
+            limit_steps = self._own_limit_steps(principal.tenant_id, subject)
         return {
             "schema": SUBJECT_EXPORT_SCHEMA,
             "generated_at": _now().isoformat(),
@@ -1515,6 +1564,7 @@ class InMemoryRepository:
             "incidents_created": incidents,
             "incident_steps": steps,
             "document_steps": document_steps,
+            "operating_limit_steps": limit_steps,
             "privacy_requests": [item.__dict__ for item in self.list_privacy_requests(principal)],
         }
 
@@ -1593,6 +1643,133 @@ class InMemoryRepository:
                 )
             )
 
+    def _limit_view(self, tenant: str, item: OperatingLimitSet, actor: str | None) -> OperatingLimitSet:
+        """The stored set as the caller sees it: own proposal and the current state of its source."""
+        proposer, _ = self._limit_actors[(tenant, item.limit_set_id)]
+        name = revision = ""
+        withdrawn = False
+        if item.source_document_id is not None:
+            document = self._documents.get((tenant, item.source_document_id))
+            if document is not None and document.status != "deleted":
+                name, revision = document.display_name, document.revision
+            withdrawn = document is None or not document.usable_for_answers
+        return replace(
+            item,
+            is_own=proposer == actor,
+            source_document_name=name,
+            source_revision=revision,
+            source_withdrawn=withdrawn,
+        )
+
+    def _tenant_limits(self, tenant: str) -> list[OperatingLimitSet]:
+        return [item for (owner, _), item in self._limit_sets.items() if owner == tenant]
+
+    def propose_operating_limits(
+        self,
+        principal: UserPrincipal,
+        asset_id: str,
+        values: LimitValues,
+        *,
+        source_reference: str,
+        source_document_id: str | None = None,
+        source_page: int | None = None,
+    ) -> OperatingLimitSet:
+        actor = _principal_token(self._pseudonymizer, principal)
+        tenant = principal.tenant_id
+        now = _now()
+        with self._lock:
+            existing = [item for item in self._tenant_limits(tenant) if item.asset_id == asset_id]
+            document = self._find_document(tenant, source_document_id, actor) if source_document_id else None
+            reference = check_limit_proposal(
+                principal,
+                asset_known=(tenant, asset_id) in self._assets,
+                pending=any(item.status == "draft" for item in existing),
+                source_reference=source_reference,
+                source_document=document,
+                source_document_id=source_document_id,
+                source_page=source_page,
+            )
+            record = OperatingLimitSet(
+                limit_set_id=str(uuid.uuid4()),
+                tenant_id=tenant,
+                asset_id=asset_id,
+                version=max((item.version for item in existing), default=0) + 1,
+                status="draft",
+                values=values,
+                source_reference=reference,
+                proposed_at=now,
+                source_document_id=source_document_id,
+                source_page=source_page,
+            )
+            self._limit_sets[(tenant, record.limit_set_id)] = record
+            self._limit_actors[(tenant, record.limit_set_id)] = (actor, None)
+            return self._limit_view(tenant, record, actor)
+
+    def release_operating_limits(self, principal: UserPrincipal, limit_set_id: str) -> OperatingLimitRelease:
+        actor = _principal_token(self._pseudonymizer, principal)
+        tenant = principal.tenant_id
+        now = _now()
+        with self._lock:
+            stored = self._limit_sets.get((tenant, limit_set_id))
+            if stored is None:
+                raise KeyError(limit_set_id)
+            check_limit_release(principal, self._limit_view(tenant, stored, actor))
+            superseded = None
+            previous = released_limits(self._tenant_limits(tenant), stored.asset_id)
+            if previous is not None:
+                replaced = replace(previous, status="superseded", superseded_at=now)
+                self._limit_sets[(tenant, previous.limit_set_id)] = replaced
+                superseded = self._limit_view(tenant, replaced, actor)
+            released = replace(stored, status="released", decided_at=now)
+            self._limit_sets[(tenant, limit_set_id)] = released
+            proposer, _ = self._limit_actors[(tenant, limit_set_id)]
+            self._limit_actors[(tenant, limit_set_id)] = (proposer, actor)
+            return OperatingLimitRelease(self._limit_view(tenant, released, actor), superseded)
+
+    def reject_operating_limits(
+        self, principal: UserPrincipal, limit_set_id: str, reason_code: str
+    ) -> OperatingLimitSet:
+        actor = _principal_token(self._pseudonymizer, principal)
+        tenant = principal.tenant_id
+        now = _now()
+        with self._lock:
+            stored = self._limit_sets.get((tenant, limit_set_id))
+            if stored is None:
+                raise KeyError(limit_set_id)
+            check_limit_rejection(principal, self._limit_view(tenant, stored, actor), reason_code)
+            rejected = replace(stored, status="rejected", decided_at=now, decision_reason=reason_code)
+            self._limit_sets[(tenant, limit_set_id)] = rejected
+            proposer, _ = self._limit_actors[(tenant, limit_set_id)]
+            self._limit_actors[(tenant, limit_set_id)] = (proposer, actor)
+            return self._limit_view(tenant, rejected, actor)
+
+    def list_operating_limits(
+        self, principal: UserPrincipal, asset_id: str | None = None
+    ) -> tuple[OperatingLimitSet, ...]:
+        actor = self._pseudonymizer.token(principal.subject_id)
+        tenant = principal.tenant_id
+        with self._lock:
+            return tuple(
+                sorted(
+                    (
+                        self._limit_view(tenant, item, actor)
+                        for item in self._tenant_limits(tenant)
+                        if asset_id is None or item.asset_id == asset_id
+                    ),
+                    key=lambda item: (item.asset_id, -item.version),
+                )
+            )
+
+    def _own_limit_steps(self, tenant: str, subject: str) -> list[dict[str, Any]]:
+        steps = []
+        for item in sorted(self._tenant_limits(tenant), key=lambda record: record.proposed_at):
+            proposer, decider = self._limit_actors[(tenant, item.limit_set_id)]
+            if proposer == subject:
+                steps.append(_limit_step(item, "proposed", item.proposed_at))
+            if decider == subject and item.decided_at is not None:
+                steps.append(_limit_step(item, _limit_decision_step(item), item.decided_at))
+        return steps
+
 
 # Column order matches IncidentRecord. Statements are complete literals so no SQL is assembled at runtime.
 _SELECT_INCIDENTS_SQL = """SELECT incident_id::text, tenant_id, asset_id, title, severity, status, created_at, details, updated_at,
@@ -1659,6 +1836,7 @@ class PostgresRepository:
             "notice_acceptances",
             "privacy_requests",
             "legal_holds",
+            "operating_limits",
             "audit_events",
         }
         with self._connect() as connection:
@@ -2458,6 +2636,14 @@ class PostgresRepository:
                 steps = [_incident_step(IncidentEventRecord(*row)) for row in cursor.fetchall()]
                 cursor.execute(_SELECT_OWN_DOCUMENT_EVENTS_SQL, (subject,))
                 document_steps = [_document_step(DocumentEventRecord(*row)) for row in cursor.fetchall()]
+                cursor.execute(_SELECT_OWN_LIMIT_SETS_SQL, (subject, subject, subject, subject))
+                limit_steps = []
+                for row in cursor.fetchall():
+                    item = _limit_set(row[:-1])
+                    if item.is_own:
+                        limit_steps.append(_limit_step(item, "proposed", item.proposed_at))
+                    if row[-1] and item.decided_at is not None:
+                        limit_steps.append(_limit_step(item, _limit_decision_step(item), item.decided_at))
         return {
             "schema": SUBJECT_EXPORT_SCHEMA,
             "generated_at": _now().isoformat(),
@@ -2469,6 +2655,7 @@ class PostgresRepository:
             "incidents_created": incidents,
             "incident_steps": steps,
             "document_steps": document_steps,
+            "operating_limit_steps": limit_steps,
             "privacy_requests": [item.__dict__ for item in self.list_privacy_requests(principal)],
         }
 
@@ -2620,6 +2807,125 @@ class PostgresRepository:
                 cursor.execute(_SELECT_LEGAL_HOLDS_SQL)
                 return tuple(_legal_hold(row) for row in cursor.fetchall())
 
+    @staticmethod
+    def _lock_asset(cursor, asset_id: str) -> bool:
+        """Serialises proposals and releases for one asset; False when the asset does not exist."""
+        cursor.execute("SELECT 1 FROM assets WHERE asset_id=%s FOR UPDATE", (asset_id,))
+        return cursor.fetchone() is not None
+
+    @staticmethod
+    def _locked_limit_set(cursor, limit_set_id: str, actor: str) -> OperatingLimitSet | None:
+        if not _is_uuid(limit_set_id):
+            return None
+        cursor.execute(_LOCK_LIMIT_SET_SQL, (limit_set_id,))
+        if cursor.fetchone() is None:
+            return None
+        cursor.execute(_SELECT_LIMIT_SET_SQL, (actor, limit_set_id))
+        row = cursor.fetchone()
+        return None if row is None else _limit_set(row)
+
+    def propose_operating_limits(
+        self,
+        principal: UserPrincipal,
+        asset_id: str,
+        values: LimitValues,
+        *,
+        source_reference: str,
+        source_document_id: str | None = None,
+        source_page: int | None = None,
+    ) -> OperatingLimitSet:
+        actor = _principal_token(self._pseudonymizer, principal)
+        limit_set_id = str(uuid.uuid4())
+        with self._connect() as connection:
+            with connection.cursor() as cursor:
+                self._tenant(cursor, principal.tenant_id)
+                asset_known = self._lock_asset(cursor, asset_id)
+                cursor.execute(_COUNT_LIMIT_DRAFTS_SQL, (asset_id,))
+                pending = cursor.fetchone()[0] > 0
+                # Locking the source serialises the proposal with a withdrawal of that document.
+                document = self._locked_document(cursor, source_document_id, actor)
+                reference = check_limit_proposal(
+                    principal,
+                    asset_known=asset_known,
+                    pending=pending,
+                    source_reference=source_reference,
+                    source_document=document,
+                    source_document_id=source_document_id,
+                    source_page=source_page,
+                )
+                cursor.execute(
+                    _INSERT_LIMIT_SET_SQL,
+                    (
+                        limit_set_id,
+                        principal.tenant_id,
+                        asset_id,
+                        asset_id,
+                        *(getattr(values, name) for name in _LIMIT_COLUMNS),
+                        document.document_id if document else None,
+                        source_page,
+                        reference,
+                        actor,
+                    ),
+                )
+                cursor.execute(_SELECT_LIMIT_SET_SQL, (actor, limit_set_id))
+                return _limit_set(cursor.fetchone())
+
+    def release_operating_limits(self, principal: UserPrincipal, limit_set_id: str) -> OperatingLimitRelease:
+        actor = _principal_token(self._pseudonymizer, principal)
+        now = _now()
+        retention = self._retention.expires_at(RecordClass.AUDIT_EVENT, now)
+        superseded = None
+        with self._connect() as connection:
+            with connection.cursor() as cursor:
+                self._tenant(cursor, principal.tenant_id)
+                current = self._locked_limit_set(cursor, limit_set_id, actor)
+                if current is None:
+                    raise KeyError(limit_set_id)
+                self._lock_asset(cursor, current.asset_id)
+                # Re-read under the asset lock and lock the source, so a withdrawal cannot slip in between.
+                self._locked_document(cursor, current.source_document_id, actor)
+                current = self._locked_limit_set(cursor, limit_set_id, actor)
+                if current is None:
+                    raise KeyError(limit_set_id)
+                check_limit_release(principal, current)
+                # The previous set goes out of use first; the unique index allows one released set per asset.
+                cursor.execute(_SUPERSEDE_LIMIT_SETS_SQL, (now, retention, current.asset_id))
+                previous_id = cursor.fetchone()
+                cursor.execute(_RELEASE_LIMIT_SET_SQL, (actor, now, limit_set_id))
+                if previous_id is not None:
+                    cursor.execute(_SELECT_LIMIT_SET_SQL, (actor, previous_id[0]))
+                    superseded = _limit_set(cursor.fetchone())
+                cursor.execute(_SELECT_LIMIT_SET_SQL, (actor, limit_set_id))
+                released = _limit_set(cursor.fetchone())
+        return OperatingLimitRelease(released, superseded)
+
+    def reject_operating_limits(
+        self, principal: UserPrincipal, limit_set_id: str, reason_code: str
+    ) -> OperatingLimitSet:
+        actor = _principal_token(self._pseudonymizer, principal)
+        now = _now()
+        retention = self._retention.expires_at(RecordClass.AUDIT_EVENT, now)
+        with self._connect() as connection:
+            with connection.cursor() as cursor:
+                self._tenant(cursor, principal.tenant_id)
+                current = self._locked_limit_set(cursor, limit_set_id, actor)
+                if current is None:
+                    raise KeyError(limit_set_id)
+                check_limit_rejection(principal, current, reason_code)
+                cursor.execute(_REJECT_LIMIT_SET_SQL, (actor, now, reason_code, retention, limit_set_id))
+                cursor.execute(_SELECT_LIMIT_SET_SQL, (actor, limit_set_id))
+                return _limit_set(cursor.fetchone())
+
+    def list_operating_limits(
+        self, principal: UserPrincipal, asset_id: str | None = None
+    ) -> tuple[OperatingLimitSet, ...]:
+        actor = self._pseudonymizer.token(principal.subject_id)
+        with self._connect() as connection:
+            with connection.cursor() as cursor:
+                self._tenant(cursor, principal.tenant_id)
+                cursor.execute(_SELECT_LIMIT_SETS_SQL, (actor, asset_id, asset_id))
+                return tuple(_limit_set(row) for row in cursor.fetchall())
+
 
 # Column order matches DocumentRecord; the last column tells whether the caller uploaded the document.
 _SELECT_DOCUMENTS_SQL = """SELECT document_id::text, tenant_id, display_name, sha256, status, page_count, created_at,
@@ -2725,6 +3031,91 @@ _SELECT_LEGAL_HOLDS_SQL = """SELECT hold_id::text, tenant_id, case_reference, re
 
 def _legal_hold(row: tuple[Any, ...]) -> LegalHoldRecord:
     return LegalHoldRecord(row[0], row[1], row[2], row[3], tuple(row[4]), row[5], row[6], row[7])
+
+
+_LIMIT_COLUMNS = (
+    "pressure_warning_bar",
+    "pressure_critical_bar",
+    "temperature_warning_c",
+    "temperature_critical_c",
+    "minimum_flow_l_min",
+    "particle_warning",
+    "water_warning_pct",
+    "water_critical_pct",
+)
+# Column order matches _limit_set(). The source is read from the documents table on every query, so a
+# withdrawal or deletion after the release shows up without touching the limit set.
+_SELECT_LIMIT_SETS_SQL = """SELECT l.limit_set_id::text, l.tenant_id, l.asset_id, l.version, l.status,
+    l.pressure_warning_bar, l.pressure_critical_bar, l.temperature_warning_c, l.temperature_critical_c,
+    l.minimum_flow_l_min, l.particle_warning, l.water_warning_pct, l.water_critical_pct,
+    l.source_reference, l.proposed_at, l.source_document_id::text, l.source_page, l.decided_at, l.decision_reason,
+    l.superseded_at, l.proposed_by_token = %s, COALESCE(d.display_name, ''), COALESCE(d.revision, ''),
+    (l.source_document_id IS NOT NULL AND (d.document_id IS NULL OR d.status <> 'ready'
+      OR d.release_status <> 'released'))
+    FROM operating_limits l
+    LEFT JOIN documents d ON d.document_id = l.source_document_id AND d.deleted_at IS NULL
+    WHERE (%s::text IS NULL OR l.asset_id = %s) ORDER BY l.asset_id, l.version DESC LIMIT 2000"""
+_SELECT_LIMIT_SET_SQL = """SELECT l.limit_set_id::text, l.tenant_id, l.asset_id, l.version, l.status,
+    l.pressure_warning_bar, l.pressure_critical_bar, l.temperature_warning_c, l.temperature_critical_c,
+    l.minimum_flow_l_min, l.particle_warning, l.water_warning_pct, l.water_critical_pct,
+    l.source_reference, l.proposed_at, l.source_document_id::text, l.source_page, l.decided_at, l.decision_reason,
+    l.superseded_at, l.proposed_by_token = %s, COALESCE(d.display_name, ''), COALESCE(d.revision, ''),
+    (l.source_document_id IS NOT NULL AND (d.document_id IS NULL OR d.status <> 'ready'
+      OR d.release_status <> 'released'))
+    FROM operating_limits l
+    LEFT JOIN documents d ON d.document_id = l.source_document_id AND d.deleted_at IS NULL
+    WHERE l.limit_set_id = %s"""
+# FOR UPDATE cannot lock the nullable side of an outer join, so the row is locked on its own first.
+_LOCK_LIMIT_SET_SQL = "SELECT 1 FROM operating_limits WHERE limit_set_id=%s FOR UPDATE"
+# The last column tells whether the caller decided the set.
+_SELECT_OWN_LIMIT_SETS_SQL = """SELECT l.limit_set_id::text, l.tenant_id, l.asset_id, l.version, l.status,
+    l.pressure_warning_bar, l.pressure_critical_bar, l.temperature_warning_c, l.temperature_critical_c,
+    l.minimum_flow_l_min, l.particle_warning, l.water_warning_pct, l.water_critical_pct,
+    l.source_reference, l.proposed_at, l.source_document_id::text, l.source_page, l.decided_at, l.decision_reason,
+    l.superseded_at, l.proposed_by_token = %s, COALESCE(d.display_name, ''), COALESCE(d.revision, ''),
+    (l.source_document_id IS NOT NULL AND (d.document_id IS NULL OR d.status <> 'ready'
+      OR d.release_status <> 'released')),
+    l.decided_by_token = %s
+    FROM operating_limits l
+    LEFT JOIN documents d ON d.document_id = l.source_document_id AND d.deleted_at IS NULL
+    WHERE l.proposed_by_token = %s OR l.decided_by_token = %s ORDER BY l.proposed_at, l.limit_set_id"""
+_COUNT_LIMIT_DRAFTS_SQL = "SELECT count(*) FROM operating_limits WHERE asset_id=%s AND status='draft'"
+_INSERT_LIMIT_SET_SQL = """INSERT INTO operating_limits
+    (limit_set_id, tenant_id, asset_id, version, status, pressure_warning_bar, pressure_critical_bar,
+     temperature_warning_c, temperature_critical_c, minimum_flow_l_min, particle_warning, water_warning_pct,
+     water_critical_pct, source_document_id, source_page, source_reference, proposed_by_token)
+    VALUES (%s, %s, %s, (SELECT COALESCE(max(version), 0) + 1 FROM operating_limits WHERE asset_id=%s), 'draft',
+            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"""
+# Status columns are the only ones the runtime role may update; the limit values stay as released.
+_SUPERSEDE_LIMIT_SETS_SQL = """UPDATE operating_limits SET status='superseded', superseded_at=%s, retention_until=%s
+    WHERE asset_id=%s AND status='released' RETURNING limit_set_id::text"""
+_RELEASE_LIMIT_SET_SQL = """UPDATE operating_limits SET status='released', decided_by_token=%s, decided_at=%s
+    WHERE limit_set_id=%s AND status='draft'"""
+_REJECT_LIMIT_SET_SQL = """UPDATE operating_limits
+    SET status='rejected', decided_by_token=%s, decided_at=%s, decision_reason=%s, retention_until=%s
+    WHERE limit_set_id=%s AND status='draft'"""
+
+
+def _limit_set(row: tuple[Any, ...]) -> OperatingLimitSet:
+    return OperatingLimitSet(
+        limit_set_id=row[0],
+        tenant_id=row[1],
+        asset_id=row[2],
+        version=row[3],
+        status=row[4],
+        values=LimitValues(*(float(value) for value in row[5:13])),
+        source_reference=row[13],
+        proposed_at=row[14],
+        source_document_id=row[15],
+        source_page=row[16],
+        decided_at=row[17],
+        decision_reason=row[18],
+        superseded_at=row[19],
+        is_own=bool(row[20]),
+        source_document_name=row[21],
+        source_revision=row[22],
+        source_withdrawn=bool(row[23]),
+    )
 
 
 _SELECT_AUDIT_CHAIN_SQL = """SELECT sequence_id, previous_hash, event_hash, event_id::text, action, outcome, actor_token,

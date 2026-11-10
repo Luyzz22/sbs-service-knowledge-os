@@ -37,6 +37,7 @@ HydraulikDoc ist die evidenzorientierte Arbeitsoberfläche zwischen technischer 
 | Implementiert | Human Review und rollenbegrenzter Export | `hydraulikdoc/ui.py`, `hydraulikdoc/repository.py` |
 | Implementiert | Prüfwarteschlange für die zweite Person und KI-Qualitätskennzahlen je Prompt-/Modellversion und Dokument, ohne Personenbezug | `hydraulikdoc/repository.py`, `hydraulikdoc/ai_quality.py`, `tests/test_review_queue.py` |
 | Implementiert | Deterministische Condition-/Fluid-Vorbewertung | `hydraulikdoc/condition_monitoring.py`, `fluid_advisor.py` |
+| Implementiert | Betriebsgrenzen je Asset mit Quelle, Freigabe durch eine zweite Person und Versionierung; Bewertungen und Incidents nennen die verwendete Fassung | `hydraulikdoc/operating_limits.py`, `operating_limits`, `tests/test_operating_limits.py` |
 | Implementiert | Datenschutz-Self-Service und DSR-Warteschlange | `hydraulikdoc/ui.py`, `privacy_requests` |
 | Implementiert | Incident-Workflow mit Rollenprüfung, Abnahme durch Supervisor und Schutz vor veralteten Statuswechseln | `hydraulikdoc/repository.py`, `hydraulikdoc/ui.py` |
 | Implementiert | 8D-light mit schwereabhängigen Pflichtfeldern und append-only Incident-Verlauf | `hydraulikdoc/repository.py`, `incident_events` |

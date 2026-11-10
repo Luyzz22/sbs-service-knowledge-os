@@ -193,6 +193,48 @@ CREATE TABLE IF NOT EXISTS legal_holds (
     CHECK ((released_at IS NULL) = (released_by_token IS NULL) AND (released_at IS NULL) = (retention_until IS NULL))
 );
 
+-- Operating limits per asset that condition monitoring and the fluid advisor rely on. A set is proposed
+-- with its source, released by a second person and replaced by the next released version. The runtime
+-- role may only change the status columns, so released values cannot be edited in place. Superseded and
+-- rejected sets are kept as long as audit events and removed by purge_expired_tenant_data.
+CREATE TABLE IF NOT EXISTS operating_limits (
+    limit_set_id uuid PRIMARY KEY,
+    tenant_id text NOT NULL REFERENCES tenants(tenant_id),
+    asset_id text NOT NULL,
+    version integer NOT NULL CHECK (version > 0),
+    status text NOT NULL CHECK (status IN ('draft', 'released', 'superseded', 'rejected')),
+    pressure_warning_bar double precision NOT NULL,
+    pressure_critical_bar double precision NOT NULL,
+    temperature_warning_c double precision NOT NULL,
+    temperature_critical_c double precision NOT NULL,
+    minimum_flow_l_min double precision NOT NULL CHECK (minimum_flow_l_min >= 0),
+    particle_warning double precision NOT NULL CHECK (particle_warning >= 0),
+    water_warning_pct double precision NOT NULL,
+    water_critical_pct double precision NOT NULL,
+    source_document_id uuid,
+    source_page integer CHECK (source_page > 0),
+    source_reference text NOT NULL CHECK (char_length(source_reference) BETWEEN 3 AND 160),
+    proposed_by_token text NOT NULL,
+    proposed_at timestamptz NOT NULL DEFAULT now(),
+    decided_by_token text,
+    decided_at timestamptz,
+    decision_reason text NOT NULL DEFAULT '' CHECK (
+        decision_reason IN ('', 'value_incorrect', 'source_insufficient', 'not_applicable', 'replaced_by_proposal')
+    ),
+    superseded_at timestamptz,
+    retention_until timestamptz,
+    FOREIGN KEY (tenant_id, asset_id) REFERENCES assets(tenant_id, asset_id),
+    UNIQUE (tenant_id, asset_id, version),
+    CHECK (0 <= pressure_warning_bar AND pressure_warning_bar < pressure_critical_bar),
+    CHECK (0 <= temperature_warning_c AND temperature_warning_c < temperature_critical_c),
+    CHECK (0 <= water_warning_pct AND water_warning_pct <= water_critical_pct AND water_critical_pct <= 100),
+    CHECK ((source_document_id IS NULL) = (source_page IS NULL)),
+    CHECK ((status = 'draft') = (decided_at IS NULL) AND (decided_at IS NULL) = (decided_by_token IS NULL)),
+    CHECK ((status = 'rejected') = (decision_reason <> '')),
+    CHECK ((status = 'superseded') = (superseded_at IS NOT NULL)),
+    CHECK ((status IN ('superseded', 'rejected')) = (retention_until IS NOT NULL))
+);
+
 -- Outcome of a closed privacy request; free text is deliberately not stored.
 ALTER TABLE privacy_requests ADD COLUMN IF NOT EXISTS decision_reason text CHECK (
     decision_reason IS NULL
@@ -226,6 +268,13 @@ CREATE INDEX IF NOT EXISTS incidents_tenant_status_idx ON incidents(tenant_id, s
 CREATE INDEX IF NOT EXISTS incidents_tenant_created_idx ON incidents(tenant_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS incident_events_incident_idx ON incident_events(tenant_id, incident_id, occurred_at);
 CREATE INDEX IF NOT EXISTS audit_events_tenant_sequence_idx ON audit_events(tenant_id, sequence_id);
+-- At most one set in force and one open proposal per asset.
+CREATE UNIQUE INDEX IF NOT EXISTS operating_limits_released_idx
+    ON operating_limits(tenant_id, asset_id) WHERE status = 'released';
+CREATE UNIQUE INDEX IF NOT EXISTS operating_limits_draft_idx
+    ON operating_limits(tenant_id, asset_id) WHERE status = 'draft';
+CREATE INDEX IF NOT EXISTS retention_operating_limits_idx
+    ON operating_limits(retention_until) WHERE retention_until IS NOT NULL;
 CREATE INDEX IF NOT EXISTS legal_holds_tenant_active_idx ON legal_holds(tenant_id) WHERE released_at IS NULL;
 CREATE INDEX IF NOT EXISTS privacy_requests_tenant_subject_idx ON privacy_requests(tenant_id, subject_token, requested_at DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS privacy_requests_active_unique_idx
@@ -262,6 +311,8 @@ ALTER TABLE audit_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE audit_events FORCE ROW LEVEL SECURITY;
 ALTER TABLE legal_holds ENABLE ROW LEVEL SECURITY;
 ALTER TABLE legal_holds FORCE ROW LEVEL SECURITY;
+ALTER TABLE operating_limits ENABLE ROW LEVEL SECURITY;
+ALTER TABLE operating_limits FORCE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS tenant_tenants ON tenants;
 CREATE POLICY tenant_tenants ON tenants USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
@@ -287,11 +338,14 @@ DROP POLICY IF EXISTS tenant_audit_events ON audit_events;
 CREATE POLICY tenant_audit_events ON audit_events USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 DROP POLICY IF EXISTS tenant_legal_holds ON legal_holds;
 CREATE POLICY tenant_legal_holds ON legal_holds USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+DROP POLICY IF EXISTS tenant_operating_limits ON operating_limits;
+CREATE POLICY tenant_operating_limits ON operating_limits USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 
 REVOKE UPDATE, DELETE ON audit_events FROM PUBLIC;
 REVOKE UPDATE, DELETE ON incident_events FROM PUBLIC;
 REVOKE UPDATE, DELETE ON document_events FROM PUBLIC;
 REVOKE UPDATE, DELETE ON legal_holds FROM PUBLIC;
+REVOKE UPDATE, DELETE ON operating_limits FROM PUBLIC;
 
 CREATE OR REPLACE FUNCTION legal_hold_active(p_tenant_id text, p_record_class text)
 RETURNS boolean
@@ -322,6 +376,7 @@ DECLARE
     documents_deleted integer := 0;
     audits_deleted integer := 0;
     holds_deleted integer := 0;
+    limits_deleted integer := 0;
     hold_ai boolean := public.legal_hold_active(p_tenant_id, 'ai_interaction');
     hold_incident boolean := public.legal_hold_active(p_tenant_id, 'incident');
     hold_notice boolean := public.legal_hold_active(p_tenant_id, 'contract_acceptance');
@@ -388,6 +443,11 @@ BEGIN
     DELETE FROM public.audit_events
     WHERE tenant_id = p_tenant_id AND retention_until <= now();
     GET DIAGNOSTICS audits_deleted = ROW_COUNT;
+
+    -- Only superseded and rejected sets carry a retention date; the set in force and open proposals stay.
+    DELETE FROM public.operating_limits
+    WHERE tenant_id = p_tenant_id AND retention_until <= now();
+    GET DIAGNOSTICS limits_deleted = ROW_COUNT;
     END IF;
 
     -- Released holds are evidence of their own and are kept as long as audit events.
@@ -405,7 +465,8 @@ BEGIN
         'document_events', document_events_deleted,
         'documents', documents_deleted,
         'audit_events', audits_deleted,
-        'legal_holds', holds_deleted
+        'legal_holds', holds_deleted,
+        'operating_limits', limits_deleted
     );
 END;
 $$;
