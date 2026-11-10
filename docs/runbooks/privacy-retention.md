@@ -8,7 +8,7 @@ Technische Defaults sind keine Rechtsfreigabe:
 
 | Record Class | Default | Technische Behandlung |
 | --- | ---: | --- |
-| AI interaction | 90 Tage | Antwort/Provenienz; Rohfrage nur als Hash |
+| AI interaction | 90 Tage | Antwort/Provenienz; Rohfrage als Hash, Wortlaut nur bis zur Entscheidung einer offenen Prüfung |
 | Audit event | 730 Tage | pseudonymisierte Hashkette |
 | Notice acceptance | 3650 Tage | Version, Digest, Subjektpseudonym |
 | Privacy request | 1095 Tage | Status und Fristen ohne Freitext |
@@ -31,7 +31,7 @@ Der Web-Runtime-Account besitzt weder DDL noch allgemeines `DELETE` und darf die
 
 ## Betroffenenantrag
 
-1. Der angemeldete Nutzer kann einen unmittelbaren Export (Schema `hydraulikdoc.subject-export.v2`) der ihm zugeordneten KI-Interaktionen, Hinweisbestätigungen, hochgeladenen Dokumente, abgegebenen Reviews, gemeldeten Incidents, eigenen Workflow-Schritte und Anträge erzeugen. Welche Felder enthalten sind und welche nur auf Antrag beauskunftet werden (Sicherheitsprotokoll), steht in der [technischen Anlage zur Betriebsvereinbarung](../compliance/works-council-annex.md).
+1. Der angemeldete Nutzer kann einen unmittelbaren Export (Schema `hydraulikdoc.subject-export.v4`) der ihm zugeordneten KI-Interaktionen, Hinweisbestätigungen, hochgeladenen Dokumente, abgegebenen Reviews, gemeldeten Incidents, eigenen Workflow-Schritte und Anträge erzeugen. Welche Felder enthalten sind und welche nur auf Antrag beauskunftet werden (Sicherheitsprotokoll), steht in der [technischen Anlage zur Betriebsvereinbarung](../compliance/works-council-annex.md).
 2. Auskunft, Berichtigung, Einschränkung, Löschung und Widerspruch werden als pseudonymisierter Antrag mit interner 28-Tage-Zielfrist eingereiht.
 3. DSR-Owner prüft Identität, Vertretungsmacht, Scope, Rechte Dritter, Aufbewahrungspflichten und Legal Holds.
 4. Für Löschung werden betroffene Analysen, Incidents, Notices, Dokumente und externe Empfänger bestimmt. Dokumentlöschung nutzt dieselbe Search-/Blob-/DB-Propagation.

@@ -17,7 +17,7 @@ from .i18n import Message, msg
 
 # Column names that identify or describe the acting person; the schema test uses them to find new fields.
 PERSON_COLUMN_SUFFIXES = ("_token",)
-PERSON_COLUMNS = frozenset({"actor_role", "question_hash"})
+PERSON_COLUMNS = frozenset({"actor_role", "question_hash", "review_question", "reviewer_role"})
 
 PSEUDONYM = msg("Pseudonym der Person (HMAC, nicht umkehrbar)")
 NOT_SHOWN = msg("In der Oberfläche nicht angezeigt")
@@ -76,7 +76,7 @@ PERSONAL_DATA_FIELDS = (
         "actor_token",
         PSEUDONYM,
         msg("Zuordnung eigener KI-Anfragen für Auskunft und Vier-Augen-Prinzip"),
-        msg("Nur für die Person selbst; Prüfer sehen nur die Antwort"),
+        msg("Nur für die Person selbst; Prüfer sehen Antwort und Frage, nicht die Person"),
         msg("Keine Auswertung je Person; Selbstfreigabe sicherheitsrelevanter Antworten wird gesperrt"),
         RecordClass.AI_INTERACTION,
         "analysis_runs",
@@ -84,12 +84,32 @@ PERSONAL_DATA_FIELDS = (
     PersonalDataField(
         "analysis_runs",
         "question_hash",
-        msg("SHA-256 der Frage; der Fragetext wird nicht gespeichert"),
+        msg("SHA-256 der Frage; der Wortlaut wird nur für eine offene Prüfung gespeichert"),
         msg("Nachweis, auf welche Frage sich eine Antwort bezieht, ohne den Wortlaut aufzubewahren"),
         NOT_SHOWN,
         msg("Keine Auswertung von Fragen oder Fragehäufigkeit je Person"),
         RecordClass.AI_INTERACTION,
         "analysis_runs",
+    ),
+    PersonalDataField(
+        "analysis_runs",
+        "review_question",
+        msg("Wortlaut der Frage, nur solange eine zweite Person über die Antwort entscheiden muss"),
+        msg("Prüfung sicherheitsrelevanter oder eskalierter Antworten im Vier-Augen-Prinzip"),
+        msg("Für Prüfberechtigte in der Prüfwarteschlange, ohne Angabe der fragenden Person"),
+        msg("Keine Auswertung je Person; der Wortlaut wird mit der Entscheidung gelöscht"),
+        RecordClass.AI_INTERACTION,
+        "analysis_runs",
+    ),
+    PersonalDataField(
+        "analysis_reviews",
+        "reviewer_role",
+        msg("App-Rolle der prüfenden Person (z. B. Supervisor)"),
+        msg("Nachvollziehbarkeit, welche Rolle eine KI-Antwort akzeptiert, abgelehnt oder eskaliert hat"),
+        msg("Im Prüfverlauf der Antwort für Prüfberechtigte"),
+        msg("Keine Auswertung je Person oder Rolle"),
+        RecordClass.AI_INTERACTION,
+        "reviews_given",
     ),
     PersonalDataField(
         "analysis_reviews",
@@ -204,7 +224,7 @@ EXCLUDED_EVALUATIONS = (
     msg("Leistungs-, Tempo- oder Fehlerquoten je Person"),
     msg("Rankings oder Vergleiche zwischen Beschäftigten oder Schichten"),
     msg("Anwesenheits-, Arbeitszeit- oder Standortauswertung"),
-    msg("Auswertung von Fragetexten; gespeichert wird nur ein Hash"),
+    msg("Auswertung von Fragetexten; dauerhaft gespeichert wird nur ein Hash"),
 )
 
 
