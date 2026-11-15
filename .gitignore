@@ -37,3 +37,8 @@ data/
 .DS_Store
 .idea/
 .vscode/
+
+# Impeccable: engine binary is fetched + checksum-verified on demand; hooks stay personal
+.claude/skills/impeccable/scripts/bin/
+.claude/settings.local.json
+!.claude/skills/impeccable/scripts/data/
