@@ -878,6 +878,240 @@ class PostgresSecurityIntegrationTests(unittest.TestCase):
         self.assertEqual([(item.version, item.status) for item in remaining], [(2, "released")])
         self.assertEqual(released_limits(remaining, "PRESSE-04"), remaining[0])
 
+    def test_evidence_snapshot_reperforms_controls_and_detects_direct_changes(self) -> None:
+        from datetime import UTC, datetime, timedelta
+
+        from compliance.audit import AuditOutcome
+        from hydraulikdoc.auth import ROLE_PERMISSIONS, UserPrincipal
+        from hydraulikdoc.config import AppSettings
+        from hydraulikdoc.evidence import ControlStatus, EvidenceReport, evaluate_controls, window
+        from hydraulikdoc.governance import AIProvenance, GroundedAnswer, ReviewStatus, SourceCitation, UseCase
+        from hydraulikdoc.operating_limits import LimitValues
+        from hydraulikdoc.repository import INCIDENT_ANALYSIS_FIELDS, PostgresRepository
+        from hydraulikdoc.security import ValidatedUpload
+
+        runtime = PostgresRepository(
+            AppSettings.from_environment(
+                {
+                    "APP_ENV": "test",
+                    "PERSISTENCE_BACKEND": "postgres",
+                    "AUDIT_HMAC_KEY": "integration-audit-key-" + "x" * 16,
+                    "DATABASE_URL": self.app_dsn,
+                }
+            )
+        )
+        tenant = f"{self.tenant_a}-evidence"
+
+        def principal(subject: str, role: str, tenant_id: str = tenant) -> UserPrincipal:
+            return UserPrincipal(subject, tenant_id, subject.title(), role, permissions=ROLE_PERMISSIONS[role])
+
+        technician, colleague = principal("tech", "technician"), principal("tech-2", "technician")
+        approver, admin, auditor = (
+            principal("approver", "supervisor"),
+            principal("admin", "admin"),
+            principal("aud", "auditor"),
+        )
+        outsider = principal("aud", "auditor", f"{self.tenant_b}-evidence")
+
+        def report(viewer: UserPrincipal = auditor, limit: int = 1000) -> EvidenceReport:
+            since, until = window(datetime.now(UTC), 30)
+            snapshot = runtime.evidence_snapshot(viewer, since=since, until=until, limit=limit)
+            return evaluate_controls(snapshot, runtime.verify_audit_chain(viewer))
+
+        def control(result: EvidenceReport, control_id: str):  # type: ignore[no-untyped-def]
+            return next(item for item in result.results if item.definition.control_id == control_id)
+
+        runtime.upsert_asset(
+            approver,
+            asset_id="PRESSE-04",
+            name="Presse 04",
+            site="Werk 1",
+            manufacturer="",
+            model="",
+            criticality="high",
+        )
+        manual = runtime.register_document(
+            technician, ValidatedUpload(str(uuid.uuid4()), "Handbuch.pdf", "7" * 64, b"", "application/pdf")
+        )
+        runtime.mark_document_indexed(technician, manual.document_id, 20)
+        runtime.release_document(approver, manual.document_id, review_due_at=datetime.now(UTC) + timedelta(days=90))
+        runtime.record_acceptance(technician, "ai_literacy", "2026-08-14", "d" * 64)
+
+        def ask(use_case: UseCase) -> GroundedAnswer:
+            answer = GroundedAnswer.create(
+                text="Der Betriebsdruck beträgt 210 bar [S1].",
+                citations=(SourceCitation(manual.document_id, "Handbuch.pdf", 4, "chunk-4", 0.8, "1"),),
+                provenance=AIProvenance("azure-openai", "integration", "snapshot", "swedencentral"),
+                use_case=use_case,
+            )
+            runtime.record_answer(technician, "Welcher Betriebsdruck gilt?", answer)
+            return answer
+
+        safety, ordinary, untouched = (
+            ask(UseCase.SAFETY_RELEVANT_DIAGNOSIS),
+            ask(UseCase.MAINTENANCE_ASSISTANCE),
+            ask(UseCase.MAINTENANCE_ASSISTANCE),
+        )
+        runtime.record_review(colleague, safety.answer_id, ReviewStatus.ACCEPTED)
+        runtime.record_review(technician, ordinary.answer_id, ReviewStatus.REJECTED, "incomplete")
+        proposal = runtime.propose_operating_limits(
+            technician,
+            "PRESSE-04",
+            LimitValues(),
+            source_reference="BA-HA-250 Kapitel 4.2",
+            source_document_id=manual.document_id,
+            source_page=4,
+        )
+        runtime.release_operating_limits(approver, proposal.limit_set_id)
+        incident = runtime.create_incident(
+            technician, asset_id="PRESSE-04", title="Druckabfall", severity="p1", details="Druck fällt ab"
+        )
+        incident = runtime.transition_incident(technician, incident.incident_id, expected="new", target="in_progress")
+        incident = runtime.update_incident_analysis(
+            technician,
+            incident.incident_id,
+            expected_updated_at=incident.updated_at or incident.created_at,
+            analysis={name: "  Dokumentierte Analyse mit Messreihe\n" for name in INCIDENT_ANALYSIS_FIELDS},
+        )
+        runtime.transition_incident(technician, incident.incident_id, expected="in_progress", target="resolved")
+        runtime.transition_incident(approver, incident.incident_id, expected="resolved", target="closed")
+        runtime.create_privacy_request(technician, "access")
+        runtime.create_legal_hold(
+            admin,
+            case_reference="AZ-2026-17",
+            reason_code="litigation",
+            record_classes=("incident",),
+            review_at=datetime.now(UTC) + timedelta(days=60),
+        )
+        for _ in range(2):
+            runtime.emit_audit(
+                technician,
+                action="knowledge.document.release_denied",
+                outcome=AuditOutcome.DENIED,
+                resource_type="document",
+                resource_id=manual.document_id,
+                metadata={"reason_code": "FOUR_EYES_RELEASE_REQUIRED"},
+            )
+
+        # Evidence needs its own permission and never crosses the tenant.
+        since, until = window(datetime.now(UTC), 30)
+        for forbidden in (technician, approver):
+            with self.assertRaises(PermissionError) as denied:
+                runtime.evidence_snapshot(forbidden, since=since, until=until, limit=10)
+            self.assertEqual(str(denied.exception.args[0]), "EVIDENCE_READ_REQUIRED")
+            with self.assertRaises(PermissionError):
+                runtime.list_audit_events(forbidden, since=since, until=until, limit=10)
+        foreign = runtime.evidence_snapshot(outsider, since=since, until=until, limit=10)
+        self.assertEqual(
+            (foreign.documents, foreign.answers, foreign.incidents, foreign.limits, foreign.denied),
+            ((), (), (), (), ()),
+        )
+        self.assertEqual(runtime.list_audit_events(outsider, since=since, until=until, limit=10), ())
+
+        clean = report()
+        self.assertEqual(
+            {item.definition.control_id: (item.status.value, item.population) for item in clean.results},
+            {
+                "DOC-01": ("effective", 1),
+                "DOC-02": ("effective", 3),
+                "DOC-03": ("effective", 1),
+                "AI-01": ("effective", 1),
+                "AI-02": ("effective", 2),
+                "AI-03": ("not_exercised", 0),
+                "AI-04": ("effective", 1),
+                "LIM-01": ("effective", 1),
+                "LIM-02": ("effective", 1),
+                "INC-01": ("effective", 1),
+                "PRIV-01": ("effective", 1),
+                "RET-01": ("effective", 6),
+                "RET-02": ("effective", 1),
+                "LOG-01": ("effective", 2),
+            },
+        )
+        self.assertEqual(control(clean, "DOC-01").prevented, 2)
+        self.assertEqual(clean.truncated, frozenset())
+        self.assertEqual(report(admin).deviations, ())
+        self.assertIn("answers", report(limit=2).truncated)
+
+        events = runtime.list_audit_events(auditor, since=since, until=until, limit=10)
+        self.assertEqual([item.action for item in events], ["knowledge.document.release_denied"] * 2)
+        self.assertGreater(events[0].sequence, events[1].sequence)
+        self.assertEqual(
+            (events[0].outcome, events[0].metadata["reason_code"]), ("denied", "FOUR_EYES_RELEASE_REQUIRED")
+        )
+        self.assertEqual(len(events[0].event_hash), 64)
+        self.assertEqual(runtime.list_audit_events(auditor, since=since, until=until, limit=10, outcome="success"), ())
+        self.assertEqual(
+            len(runtime.list_audit_events(auditor, since=since, until=until, limit=1, action_prefix="knowledge.")), 1
+        )
+        self.assertEqual(
+            runtime.list_audit_events(auditor, since=since, until=until, limit=10, action_prefix="incident."), ()
+        )
+
+        # Changes written straight to the database, as a compromised account with database access could make them.
+        with self.psycopg.connect(self.admin_dsn) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """UPDATE documents SET created_by_token =
+                        (SELECT actor_token FROM document_events WHERE document_id = %s AND event_type = 'released')
+                    WHERE document_id = %s""",
+                    (manual.document_id, manual.document_id),
+                )
+                cursor.execute(
+                    "UPDATE analysis_runs SET review_status = 'accepted' WHERE answer_id = %s", (untouched.answer_id,)
+                )
+                cursor.execute(
+                    "UPDATE analysis_reviews SET reviewer_token = (SELECT actor_token FROM analysis_runs WHERE answer_id = %s) "
+                    "WHERE answer_id = %s",
+                    (safety.answer_id, safety.answer_id),
+                )
+                cursor.execute(
+                    "UPDATE operating_limits SET decided_by_token = proposed_by_token WHERE limit_set_id = %s",
+                    (proposal.limit_set_id,),
+                )
+                cursor.execute(
+                    "UPDATE incidents SET effectiveness_check = ' zu kurz ' WHERE incident_id = %s",
+                    (incident.incident_id,),
+                )
+                cursor.execute(
+                    "UPDATE notice_acceptances SET accepted_at = now() + interval '1 day' WHERE tenant_id = %s",
+                    (tenant,),
+                )
+                cursor.execute(
+                    "UPDATE analysis_runs SET retention_until = now() - interval '3 days' WHERE answer_id = %s",
+                    (ordinary.answer_id,),
+                )
+                cursor.execute(
+                    "UPDATE incidents SET retention_until = now() - interval '3 days' WHERE incident_id = %s",
+                    (incident.incident_id,),
+                )
+        tampered = report()
+        findings = {
+            item.definition.control_id: sorted((finding.resource_id, finding.code) for finding in item.findings)
+            for item in tampered.results
+            if item.findings
+        }
+        self.assertEqual(
+            findings,
+            {
+                "DOC-01": [(manual.document_id, "SAME_PERSON")],
+                "AI-01": [(safety.answer_id, "SAME_PERSON")],
+                "AI-02": [(untouched.answer_id, "DECISION_WITHOUT_REVIEW")],
+                "AI-04": [(safety.answer_id, "NOTICE_MISSING")],
+                "LIM-01": [(proposal.limit_set_id, "SAME_PERSON")],
+                "INC-01": [(incident.incident_id, "ANALYSIS_INCOMPLETE")],
+                # The incident class is under the legal hold, so only the AI interaction is overdue.
+                "RET-01": [("ai_interaction", "RETENTION_OVERDUE")],
+            },
+        )
+        self.assertEqual(
+            [item.definition.control_id for item in tampered.deviations],
+            ["DOC-01", "AI-01", "AI-02", "AI-04", "LIM-01", "INC-01"],
+        )
+        self.assertIs(control(tampered, "RET-01").status, ControlStatus.OPEN_ITEMS)
+        # The audit chain itself was not touched.
+        self.assertIs(control(tampered, "LOG-01").status, ControlStatus.EFFECTIVE)
+
 
 if __name__ == "__main__":
     unittest.main()

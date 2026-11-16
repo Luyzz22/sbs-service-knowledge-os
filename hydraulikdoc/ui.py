@@ -37,6 +37,7 @@ from .auth import (
     AuthenticationError,
     UserPrincipal,
     principal_from_entra_header,
+    require_permission,
     verify_local_user,
 )
 from .azure_ai import AzureRAGService
@@ -49,6 +50,21 @@ from .condition_monitoring import (
 )
 from .config import AppSettings, AuthMode, ConfigurationError, get_settings
 from .demo import DemoRAGService, demo_seed_blockers, demo_sensor_csv, seed_demo_tenant, tenant_has_data
+from .evidence import (
+    EVIDENCE_ROW_LIMIT,
+    EVIDENCE_WINDOW_DAYS,
+    FINDING_LABELS,
+    KIND_LABELS,
+    RESOURCE_LABELS,
+    STATUS_LABELS,
+    ControlResult,
+    ControlStatus,
+    EvidenceReport,
+    evaluate_controls,
+    window,
+)
+from .evidence_bundle import MAX_BUNDLE_EVENTS, EvidenceBundle, build_bundle
+from .evidence_data import EVIDENCE_PERMISSION
 from .governance import ReviewStatus, RiskClass, UseCase, evaluate_use_case
 from .i18n import DEFAULT_LANGUAGE, LANGUAGES, msg, preferred_language, translate, translate_plural
 from .interop import (
@@ -237,6 +253,7 @@ REVIEW_ERRORS = {
 }
 ROLE_LABELS = {
     "viewer": msg("Leser"),
+    "auditor": msg("Prüfer"),
     "technician": msg("Techniker"),
     "supervisor": msg("Supervisor"),
     "admin": msg("Admin"),
@@ -308,8 +325,31 @@ NAV_PAGES = (
     "Incidents",
     "Kennzahlen",
     "Governance",
+    "Nachweise",
     "System",
 )
+EVIDENCE_PAGE = "Nachweise"
+# What a role without any operational permission may open: evidence, its own notices and requests, and
+# the configuration. Assets, documents, answers and incidents stay closed to an auditor.
+AUDITOR_PAGES = (EVIDENCE_PAGE, "Governance", "System")
+AUDIT_ACTION_GROUPS = (
+    "knowledge.",
+    "analysis.",
+    "asset.",
+    "incident.",
+    "privacy.",
+    "legal_hold.",
+    "audit.",
+    "evidence.",
+    "retention.",
+)
+AUDIT_OUTCOME_LABELS = {
+    "success": msg("Erfolg"),
+    "denied": msg("Abgewiesen"),
+    "failure": msg("Fehler"),
+}
+AUDIT_TRAIL_ROWS = 200
+EVIDENCE_FINDING_ROWS = 200
 NAV_LABELS = {
     "Leitstand": msg("Leitstand"),
     "Assets": msg("Assets"),
@@ -319,6 +359,7 @@ NAV_LABELS = {
     "Incidents": msg("Incidents"),
     "Kennzahlen": msg("Kennzahlen"),
     "Governance": msg("Governance"),
+    "Nachweise": msg("Nachweise"),
     "System": msg("System"),
 }
 OVERVIEW_KPI_DAYS = 90
@@ -601,6 +642,12 @@ def _go_to(page: str) -> None:
     st.session_state.nav = page
 
 
+def nav_pages(principal: UserPrincipal) -> tuple[str, ...]:
+    """Workspaces this role may open; the evidence page needs its own permission."""
+    pages = NAV_PAGES if principal.can("knowledge:read") else AUDITOR_PAGES
+    return tuple(page for page in pages if page != EVIDENCE_PAGE or principal.can(EVIDENCE_PERMISSION))
+
+
 def _sidebar(principal: UserPrincipal, settings: AppSettings) -> str:
     with st.sidebar:
         st.markdown("## HydraulikDoc")
@@ -611,9 +658,11 @@ def _sidebar(principal: UserPrincipal, settings: AppSettings) -> str:
         st.caption(f"{label(ROLE_LABELS, principal.role)} · {principal.authentication_method}")
         st.divider()
         # Page keys stay German and stable; only their display follows the interface language.
-        selected = st.radio(
-            tr("Arbeitsbereich"), NAV_PAGES, key="nav", label_visibility="collapsed", format_func=label_nav
-        )
+        pages = nav_pages(principal)
+        # A page from an earlier session state or a jump target outside this role falls back to the first one.
+        if st.session_state.get("nav") not in pages:
+            st.session_state.nav = pages[0]
+        selected = st.radio(tr("Arbeitsbereich"), pages, key="nav", label_visibility="collapsed", format_func=label_nav)
         st.divider()
         if settings.demo_mode:
             ai_state = tr("Demo, kein Modellaufruf")
@@ -3588,33 +3637,364 @@ def _render_personal_data_inventory() -> None:
         st.markdown("\n".join(f"- {tr(item)}" for item in EXCLUDED_EVALUATIONS))
 
 
+def configuration_evidence(settings: AppSettings) -> dict[str, Any]:
+    """Configuration of this instance without secrets, as shown on the system page and in an evidence bundle."""
+    policy = RetentionPolicy.from_environment()
+    return {
+        "application_version": APP_VERSION,
+        "environment": settings.environment.value,
+        "release_state": settings.release_state,
+        "auth_mode": settings.auth_mode.value,
+        "persistence": settings.persistence_backend.value,
+        "ai_backend": settings.ai_backend.value,
+        "azure_ready": settings.azure_ready,
+        "demo_mode": settings.demo_mode,
+        "azure_region": settings.azure_region,
+        "managed_identity": settings.azure_use_managed_identity,
+        "search_semantic_ranker": settings.azure_search_semantic,
+        "human_review_required": settings.require_human_review,
+        "deployment_evidence_id": settings.deployment_evidence_id,
+        "ai_evaluation_evidence_id": settings.ai_evaluation_evidence_id,
+        "model_snapshot": settings.azure_model_snapshot,
+        "retention_policy_approved": settings.retention_policy_approved,
+        "retention_policy_id": settings.retention_policy_id,
+        "retention_days": {record_class.value: days for record_class, days in policy.days_by_class.items()},
+    }
+
+
+def _control_label(result: ControlResult) -> str:
+    return f"{result.definition.control_id} · {tr(result.definition.title)}"
+
+
+def _render_evidence_summary(report: EvidenceReport, evaluated_at: datetime) -> None:
+    chain = report.chain
+    if chain is None:
+        chain_text = tr("nicht geprüft")
+    elif chain.intact:
+        chain_text = tr_plural(chain.event_count, "intakt, {n} Ereignis", "intakt, {n} Ereignisse")
+    else:
+        chain_text = tr("unterbrochen")
+    tiles = (
+        (label(STATUS_LABELS, ControlStatus.EFFECTIVE), report.count(ControlStatus.EFFECTIVE)),
+        (label(STATUS_LABELS, ControlStatus.DEVIATION), report.count(ControlStatus.DEVIATION)),
+        (label(STATUS_LABELS, ControlStatus.OPEN_ITEMS), report.count(ControlStatus.OPEN_ITEMS)),
+        (label(STATUS_LABELS, ControlStatus.NOT_EXERCISED), report.count(ControlStatus.NOT_EXERCISED)),
+        (tr("Auditkette"), chain_text),
+    )
+    st.markdown(
+        '<div class="hd-state hd-state-wide">'
+        + "".join(f"<div><strong>{html.escape(title)}</strong>{html.escape(str(text))}</div>" for title, text in tiles)
+        + "</div>",
+        unsafe_allow_html=True,
+    )
+    st.caption(
+        tr(
+            "Stand {time} UTC · Zeitraum {since} bis {until}",
+            time=fmt_datetime(evaluated_at),
+            since=fmt_date(report.since),
+            until=fmt_date(report.until),
+        )
+    )
+    if report.deviations:
+        st.markdown(
+            '<div class="hd-notice hd-blocked">'
+            + html.escape(
+                tr_plural(
+                    len(report.deviations),
+                    "{n} technisch erzwungene Kontrolle zeigt eine Abweichung ({controls}). Eine Regel wurde "
+                    "umgangen; als Sicherheitsvorfall nach Runbook behandeln.",
+                    "{n} technisch erzwungene Kontrollen zeigen eine Abweichung ({controls}). Eine Regel wurde "
+                    "umgangen; als Sicherheitsvorfall nach Runbook behandeln.",
+                    controls=", ".join(item.definition.control_id for item in report.deviations),
+                )
+            )
+            + "</div>",
+            unsafe_allow_html=True,
+        )
+
+
+def _render_control_table(report: EvidenceReport) -> None:
+    st.subheader(tr("Kontrolltests"))
+    st.dataframe(
+        [
+            {
+                tr("ID"): item.definition.control_id,
+                tr("Kontrolle"): tr(item.definition.title),
+                tr("Art"): label(KIND_LABELS, item.definition.kind),
+                tr("Ergebnis"): label(STATUS_LABELS, item.status),
+                tr("Geprüfte Fälle"): item.population,
+                tr("Befunde"): len(item.findings),
+                tr("Abgewiesene Versuche"): item.prevented,
+                tr("Bezug"): "; ".join(item.definition.references),
+            }
+            for item in report.results
+        ],
+        width="stretch",
+        hide_index=True,
+    )
+
+
+def _render_control_detail(report: EvidenceReport) -> None:
+    by_id = {item.definition.control_id: item for item in report.results}
+    flagged = [key for key, item in by_id.items() if item.findings]
+    selected = st.selectbox(
+        tr("Kontrolle im Detail"),
+        tuple(by_id),
+        index=list(by_id).index(flagged[0]) if flagged else 0,
+        format_func=lambda option: f"{_control_label(by_id[option])} · {label(STATUS_LABELS, by_id[option].status)}",
+        key="evidence-control",
+    )
+    result = by_id[selected]
+    definition = result.definition
+    st.markdown(
+        f"**{tr('Ziel')}:** {tr(definition.objective)}\n\n"
+        f"**{tr('Prüfung')}:** {tr(definition.method)}\n\n"
+        f"**{tr('Bezug')}:** {'; '.join(definition.references)}"
+    )
+    if result.status is ControlStatus.NOT_EXERCISED:
+        st.info(
+            tr(
+                "Im Zeitraum gab es keinen Fall, an dem sich diese Kontrolle zeigen konnte. Das ist kein Nachweis "
+                "der Wirksamkeit."
+            )
+        )
+    if result.prevented:
+        st.caption(
+            tr_plural(
+                result.prevented,
+                "Die Anwendung hat im Zeitraum {n} Versuch abgewiesen, der diese Regel verletzt hätte.",
+                "Die Anwendung hat im Zeitraum {n} Versuche abgewiesen, die diese Regel verletzt hätten.",
+            )
+        )
+    if result.untested:
+        st.caption(
+            tr_plural(
+                result.untested,
+                "{n} Fall ist aus den gespeicherten Daten nicht prüfbar (gelöschtes Dokument oder Eintrag aus der "
+                "Zeit vor Einführung der Regel).",
+                "{n} Fälle sind aus den gespeicherten Daten nicht prüfbar (gelöschtes Dokument oder Eintrag aus der "
+                "Zeit vor Einführung der Regel).",
+            )
+        )
+    if result.incomplete:
+        st.warning(
+            tr(
+                "Die Datenmenge überschreitet {limit} Zeilen je Datenart. Das Ergebnis ist unvollständig; einen "
+                "kürzeren Zeitraum wählen.",
+                limit=EVIDENCE_ROW_LIMIT,
+            )
+        )
+    if not result.findings:
+        return
+    st.dataframe(
+        [
+            {
+                tr("Objekt"): label(RESOURCE_LABELS, finding.resource_type),
+                tr("Kennung"): finding.resource_id,
+                tr("Befund"): label(FINDING_LABELS, finding.code),
+                tr("Zeitpunkt (UTC)"): fmt_datetime(finding.occurred_at) if finding.occurred_at else "–",
+            }
+            for finding in result.findings[:EVIDENCE_FINDING_ROWS]
+        ],
+        width="stretch",
+        hide_index=True,
+    )
+    if len(result.findings) > EVIDENCE_FINDING_ROWS:
+        st.caption(
+            tr(
+                "Angezeigt werden die ersten {shown} von {total} Befunden; das Nachweispaket enthält alle.",
+                shown=EVIDENCE_FINDING_ROWS,
+                total=len(result.findings),
+            )
+        )
+
+
+def _render_audit_trail(principal: UserPrincipal, repository: EnterpriseRepository, report: EvidenceReport) -> None:
+    st.subheader(tr("Auditprotokoll"))
+    st.caption(
+        tr(
+            "Ereignisse des Zeitraums ohne Inhalte und ohne Personen: Die Ansicht zeigt weder Namen noch "
+            "Pseudonyme. Das Protokoll dient dem Sicherheits- und Compliance-Nachweis, nicht der Auswertung "
+            "einzelner Beschäftigter."
+        )
+    )
+    if report.denied:
+        st.markdown(f"#### {tr('Abgewiesene Vorgänge')}")
+        st.dataframe(
+            [
+                {tr("Aktion"): item.action, tr("Grund"): item.reason_code or "–", tr("Anzahl"): item.count}
+                for item in report.denied
+            ],
+            width="stretch",
+            hide_index=True,
+        )
+    outcome_column, group_column = st.columns(2)
+    outcome = outcome_column.selectbox(
+        tr("Ergebnis"),
+        (None, *AUDIT_OUTCOME_LABELS),
+        format_func=lambda option: tr("Alle") if option is None else label(AUDIT_OUTCOME_LABELS, option),
+        key="evidence-audit-outcome",
+    )
+    group = group_column.selectbox(
+        tr("Bereich"),
+        (None, *AUDIT_ACTION_GROUPS),
+        format_func=lambda option: tr("Alle") if option is None else option.rstrip("."),
+        key="evidence-audit-group",
+    )
+    events = repository.list_audit_events(
+        principal,
+        since=report.since,
+        until=report.until,
+        limit=AUDIT_TRAIL_ROWS + 1,
+        outcome=outcome,
+        action_prefix=group,
+    )
+    if not events:
+        st.info(tr("Für diese Auswahl liegen im Zeitraum keine Auditereignisse vor."))
+        return
+    st.dataframe(
+        [
+            {
+                tr("Nr."): event.sequence,
+                tr("Zeitpunkt (UTC)"): fmt_datetime(event.occurred_at),
+                tr("Aktion"): event.action,
+                tr("Ergebnis"): label(AUDIT_OUTCOME_LABELS, event.outcome),
+                tr("Objektart"): event.resource_type or "–",
+                tr("Grund"): str(event.metadata.get("reason_code") or "–"),
+            }
+            for event in events[:AUDIT_TRAIL_ROWS]
+        ],
+        width="stretch",
+        hide_index=True,
+    )
+    if len(events) > AUDIT_TRAIL_ROWS:
+        st.caption(
+            tr(
+                "Angezeigt werden die jüngsten {n} Ereignisse der Auswahl; das Nachweispaket enthält den Zeitraum "
+                "vollständig.",
+                n=AUDIT_TRAIL_ROWS,
+            )
+        )
+
+
+def _render_evidence_bundle(
+    principal: UserPrincipal,
+    repository: EnterpriseRepository,
+    settings: AppSettings,
+    report: EvidenceReport,
+    days: int,
+) -> None:
+    st.subheader(tr("Nachweispaket"))
+    st.caption(
+        tr(
+            "ZIP-Datei mit den Kontrolltests, den Auditereignissen des Zeitraums und der Konfiguration. Das "
+            "Manifest nennt die SHA-256-Summe jeder Datei und ist mit dem Instanzgeheimnis versiegelt. Akteure und "
+            "Objekte erscheinen als Alias, der nur in diesem Paket gilt. Das Paket vertraulich behandeln."
+        )
+    )
+    if st.button(tr("Nachweispaket erstellen"), key="evidence-bundle-build"):
+        events = repository.list_audit_events(
+            principal, since=report.since, until=report.until, limit=MAX_BUNDLE_EVENTS + 1
+        )
+        bundle = build_bundle(
+            report=report,
+            events=events[:MAX_BUNDLE_EVENTS],
+            events_truncated=len(events) > MAX_BUNDLE_EVENTS,
+            configuration=configuration_evidence(settings),
+            tenant_id=principal.tenant_id,
+            language=_language(),
+            secret=settings.audit_hmac_key,
+        )
+        repository.emit_audit(
+            principal,
+            action="evidence.bundle.generated",
+            outcome=AuditOutcome.SUCCESS,
+            metadata={
+                "evidence_id": bundle.bundle_id,
+                "source_count": min(len(events), MAX_BUNDLE_EVENTS),
+                "window_days": days,
+            },
+        )
+        st.session_state.evidence_bundle = (days, bundle)
+    stored: tuple[int, EvidenceBundle] | None = st.session_state.get("evidence_bundle")
+    if stored is None or stored[0] != days:
+        return
+    bundle = stored[1]
+    st.download_button(
+        tr("Nachweispaket herunterladen"),
+        bundle.content,
+        file_name=bundle.file_name,
+        mime="application/zip",
+        key="evidence-bundle-download",
+    )
+    st.caption(
+        tr(
+            "Paket {bundle}, SHA-256 der Datei: {digest}. Diese Summe getrennt vom Paket übermitteln.",
+            bundle=bundle.bundle_id,
+            digest=hashlib.sha256(bundle.content).hexdigest(),
+        )
+    )
+    if bundle.manifest["audit_events"]["truncated"]:
+        st.warning(
+            tr(
+                "Der Zeitraum enthält mehr als {limit} Auditereignisse; das Paket enthält die jüngsten {limit}.",
+                limit=MAX_BUNDLE_EVENTS,
+            )
+        )
+
+
+def _evidence(principal: UserPrincipal, repository: EnterpriseRepository, settings: AppSettings) -> None:
+    st.title(tr("Nachweise"))
+    require_permission(principal, EVIDENCE_PERMISSION)
+    st.caption(
+        tr(
+            "Kontrolltests lesen die gespeicherten Daten erneut und prüfen jede Regel unabhängig von dem Code, der "
+            "sie durchgesetzt hat. Ein Ergebnis nennt Datensätze, keine Personen. Die Normbezüge sind eine "
+            "Zuordnung und keine Konformitätsaussage; sie ersetzen weder Audit noch Zertifizierung."
+        )
+    )
+    days = st.radio(
+        tr("Zeitraum"),
+        EVIDENCE_WINDOW_DAYS,
+        index=EVIDENCE_WINDOW_DAYS.index(90),
+        format_func=lambda option: tr("Letzte {n} Tage", n=option),
+        horizontal=True,
+        key="evidence-window",
+    )
+    if st.button(tr("Kontrolltests ausführen"), type="primary", key="evidence-run"):
+        now = datetime.now(UTC)
+        since, until = window(now, days)
+        snapshot = repository.evidence_snapshot(principal, since=since, until=until, limit=EVIDENCE_ROW_LIMIT)
+        chain = repository.verify_audit_chain(principal) if principal.can(AUDIT_VERIFY_PERMISSION) else None
+        report = evaluate_controls(snapshot, chain)
+        repository.emit_audit(
+            principal,
+            action="evidence.controls.evaluated",
+            outcome=AuditOutcome.FAILURE if report.deviations else AuditOutcome.SUCCESS,
+            metadata={
+                "source_count": len(report.results),
+                "failure_count": len(report.deviations),
+                "window_days": days,
+            },
+        )
+        st.session_state.evidence_report = (days, now, report)
+        st.session_state.pop("evidence_bundle", None)
+    stored: tuple[int, datetime, EvidenceReport] | None = st.session_state.get("evidence_report")
+    if stored is None or stored[0] != days:
+        st.info(tr("Für diesen Zeitraum wurden in dieser Sitzung noch keine Kontrolltests ausgeführt."))
+        return
+    _, evaluated_at, report = stored
+    _render_evidence_summary(report, evaluated_at)
+    _render_control_table(report)
+    _render_control_detail(report)
+    _render_audit_trail(principal, repository, report)
+    _render_evidence_bundle(principal, repository, settings, report, days)
+
+
 def _system(principal: UserPrincipal, repository: EnterpriseRepository, settings: AppSettings) -> None:
     st.title(tr("System Evidence"))
     st.caption(tr("Keine Secrets und keine Rohinhalte werden in dieser Ansicht ausgegeben."))
-    policy = RetentionPolicy.from_environment()
-    st.json(
-        {
-            "application_version": APP_VERSION,
-            "environment": settings.environment.value,
-            "release_state": settings.release_state,
-            "auth_mode": settings.auth_mode.value,
-            "persistence": settings.persistence_backend.value,
-            "ai_backend": settings.ai_backend.value,
-            "azure_ready": settings.azure_ready,
-            "demo_mode": settings.demo_mode,
-            "azure_region": settings.azure_region,
-            "managed_identity": settings.azure_use_managed_identity,
-            "search_semantic_ranker": settings.azure_search_semantic,
-            "human_review_required": settings.require_human_review,
-            "deployment_evidence_id": settings.deployment_evidence_id,
-            "ai_evaluation_evidence_id": settings.ai_evaluation_evidence_id,
-            "model_snapshot": settings.azure_model_snapshot,
-            "retention_policy_approved": settings.retention_policy_approved,
-            "retention_policy_id": settings.retention_policy_id,
-            "retention_days": {record_class.value: days for record_class, days in policy.days_by_class.items()},
-            "principal_role": principal.role,
-        }
-    )
+    st.json({**configuration_evidence(settings), "principal_role": principal.role})
     if principal.can(AUDIT_VERIFY_PERMISSION):
         _render_audit_chain_check(principal, repository)
 
@@ -3716,6 +4096,8 @@ def run() -> None:
             _kpis(principal, repository)
         elif selected == "Governance":
             _governance(principal, repository, settings)
+        elif selected == EVIDENCE_PAGE:
+            _evidence(principal, repository, settings)
         else:
             _system(principal, repository, settings)
     except AuthenticationError:

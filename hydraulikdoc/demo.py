@@ -147,6 +147,11 @@ DEMO_DOCUMENT_CONTROL: Mapping[str, _DemoDocumentControl] = {
 # pair of eyes for every release, including the draft that is left open on purpose.
 DEMO_AUTHOR_SUBJECT = "demo:technische-redaktion"
 DEMO_REVIEW_INTERVAL = timedelta(days=365)
+# Released manuals were in use before the seeded questions were asked; the waiting revision is recent.
+DEMO_RELEASED_DAYS_AGO = 21
+DEMO_DRAFT_DAYS_AGO = 2
+# The fictitious colleagues confirmed a notice that is labelled as demo data like everything else.
+DEMO_NOTICE_VERSION = "demo"
 
 DEMO_ASSETS = (
     {
@@ -340,25 +345,30 @@ def seed_demo_tenant(principal: UserPrincipal, repository: EnterpriseRepository)
     for display_name, pages in DEMO_DOCUMENTS.items():
         control = DEMO_DOCUMENT_CONTROL[display_name]
         content = "\n".join(pages.values()).encode("utf-8")
-        record = repository.register_document(
-            author,
-            ValidatedUpload(
-                document_id=str(uuid.uuid4()),
-                display_name=display_name,
-                sha256=hashlib.sha256(content).hexdigest(),
-                content=b"",
-                content_type="text/plain",
-            ),
-            DocumentControl(
-                revision=control.revision,
-                document_number=control.document_number,
-                supersedes_document_id=registered.get(control.supersedes or ""),
-            ),
-        )
+        uploaded = now - timedelta(days=DEMO_RELEASED_DAYS_AGO if control.released else DEMO_DRAFT_DAYS_AGO)
+        with _staged(repository, author, uploaded):
+            record = repository.register_document(
+                author,
+                ValidatedUpload(
+                    document_id=str(uuid.uuid4()),
+                    display_name=display_name,
+                    sha256=hashlib.sha256(content).hexdigest(),
+                    content=b"",
+                    content_type="text/plain",
+                ),
+                DocumentControl(
+                    revision=control.revision,
+                    document_number=control.document_number,
+                    supersedes_document_id=registered.get(control.supersedes or ""),
+                ),
+            )
         registered[display_name] = record.document_id
         repository.mark_document_indexed(author, record.document_id, max(pages))
         if control.released:
-            repository.release_document(principal, record.document_id, review_due_at=now + DEMO_REVIEW_INTERVAL)
+            released = uploaded + timedelta(hours=4)
+            due = (released if isinstance(repository, InMemoryRepository) else now) + DEMO_REVIEW_INTERVAL
+            with _staged(repository, principal, released):
+                repository.release_document(principal, record.document_id, review_due_at=due)
     _seed_operating_limits(principal, repository, registered)
     _seed_reviewed_answers(principal, repository, now)
     for item in DEMO_INCIDENTS:
@@ -479,6 +489,11 @@ def _seed_reviewed_answers(principal: UserPrincipal, repository: EnterpriseRepos
     reviewer = _demo_shift_lead(principal)
     # Only the development backend can stage history; on PostgreSQL everything happens at load time.
     staged = isinstance(repository, InMemoryRepository)
+    # Like every user, the fictitious shift confirmed the AI notice before its first question.
+    with _staged(repository, asker, now - timedelta(days=DEMO_RELEASED_DAYS_AGO - 1)):
+        repository.record_acceptance(
+            asker, "ai_literacy", DEMO_NOTICE_VERSION, hashlib.sha256(DEMO_NOTICE_VERSION.encode()).hexdigest()
+        )
     for item in DEMO_REVIEWED_ANSWERS:
         asked = now - timedelta(hours=item.asked_hours_ago) if staged else now
         answer = _extractive_answer(repository, asker, item.question, item.use_case, DEFAULT_LANGUAGE, asked)

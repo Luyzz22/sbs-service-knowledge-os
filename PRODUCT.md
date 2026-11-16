@@ -39,6 +39,7 @@ HydraulikDoc ist die evidenzorientierte Arbeitsoberfläche zwischen technischer 
 | Implementiert | Deterministische Condition-/Fluid-Vorbewertung | `hydraulikdoc/condition_monitoring.py`, `fluid_advisor.py` |
 | Implementiert | Betriebsgrenzen je Asset mit Quelle, Freigabe durch eine zweite Person und Versionierung; Bewertungen und Incidents nennen die verwendete Fassung | `hydraulikdoc/operating_limits.py`, `operating_limits`, `tests/test_operating_limits.py` |
 | Implementiert | Datenschutz-Self-Service und DSR-Warteschlange | `hydraulikdoc/ui.py`, `privacy_requests` |
+| Implementiert | Nachweise für Audits: 14 Kontrolltests aus den gespeicherten Daten, Prüferrolle ohne Zugriff auf Fachdaten, Auditprotokoll ohne Personen und versiegeltes Nachweispaket | `hydraulikdoc/evidence.py`, `hydraulikdoc/evidence_bundle.py`, `docs/runbooks/audit-evidence.md` |
 | Implementiert | Incident-Workflow mit Rollenprüfung, Abnahme durch Supervisor und Schutz vor veralteten Statuswechseln | `hydraulikdoc/repository.py`, `hydraulikdoc/ui.py` |
 | Implementiert | 8D-light mit schwereabhängigen Pflichtfeldern und append-only Incident-Verlauf | `hydraulikdoc/repository.py`, `incident_events` |
 | Implementiert | Instandhaltungskennzahlen je Anlage (Reaktions- und Behebungszeit, Wiedereröffnung, Wiederholungsfehler) aus dem Incident-Verlauf, ohne Personenbezug | `hydraulikdoc/maintenance_kpis.py` |

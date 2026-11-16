@@ -43,7 +43,7 @@ Priorität: **P1** blockiert Pilot oder Security-Freigabe, **P2** senkt Akzeptan
 | D13 | Werk/Sicherheit | Betriebsgrenzen für Condition Monitoring und Fluidbewertung wurden je Sitzung eingetippt und nur per Häkchen „fachlich freigegeben“ bestätigt: keine Quelle, keine zweite Person, kein Nachweis, welche Grenze eine Bewertung oder ein Incident verwendet hat. Eine falsch übernommene Abschaltgrenze wäre unbemerkt geblieben | P1 | umgesetzt: Betriebsgrenzen je Asset mit Quelle, Freigabe durch eine zweite Person, Versionierung und Ablösung; Bewertungen verwenden die freigegebene Fassung, Incidents und Auditereignisse nennen sie |
 | S4 | ERP | Kein Live-Connector (S/4HANA OData, SAP BTP Integration Suite) | P3 | Roadmap, benötigt Bedrohungsmodell und Datenvertrag je Kunde |
 | S5 | ERP | Keine automatische Benutzer-/Gruppenprovisionierung (SCIM aus Entra ID) | P3 | Roadmap |
-| D5 | Werk/Sicherheit | TISAX-/ISO-27001-Evidenzpaket fehlt | P2 | externes Gate |
+| D5 | Werk/Sicherheit | TISAX-/ISO-27001-Evidenzpaket fehlt: Vier-Augen- und Fristregeln waren nur durch den Code behauptet, nicht aus den Daten nachprüfbar; Auditoren hatten keine lesende Rolle und kein Auditprotokoll in der Anwendung | P2 | technischer Teil umgesetzt: 14 Kontrolltests aus den gespeicherten Daten, Prüferrolle ohne Zugriff auf Fachdaten, Auditprotokoll ohne Personen, versiegeltes Nachweispaket; Assessment und Zertifizierung bleiben externes Gate |
 | D7 | Werk/Mitbestimmung | Für die Betriebsvereinbarung fehlte eine belastbare Aufstellung, welche Daten über Beschäftigte gespeichert und ausgewertet werden; die Selbstauskunft deckte Dokumente, Reviews und Workflow-Schritte nicht ab | P1 | umgesetzt: Inventar als Code mit CI-Gate gegen das Schema, erzeugte technische Anlage, Übersicht für Beschäftigte, Selbstauskunft v2 |
 
 ## Umgesetzt in diesem Inkrement
@@ -104,6 +104,16 @@ Priorität: **P1** blockiert Pilot oder Security-Freigabe, **P2** senkt Akzeptan
 - **Personenbezug:** Vorschlagende und entscheidende Person werden nur als Pseudonym gespeichert, in der technischen Anlage geführt und in der Selbstauskunft (`operating_limit_steps`, Schema v5) ausgegeben. Der Verlauf zeigt keine Namen und keine Rollen.
 - **Demo:** Presse 04 hat freigegebene Grenzen aus Revision 1 der HA-250-Anleitung, für Presse 05 liegt der Vorschlag eines fiktiven Kollegen zur Freigabe bereit. Die synthetische Messreihe endet für Presse 04 kritisch (Prüfgrenze 250 bar statt des Standardwerts 300 bar).
 
+## Umgesetzt: Nachweise für Audits
+
+- **Nachprüfen statt behaupten:** 14 Kontrolltests lesen die gespeicherten Daten erneut und wenden jede Regel unabhängig von dem Code an, der sie durchgesetzt hat. Eine Freigabe durch die hochladende Person fällt damit auch auf, wenn sie direkt in die Datenbank geschrieben wurde; ein Integrationstest verändert genau solche Zeilen und erwartet die Abweichung.
+- **Zwei Arten von Kontrolle:** Technisch erzwungene Regeln (Vier-Augen-Prinzip bei Dokumenten, KI-Antworten und Betriebsgrenzen, nur freigegebene Quellen, Abnahme von Incidents, KI-Nutzerhinweis, Auditkette) und überwachte Fristen (Überprüfungstermine, Zweitprüfung, Datenschutzanträge, Löschfristen, Legal Holds). Ein Befund der ersten Art ist ein Sicherheitsvorfall, einer der zweiten ein offener Punkt. Ohne Fall im Zeitraum lautet das Ergebnis „Kein Fall“, nie „Wirksam“.
+- **Prüferrolle:** `HydraulikDoc.Auditor` öffnet nur Nachweise, die eigenen Hinweise und die Systemkonfiguration. Assets, Dokumente, Antworten und Incidents bleiben geschlossen, eine schreibende Funktion gibt es nicht. Supervisor und Techniker sehen die Seite nicht.
+- **Keine Personen:** Ein Befund nennt den Datensatz. Das Auditprotokoll wird ohne Namen und ohne Pseudonyme angezeigt. Im Nachweispaket erscheinen Akteure als Alias, der nur in einem Paket gilt.
+- **Nachweispaket:** ZIP mit Kontrollergebnissen, Auditereignissen des Zeitraums, Konfiguration und einem Manifest mit SHA-256 je Datei, dem Kopf der Auditkette und einem Siegel. `ops/scripts/verify-evidence-bundle.py` prüft die Integrität ohne Geheimnis und das Siegel mit dem Instanzgeheimnis.
+- **Abgewiesene Versuche:** Je Kontrolle zählt der Bericht die Versuche, die die Anwendung im Zeitraum abgewiesen hat, als Beleg, dass die Sperre greift.
+- **Demo:** Im Demo-Mandanten sind die Kontrollen wirksam; die länger als 72 Stunden offene sicherheitsrelevante Antwort erscheint als offener Punkt, bis die ladende Person sie entscheidet.
+
 ## Bewusste Grenzen
 
 - Betriebsgrenzen sind feste Schwellen je Messgröße. Kennlinien, Betriebszustände (Anfahren, Volllast), Trendgrenzen und je Sensor abweichende Grenzen sind nicht abgebildet. Messreihen werden weiterhin nicht gespeichert; nachvollziehbar ist, gegen welche Fassung bewertet wurde, nicht die Messung selbst.
@@ -115,6 +125,9 @@ Priorität: **P1** blockiert Pilot oder Security-Freigabe, **P2** senkt Akzeptan
 - Vier Augen sind eine Regel der Anwendung, keine Spaltenberechtigung der Datenbank: Die Runtime-Rolle darf `documents` ändern. Ein Angreifer mit Datenbankzugang der Anwendung wird durch das Auditprotokoll und dessen Kettenprüfung erkannt, nicht verhindert.
 - Die KI-Qualitätskennzahlen beschreiben nur geprüfte Antworten und reichen so weit zurück wie die Aufbewahrungsfrist für KI-Interaktionen (Standard 90 Tage). Sie ersetzen keine Evaluation mit Goldset; die Schwellen sind feste Produktwerte und noch nicht je Mandant einstellbar. Antworten aus der Zeit vor dieser Änderung tragen keinen Ablehnungsgrund und zählen als „Ohne Angabe“.
 - In der Prüfwarteschlange fehlt bei gewöhnlichen eigenen Entwürfen der Wortlaut der Frage, weil er dafür nicht gespeichert wird.
+- Die Kontrolltests prüfen, was die Datenbank zum Zeitpunkt des Laufs enthält, und laufen auf Abruf. Sie ersetzen weder Audit noch Zertifizierung, und die Normbezüge sind eine Zuordnung, keine Konformitätsaussage. Für TISAX gibt es keine Zuordnung zu einzelnen Fragen des VDA-ISA-Katalogs.
+- Das Siegel des Nachweispakets ist ein HMAC mit dem Instanzgeheimnis und keine digitale Signatur; Dritten gegenüber beweist nur der Abgleich mit den extern gespeicherten Ankern der Auditkette etwas.
+- Ob eine Entscheidung zu einem Datenschutzantrag von einer zweiten Person stammt, ist aus den Tabellen nicht nachprüfbar, weil die entscheidende Person dort nicht gespeichert wird; diese Regel bleibt durch den Code und das Auditprotokoll belegt.
 
 ## Empfohlene nächste Schritte
 
@@ -127,3 +140,4 @@ Priorität: **P1** blockiert Pilot oder Security-Freigabe, **P2** senkt Akzeptan
 7. ~~Dokumentenlenkung~~ (D11): umgesetzt. Offen für einen Folgeschritt: Kenntnisnahme neuer Revisionen durch die betroffenen Teams und eine Erinnerung vor Ablauf des Überprüfungstermins per E-Mail oder Teams.
 8. ~~Prüfwarteschlange und KI-Qualität~~ (D12): umgesetzt. Offen: Schwellen je Mandant, Benachrichtigung der Prüfberechtigten und die Übernahme der Kennzahlen in den Post-Market-Monitoring-Bericht des Betreibers.
 9. ~~Betriebsgrenzen je Anlage~~ (D13): umgesetzt. Offen: Grenzen je Betriebszustand oder Sensor, Import aus einer Stammdatenquelle und ein Überprüfungstermin wie bei Dokumenten.
+10. ~~Nachweise für Audits~~ (D5, technischer Teil): umgesetzt. Offen: nächtlicher Lauf der Kontrolltests mit Alarm, asymmetrische Signatur des Nachweispakets über einen Schlüssel im Key Vault und eine Rezertifizierung der Rollenzuweisungen aus Entra.
