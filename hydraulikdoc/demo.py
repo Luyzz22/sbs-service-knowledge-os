@@ -25,6 +25,7 @@ from .auth import ROLE_PERMISSIONS, UserPrincipal, require_permission
 from .config import AppSettings
 from .governance import AIProvenance, GroundedAnswer, ReviewStatus, SourceCitation, UseCase, evaluate_use_case
 from .i18n import DEFAULT_LANGUAGE, msg
+from .operating_limits import LimitValues
 from .repository import (
     INCIDENT_ANALYSIS_FIELDS,
     INCIDENT_CLOSE_PERMISSION,
@@ -269,6 +270,39 @@ DEMO_INCIDENTS = (
 
 
 @dataclass(frozen=True)
+class _DemoLimits:
+    asset_id: str
+    values: LimitValues
+    document: str
+    page: int
+    reference: str
+    released: bool
+
+
+# Presse 04 runs on released limits from revision 1 of the HA-250 manual. The same set for Presse 05 is
+# left as a colleague's proposal, so the person loading the demo is the second pair of eyes. Releasing
+# revision 2 of the manual later withdraws revision 1, and both sets then show that their source changed.
+_HA_250_LIMITS = LimitValues(
+    pressure_warning_bar=230.0,
+    pressure_critical_bar=250.0,
+    temperature_warning_c=70.0,
+    temperature_critical_c=85.0,
+    minimum_flow_l_min=5.0,
+    particle_warning=1000.0,
+    water_warning_pct=0.08,
+    water_critical_pct=0.1,
+)
+DEMO_LIMITS = (
+    _DemoLimits(
+        "DEMO-W1-PRESSE-04", _HA_250_LIMITS, _HA_250_MANUAL, 12, "DEMO BA-HA-250 Rev. 1, Kapitel 4.2 und 6.1", True
+    ),
+    _DemoLimits(
+        "DEMO-W1-PRESSE-05", _HA_250_LIMITS, _HA_250_MANUAL, 12, "DEMO BA-HA-250 Rev. 1, Kapitel 4.2 und 6.1", False
+    ),
+)
+
+
+@dataclass(frozen=True)
 class DemoSeedResult:
     assets: int
     documents: int
@@ -325,6 +359,7 @@ def seed_demo_tenant(principal: UserPrincipal, repository: EnterpriseRepository)
         repository.mark_document_indexed(author, record.document_id, max(pages))
         if control.released:
             repository.release_document(principal, record.document_id, review_due_at=now + DEMO_REVIEW_INTERVAL)
+    _seed_operating_limits(principal, repository, registered)
     _seed_reviewed_answers(principal, repository, now)
     for item in DEMO_INCIDENTS:
         created = now - timedelta(days=item.created_days_ago)
@@ -398,9 +433,8 @@ DEMO_SHIFT_SUBJECT = "demo:instandhaltung-schicht-a"
 DEMO_REVIEWER_SUBJECT = "demo:schichtleitung"
 
 
-def _seed_reviewed_answers(principal: UserPrincipal, repository: EnterpriseRepository, now: datetime) -> None:
-    """Answers asked and reviewed by fictitious colleagues, so the person loading the demo is the second reviewer."""
-    asker = replace(
+def _demo_shift(principal: UserPrincipal) -> UserPrincipal:
+    return replace(
         principal,
         subject_id=DEMO_SHIFT_SUBJECT,
         display_name="Instandhaltung Schicht A (Demo)",
@@ -408,7 +442,10 @@ def _seed_reviewed_answers(principal: UserPrincipal, repository: EnterpriseRepos
         role="technician",
         permissions=ROLE_PERMISSIONS["technician"],
     )
-    reviewer = replace(
+
+
+def _demo_shift_lead(principal: UserPrincipal) -> UserPrincipal:
+    return replace(
         principal,
         subject_id=DEMO_REVIEWER_SUBJECT,
         display_name="Schichtleitung (Demo)",
@@ -416,6 +453,30 @@ def _seed_reviewed_answers(principal: UserPrincipal, repository: EnterpriseRepos
         role="supervisor",
         permissions=ROLE_PERMISSIONS["supervisor"],
     )
+
+
+def _seed_operating_limits(
+    principal: UserPrincipal, repository: EnterpriseRepository, documents: Mapping[str, str]
+) -> None:
+    """Limits transcribed by the shift; one set released by the shift lead, one left for the person loading."""
+    shift, lead = _demo_shift(principal), _demo_shift_lead(principal)
+    for item in DEMO_LIMITS:
+        proposal = repository.propose_operating_limits(
+            shift,
+            item.asset_id,
+            item.values,
+            source_reference=item.reference,
+            source_document_id=documents[item.document],
+            source_page=item.page,
+        )
+        if item.released:
+            repository.release_operating_limits(lead, proposal.limit_set_id)
+
+
+def _seed_reviewed_answers(principal: UserPrincipal, repository: EnterpriseRepository, now: datetime) -> None:
+    """Answers asked and reviewed by fictitious colleagues, so the person loading the demo is the second reviewer."""
+    asker = _demo_shift(principal)
+    reviewer = _demo_shift_lead(principal)
     # Only the development backend can stage history; on PostgreSQL everything happens at load time.
     staged = isinstance(repository, InMemoryRepository)
     for item in DEMO_REVIEWED_ANSWERS:

@@ -733,6 +733,151 @@ class PostgresSecurityIntegrationTests(unittest.TestCase):
         quality = answer_quality(records, runtime.list_documents(expert))
         self.assertEqual((quality.answers, quality.accepted, quality.rejected, quality.without_evidence), (3, 1, 2, 1))
 
+    def test_operating_limits_release_flow_column_grants_and_purge(self) -> None:
+        from datetime import UTC, datetime, timedelta
+
+        from psycopg.errors import InsufficientPrivilege
+
+        from hydraulikdoc.auth import ROLE_PERMISSIONS, UserPrincipal
+        from hydraulikdoc.config import AppSettings
+        from hydraulikdoc.operating_limits import LimitValues, released_limits
+        from hydraulikdoc.repository import PostgresRepository
+        from hydraulikdoc.security import ValidatedUpload
+
+        def repository_for(dsn: str) -> PostgresRepository:
+            return PostgresRepository(
+                AppSettings.from_environment(
+                    {
+                        "APP_ENV": "test",
+                        "PERSISTENCE_BACKEND": "postgres",
+                        "AUDIT_HMAC_KEY": "integration-audit-key-" + "x" * 16,
+                        "DATABASE_URL": dsn,
+                    }
+                )
+            )
+
+        def code(error: BaseException) -> str:
+            return str(error.args[0])
+
+        runtime, lifecycle = repository_for(self.app_dsn), repository_for(self.lifecycle_dsn)
+        runtime.check_schema()
+        tenant = f"{self.tenant_a}-limits"
+        supervisor = ROLE_PERMISSIONS["supervisor"]
+        technician = UserPrincipal("tech", tenant, "Tech", "technician", permissions=ROLE_PERMISSIONS["technician"])
+        approver = UserPrincipal("approver", tenant, "Approver", "supervisor", permissions=supervisor)
+        outsider = UserPrincipal("approver", f"{self.tenant_b}-limits", "Other", "supervisor", permissions=supervisor)
+        with self.psycopg.connect(self.app_dsn) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT set_config('app.tenant_id', %s, true)", (tenant,))
+                cursor.execute("INSERT INTO tenants (tenant_id, display_name) VALUES (%s,'Limits')", (tenant,))
+        runtime.upsert_asset(
+            approver,
+            asset_id="PRESSE-04",
+            name="Presse 04",
+            site="Werk 1",
+            manufacturer="",
+            model="HA-250",
+            criticality="high",
+        )
+        manual = runtime.register_document(
+            technician, ValidatedUpload(str(uuid.uuid4()), "Handbuch.pdf", "9" * 64, b"", "application/pdf")
+        )
+        runtime.mark_document_indexed(technician, manual.document_id, 20)
+        runtime.release_document(approver, manual.document_id, review_due_at=datetime.now(UTC) + timedelta(days=90))
+
+        values = LimitValues(pressure_warning_bar=230.0, pressure_critical_bar=250.0, water_warning_pct=0.08)
+        first = runtime.propose_operating_limits(
+            technician,
+            "PRESSE-04",
+            values,
+            source_reference="BA-HA-250 Rev. 1, Kapitel 4.2",
+            source_document_id=manual.document_id,
+            source_page=12,
+        )
+        self.assertEqual((first.version, first.status, first.is_own), (1, "draft", True))
+        self.assertEqual((first.source_document_name, first.source_withdrawn), ("Handbuch.pdf", False))
+        with self.assertRaises(ValueError) as pending:
+            runtime.propose_operating_limits(approver, "PRESSE-04", values, source_reference="Zweiter Vorschlag")
+        self.assertEqual(code(pending.exception), "OPERATING_LIMITS_PENDING")
+        with self.assertRaises(ValueError) as unknown:
+            runtime.propose_operating_limits(outsider, "PRESSE-04", values, source_reference="Fremder Mandant")
+        self.assertEqual(code(unknown.exception), "OPERATING_LIMITS_ASSET_UNKNOWN")
+        with self.assertRaises(PermissionError) as role:
+            runtime.release_operating_limits(technician, first.limit_set_id)
+        self.assertEqual(code(role.exception), "OPERATING_LIMITS_RELEASE_REQUIRED")
+        with self.assertRaises(KeyError):
+            runtime.release_operating_limits(outsider, first.limit_set_id)
+
+        released = runtime.release_operating_limits(approver, first.limit_set_id)
+        self.assertEqual((released.limits.status, released.superseded), ("released", None))
+        self.assertEqual(released.limits.values, values)
+
+        second = runtime.propose_operating_limits(
+            approver,
+            "PRESSE-04",
+            LimitValues(pressure_warning_bar=220.0, pressure_critical_bar=240.0),
+            source_reference="Engineering-Entscheidung EN-2026-31",
+        )
+        with self.assertRaises(PermissionError) as four_eyes:
+            runtime.release_operating_limits(approver, second.limit_set_id)
+        self.assertEqual(code(four_eyes.exception), "FOUR_EYES_LIMITS_REQUIRED")
+        replaced = runtime.release_operating_limits(
+            UserPrincipal("approver-2", tenant, "Approver 2", "supervisor", permissions=supervisor),
+            second.limit_set_id,
+        )
+        self.assertEqual(replaced.superseded.limit_set_id if replaced.superseded else None, first.limit_set_id)
+        sets = runtime.list_operating_limits(technician, "PRESSE-04")
+        self.assertEqual([(item.version, item.status) for item in sets], [(2, "released"), (1, "superseded")])
+        self.assertEqual(runtime.list_operating_limits(outsider), ())
+
+        third = runtime.propose_operating_limits(
+            technician,
+            "PRESSE-04",
+            values,
+            source_reference="BA-HA-250 Rev. 1, Kapitel 4.2",
+            source_document_id=manual.document_id,
+            source_page=12,
+        )
+        runtime.withdraw_document(approver, manual.document_id, "obsolete")
+        with self.assertRaises(ValueError) as withdrawn:
+            runtime.release_operating_limits(approver, third.limit_set_id)
+        self.assertEqual(code(withdrawn.exception), "OPERATING_LIMITS_SOURCE_NOT_RELEASED")
+        superseded_first = {item.limit_set_id: item for item in runtime.list_operating_limits(approver)}
+        self.assertTrue(superseded_first[first.limit_set_id].source_withdrawn)
+        rejected = runtime.reject_operating_limits(technician, third.limit_set_id, "replaced_by_proposal")
+        self.assertEqual(rejected.status, "rejected")
+
+        export = runtime.subject_export(technician)["operating_limit_steps"]
+        self.assertEqual(
+            [(item["version"], item["step"]) for item in export], [(1, "proposed"), (3, "proposed"), (3, "rejected")]
+        )
+
+        # Released values cannot be edited in place, and nothing can be deleted by the runtime role.
+        for statement in (
+            "UPDATE operating_limits SET pressure_critical_bar = 400",
+            "UPDATE operating_limits SET source_reference = 'geändert'",
+            "UPDATE operating_limits SET proposed_by_token = 'x'",
+            "DELETE FROM operating_limits",
+        ):
+            with self.subTest(statement), self.assertRaises(InsufficientPrivilege):
+                with self.psycopg.connect(self.app_dsn) as connection:
+                    with connection.cursor() as cursor:
+                        cursor.execute("SELECT set_config('app.tenant_id', %s, true)", (tenant,))
+                        cursor.execute(statement)
+
+        # Superseded and rejected sets expire with audit retention; the set in force stays.
+        with self.psycopg.connect(self.admin_dsn) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """UPDATE operating_limits SET retention_until = now() - interval '1 day'
+                    WHERE tenant_id = %s AND retention_until IS NOT NULL""",
+                    (tenant,),
+                )
+        self.assertEqual(lifecycle.purge_expired_records(approver)["operating_limits"], 2)
+        remaining = runtime.list_operating_limits(approver, "PRESSE-04")
+        self.assertEqual([(item.version, item.status) for item in remaining], [(2, "released")])
+        self.assertEqual(released_limits(remaining, "PRESSE-04"), remaining[0])
+
 
 if __name__ == "__main__":
     unittest.main()

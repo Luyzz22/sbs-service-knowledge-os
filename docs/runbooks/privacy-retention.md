@@ -24,7 +24,7 @@ Der Container Apps Job `*-retention-lifecycle` läuft um 02:00 UTC:
 3. löscht alle Search-Chunks in begrenzten Batches;
 4. löscht den privaten Blob;
 5. markiert und entfernt Dokumentmetadaten einschließlich des Verlaufs der Dokumentenlenkung (`document_events`); der Verweis einer Nachfolgerevision auf das gelöschte Dokument wird geleert;
-6. ruft eine `SECURITY DEFINER`-Funktion auf, die ausschließlich abgelaufene Datensätze dieses Tenants löscht;
+6. ruft eine `SECURITY DEFINER`-Funktion auf, die ausschließlich abgelaufene Datensätze dieses Tenants löscht, darunter abgelöste und abgelehnte Betriebsgrenzen (`operating_limits`, Frist der Auditereignisse ab Ablösung oder Ablehnung; die gültige Fassung und offene Vorschläge bleiben);
 7. schreibt ein pseudonymisiertes Erfolg-/Fehlerereignis.
 
 Der Web-Runtime-Account besitzt weder DDL noch allgemeines `DELETE` und darf die Lifecycle-Funktionen nicht ausführen. Der getrennte Lifecycle-Account darf Tenant-IDs über eine SECURITY-DEFINER-Funktion aufzählen, RLS-gebunden abgelaufene Dokumente markieren, Auditereignisse schreiben und die tenant-gebundene Purge-Funktion aufrufen; auch er besitzt kein DDL und kein allgemeines `DELETE`. Ein Fehler bei einem Tenant führt zu einem fehlgeschlagenen Job und darf nicht als Gesamterfolg gewertet werden.
