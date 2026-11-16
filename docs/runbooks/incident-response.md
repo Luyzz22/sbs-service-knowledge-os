@@ -23,6 +23,17 @@ Der nächtliche Lifecycle-Job prüft nach dem Löschlauf jede Mandantenkette und
 
 Die Kette nicht reparieren und keine Ereignisse nachtragen. Datenbank-Snapshot und Job-Ausgabe sichern, Zugriffe der Admin- und Owner-Rollen im fraglichen Zeitraum prüfen. Die Ausgabe jedes Laufs ist zugleich der Anker für den nächsten (`AUDIT_ANCHOR_FILE`); Log Analytics bewahrt sie außerhalb der Datenbank auf.
 
+## Kontrolltest zeigt eine Abweichung
+
+Meldet die Seite „Nachweise“ für eine technisch erzwungene Kontrolle eine Abweichung, hat ein gespeicherter Datensatz eine Regel verletzt, die die Anwendung nicht zulässt. Wahrscheinlichste Ursachen sind eine direkte Änderung in der Datenbank oder ein Fehler in einer Migration. Mindestens P2, bei Freigaben mit Sicherheitsbezug (DOC-01, AI-01, LIM-01) und bei LOG-01 als P1 behandeln:
+
+1. Nachweispaket für den Zeitraum erstellen und zusammen mit einem Datenbank-Snapshot sichern, bevor etwas korrigiert wird.
+2. Auditkette prüfen (LOG-01 im selben Lauf) und mit dem letzten externen Anker vergleichen.
+3. Zugriffe der Datenbank-Administrations- und Owner-Rollen im Zeitraum auswerten; die Runtime-Rolle der Anwendung kann diese Datensätze zum Teil ändern.
+4. Die betroffene Freigabe fachlich neu bewerten: Dokument oder Betriebsgrenzen zurückziehen, Antwort nicht verwenden.
+
+Offene Punkte überwachter Kontrollen sind kein Sicherheitsvorfall; sie werden im jeweiligen Arbeitsbereich erledigt. Einzelheiten stehen im [Runbook Nachweise für Audits](audit-evidence.md).
+
 ## Ablauf
 
 1. **Erkennen und klassifizieren:** Zeitpunkt, Image Digest, Deployment Evidence ID, Tenantpseudonym, Providerstatus und Symptom erfassen. Keine Rohdokumente in Incidenttickets kopieren.

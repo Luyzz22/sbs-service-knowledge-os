@@ -222,7 +222,9 @@ PERSONAL_DATA_FIELDS = (
         "actor_token",
         PSEUDONYM,
         msg("Sicherheits- und Compliance-Nachweis (Anmeldung, Export, Freigaben)"),
-        NOT_SHOWN,
+        msg(
+            "Nicht angezeigt; im Nachweispaket für Admin und Prüferrolle nur als Alias, der je Paket neu gebildet wird"
+        ),
         msg("Nur anlassbezogen bei Sicherheitsvorfällen nach Verfahren der Betriebsvereinbarung"),
         RecordClass.AUDIT_EVENT,
         None,
@@ -286,6 +288,16 @@ def render_annex(policy: RetentionPolicy | None = None) -> str:
         "",
         "Instandhaltungskennzahlen (Reaktions- und Behebungszeit, Wiederholungsfehler) werden ausschließlich "
         "je Anlage gebildet; die zugrunde liegende Abfrage liefert keine Personendaten.",
+        "",
+        "## Nachweise für Audits",
+        "",
+        "Die Seite „Nachweise“ steht nur Admins und der Prüferrolle offen (`evidence:read`). Ihre Kontrolltests "
+        "vergleichen die Pseudonyme zweier Schritte desselben Vorgangs ausschließlich auf Gleichheit, etwa "
+        "Upload und Freigabe eines Dokuments. Ein Ergebnis nennt den Datensatz, nie eine Person, und bildet keine "
+        "Kennzahl je Person. Das Auditprotokoll wird dort ohne Namen und ohne Pseudonyme angezeigt. Im "
+        "Nachweispaket erscheinen Akteure als Alias, der nur innerhalb eines Pakets gilt und sich über Pakete "
+        "hinweg nicht verknüpfen lässt; nur der Betreiber kann ihn mit dem Instanzgeheimnis zurückführen, und "
+        "das nur anlassbezogen nach dem Verfahren der Betriebsvereinbarung.",
         "",
     ]
     return "\n".join(lines)

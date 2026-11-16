@@ -30,5 +30,13 @@
     "id": "2a35c7a0-1998-4c53-9ad1-2ac23727c004",
     "isEnabled": true,
     "value": "HydraulikDoc.Admin"
+  },
+  {
+    "allowedMemberTypes": ["User"],
+    "description": "Read control evidence and the audit trail for audits; no access to documents, assets, answers or incidents.",
+    "displayName": "HydraulikDoc Auditor",
+    "id": "2a35c7a0-1998-4c53-9ad1-2ac23727c005",
+    "isEnabled": true,
+    "value": "HydraulikDoc.Auditor"
   }
 ]

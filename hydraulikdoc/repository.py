@@ -7,7 +7,8 @@ import hmac
 import json
 import re
 import uuid
-from collections.abc import Iterable, Iterator, Mapping
+from collections import Counter
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
@@ -21,6 +22,24 @@ from compliance.retention import RecordClass, RetentionPolicy
 
 from .auth import UserPrincipal
 from .config import AppSettings, PersistenceBackend
+from .evidence_data import (
+    EVIDENCE_PERMISSION,
+    RETENTION_GRACE,
+    AnswerEvidence,
+    AuditTrailEntry,
+    DeniedAttempts,
+    DocumentEvidence,
+    DocumentStep,
+    EvidenceSnapshot,
+    HoldEvidence,
+    IncidentEvidence,
+    IncidentStep,
+    LimitEvidence,
+    NoticeEvidence,
+    PrivacyEvidence,
+    RetentionEvidence,
+    ReviewStep,
+)
 from .governance import AIProvenance, GroundedAnswer, ReviewStatus, RiskClass, SourceCitation, UseCase
 from .operating_limits import (
     LimitValues,
@@ -711,6 +730,21 @@ class EnterpriseRepository(Protocol):
         self, principal: UserPrincipal, anchor: tuple[int, str] | None = None
     ) -> AuditChainReport: ...
 
+    def evidence_snapshot(
+        self, principal: UserPrincipal, *, since: datetime, until: datetime, limit: int
+    ) -> EvidenceSnapshot: ...
+
+    def list_audit_events(
+        self,
+        principal: UserPrincipal,
+        *,
+        since: datetime,
+        until: datetime,
+        limit: int,
+        outcome: str | None = None,
+        action_prefix: str | None = None,
+    ) -> tuple[AuditTrailEntry, ...]: ...
+
     def create_legal_hold(
         self,
         principal: UserPrincipal,
@@ -898,6 +932,22 @@ def verify_audit_chain_rows(
     )
 
 
+def _require_evidence(principal: UserPrincipal) -> None:
+    if not principal.can(EVIDENCE_PERMISSION):
+        raise PermissionError("EVIDENCE_READ_REQUIRED")
+
+
+def _limited(name: str, rows: Sequence[Any], limit: int, truncated: set[str]) -> tuple[Any, ...]:
+    """Cut a dataset at the row limit and remember that the evidence over it is incomplete."""
+    if len(rows) > limit:
+        truncated.add(name)
+    return tuple(rows[:limit])
+
+
+def _documented_fields(lengths: Mapping[str, int]) -> frozenset[str]:
+    return frozenset(name for name, length in lengths.items() if length >= INCIDENT_ANALYSIS_MIN_CHARS)
+
+
 def _event_hash(key: bytes, previous_hash: str | None, event: AuditEvent) -> str:
     material = {
         "previous_hash": previous_hash,
@@ -925,6 +975,9 @@ class InMemoryRepository:
         self._acceptances: set[tuple[str, str, str, str]] = set()
         self._privacy_requests: dict[tuple[str, str], tuple[str, PrivacyRequestRecord]] = {}
         self._audit: list[tuple[AuditEvent, str]] = []
+        # Tenant of each audit event, in step with the chain that the development backend shares.
+        self._audit_tenants: list[str] = []
+        self._acceptance_times: dict[tuple[str, str, str, str], datetime] = {}
         self._scripted_times: dict[str, datetime] = {}
         # Pseudonyms of uploaders, reviewers and reporters, kept apart from the records like the database columns.
         self._uploaders: dict[tuple[str, str], str] = {}
@@ -939,10 +992,11 @@ class InMemoryRepository:
 
     @contextmanager
     def scripted_time(self, principal: UserPrincipal, at: datetime) -> Iterator[None]:
-        """Record this tenant's incident workflow at ``at`` instead of now.
+        """Record this tenant's workflow steps at ``at`` instead of now.
 
-        Only the demo seed uses this to stage a realistic history. It exists solely on the development
-        backend: workflow times in PostgreSQL are always server time and cannot be backdated.
+        Only the demo seed uses this to stage a realistic history: incident steps, the upload and release
+        of documents, reviews and notice confirmations. It exists solely on the development backend:
+        workflow times in PostgreSQL are always server time and cannot be backdated.
         """
         with self._lock:
             self._scripted_times[principal.tenant_id] = at
@@ -1019,7 +1073,7 @@ class InMemoryRepository:
     def register_document(
         self, principal: UserPrincipal, upload: ValidatedUpload, control: DocumentControl | None = None
     ) -> DocumentRecord:
-        created = _now()
+        created = self._incident_time(principal)
         actor = _principal_token(self._pseudonymizer, principal)
         requested = control or DocumentControl()
         replaced = requested.supersedes_document_id
@@ -1090,7 +1144,7 @@ class InMemoryRepository:
         self, principal: UserPrincipal, document_id: str, *, review_due_at: datetime
     ) -> DocumentRelease:
         _require_document_release(principal)
-        now = _now()
+        now = self._incident_time(principal)
         actor = _principal_token(self._pseudonymizer, principal)
         tenant = principal.tenant_id
         with self._lock:
@@ -1414,6 +1468,9 @@ class InMemoryRepository:
         subject = _principal_token(self._pseudonymizer, principal)
         with self._lock:
             self._acceptances.add((principal.tenant_id, subject, notice_type, version + ":" + digest))
+            self._acceptance_times.setdefault(
+                (principal.tenant_id, subject, notice_type, version), self._incident_time(principal)
+            )
 
     def has_acceptance(self, principal: UserPrincipal, notice_type: str, version: str) -> bool:
         subject = _principal_token(self._pseudonymizer, principal)
@@ -1590,6 +1647,7 @@ class InMemoryRepository:
         with self._lock:
             previous = self._audit[-1][1] if self._audit else None
             self._audit.append((event, _event_hash(self._audit_chain_key, previous, event)))
+            self._audit_tenants.append(principal.tenant_id)
         return event
 
     def verify_audit_chain(self, principal: UserPrincipal, anchor: tuple[int, str] | None = None) -> AuditChainReport:
@@ -1602,6 +1660,212 @@ class InMemoryRepository:
                 for index, (event, digest) in enumerate(self._audit, start=1)
             ]
         return verify_audit_chain_rows(self._audit_chain_key, rows, anchor)
+
+    def _tenant_audit(self, tenant: str) -> list[tuple[int, AuditEvent, str]]:
+        return [
+            (sequence, event, digest)
+            for sequence, ((event, digest), owner) in enumerate(
+                zip(self._audit, self._audit_tenants, strict=True), start=1
+            )
+            if owner == tenant
+        ]
+
+    def _retention_evidence(self, tenant: str, due_before: datetime) -> tuple[RetentionEvidence, ...]:
+        expiry = self._retention.expires_at
+        due: dict[RecordClass, list[datetime]] = {
+            RecordClass.AI_INTERACTION: [
+                expiry(RecordClass.AI_INTERACTION, answer.provenance.generated_at)
+                for (owner, _), (_, answer) in self._answers.items()
+                if owner == tenant
+            ],
+            RecordClass.AUDIT_EVENT: [
+                event.expires_at for _, event, _ in self._tenant_audit(tenant) if event.expires_at is not None
+            ],
+            RecordClass.CONTRACT_ACCEPTANCE: [
+                expiry(RecordClass.CONTRACT_ACCEPTANCE, accepted)
+                for (owner, _, _, _), accepted in self._acceptance_times.items()
+                if owner == tenant
+            ],
+            RecordClass.DATA_SUBJECT_REQUEST: [
+                expiry(RecordClass.DATA_SUBJECT_REQUEST, record.requested_at)
+                for (owner, _), (_, record) in self._privacy_requests.items()
+                if owner == tenant
+            ],
+            RecordClass.INCIDENT: [
+                expiry(RecordClass.INCIDENT, item.created_at)
+                for (owner, _), item in self._incidents.items()
+                if owner == tenant
+            ],
+            RecordClass.UPLOADED_CONTENT: [
+                item.retention_until for (owner, _), item in self._documents.items() if owner == tenant
+            ],
+        }
+        evidence = []
+        for record_class in RecordClass:
+            overdue = [value for value in due[record_class] if value < due_before]
+            evidence.append(RetentionEvidence(record_class.value, len(overdue), min(overdue, default=None)))
+        return tuple(evidence)
+
+    def evidence_snapshot(
+        self, principal: UserPrincipal, *, since: datetime, until: datetime, limit: int
+    ) -> EvidenceSnapshot:
+        _require_evidence(principal)
+        tenant = principal.tenant_id
+        truncated: set[str] = set()
+        with self._lock:
+            documents = [
+                DocumentEvidence(
+                    document_id,
+                    self._uploaders.get((tenant, document_id), ""),
+                    item.status,
+                    item.release_status,
+                    item.created_at,
+                    item.released_at,
+                    item.review_due_at,
+                    item.withdrawn_at,
+                    None,
+                    tuple(
+                        DocumentStep(event.event_type, actor, event.actor_role, event.occurred_at)
+                        for owner, actor, event in self._document_events
+                        if owner == tenant and event.document_id == document_id
+                    ),
+                )
+                for (owner, document_id), item in self._documents.items()
+                if owner == tenant
+            ]
+            answers = [
+                AnswerEvidence(
+                    answer_id,
+                    actor,
+                    answer.risk_class.value,
+                    self._reviews.get((tenant, answer_id), answer.review_status).value,
+                    answer.provenance.generated_at,
+                    tuple(sorted({citation.document_id for citation in answer.citations})),
+                    tuple(
+                        ReviewStep(
+                            record.status.value,
+                            record.reason_code,
+                            reviewer,
+                            record.reviewer_role,
+                            record.reviewed_at,
+                        )
+                        for owner, reviewer, record in self._review_log
+                        if owner == tenant and record.answer_id == answer_id
+                    ),
+                )
+                for (owner, answer_id), (actor, answer) in self._answers.items()
+                if owner == tenant
+            ]
+            incidents = [
+                IncidentEvidence(
+                    incident_id,
+                    item.severity,
+                    item.status,
+                    item.created_at,
+                    _documented_fields({name: len(getattr(item, name).strip()) for name in INCIDENT_ANALYSIS_FIELDS}),
+                    tuple(
+                        IncidentStep(
+                            event.event_type,
+                            event.previous_status,
+                            event.new_status,
+                            actor,
+                            event.actor_role,
+                            event.occurred_at,
+                        )
+                        for owner, actor, event in self._incident_events
+                        if owner == tenant and event.incident_id == incident_id
+                    ),
+                )
+                for (owner, incident_id), item in self._incidents.items()
+                if owner == tenant
+            ]
+            limits = [
+                LimitEvidence(
+                    item.limit_set_id,
+                    item.asset_id,
+                    item.version,
+                    item.status,
+                    self._limit_actors[(tenant, item.limit_set_id)][0],
+                    self._limit_actors[(tenant, item.limit_set_id)][1],
+                    item.proposed_at,
+                    item.decided_at,
+                    item.source_document_id,
+                )
+                for item in self._tenant_limits(tenant)
+            ]
+            requests = [
+                PrivacyEvidence(
+                    record.request_id, record.status, record.requested_at, record.due_at, record.completed_at
+                )
+                for (owner, _), (_, record) in self._privacy_requests.items()
+                if owner == tenant
+            ]
+            holds = [
+                HoldEvidence(item.hold_id, item.record_classes, item.review_at, item.created_at, item.released_at)
+                for (owner, _), item in self._legal_holds.items()
+                if owner == tenant
+            ]
+            notices = [
+                NoticeEvidence(actor, kind, version, accepted)
+                for (owner, actor, kind, version), accepted in self._acceptance_times.items()
+                if owner == tenant
+            ]
+            denied = Counter(
+                (event.action, str(event.metadata.get("reason_code") or ""))
+                for _, event, _ in self._tenant_audit(tenant)
+                if event.outcome is AuditOutcome.DENIED and since <= event.occurred_at <= until
+            )
+            retention = self._retention_evidence(tenant, until - RETENTION_GRACE)
+        answers.sort(key=lambda item: item.generated_at, reverse=True)
+        incidents.sort(key=lambda item: item.created_at, reverse=True)
+        documents.sort(key=lambda item: item.created_at, reverse=True)
+        return EvidenceSnapshot(
+            since=since,
+            until=until,
+            documents=_limited("documents", documents, limit, truncated),
+            answers=_limited("answers", answers, limit, truncated),
+            incidents=_limited("incidents", incidents, limit, truncated),
+            limits=_limited("limits", limits, limit, truncated),
+            privacy_requests=_limited("privacy_requests", requests, limit, truncated),
+            legal_holds=_limited("legal_holds", holds, limit, truncated),
+            notices=_limited("notices", notices, limit, truncated),
+            retention=retention,
+            denied=tuple(DeniedAttempts(action, reason, count) for (action, reason), count in sorted(denied.items())),
+            truncated=frozenset(truncated),
+        )
+
+    def list_audit_events(
+        self,
+        principal: UserPrincipal,
+        *,
+        since: datetime,
+        until: datetime,
+        limit: int,
+        outcome: str | None = None,
+        action_prefix: str | None = None,
+    ) -> tuple[AuditTrailEntry, ...]:
+        _require_evidence(principal)
+        with self._lock:
+            rows = self._tenant_audit(principal.tenant_id)
+        entries = [
+            AuditTrailEntry(
+                sequence,
+                event.event_id,
+                event.occurred_at,
+                event.action,
+                event.outcome.value,
+                event.actor_token,
+                event.resource_type,
+                event.resource_token,
+                dict(event.metadata),
+                digest,
+            )
+            for sequence, event, digest in reversed(rows)
+            if since <= event.occurred_at <= until
+            and (outcome is None or event.outcome.value == outcome)
+            and (action_prefix is None or event.action.startswith(action_prefix))
+        ]
+        return tuple(entries[:limit])
 
     def create_legal_hold(
         self,
@@ -2750,6 +3014,140 @@ class PostgresRepository:
                 stream.execute(_SELECT_AUDIT_CHAIN_SQL)
                 return verify_audit_chain_rows(self._audit_chain_key, (_audit_chain_row(row) for row in stream), anchor)
 
+    def evidence_snapshot(
+        self, principal: UserPrincipal, *, since: datetime, until: datetime, limit: int
+    ) -> EvidenceSnapshot:
+        _require_evidence(principal)
+        truncated: set[str] = set()
+        fetch = limit + 1
+        with self._connect() as connection:
+            with connection.cursor() as cursor:
+                self._tenant(cursor, principal.tenant_id)
+                cursor.execute(_EVIDENCE_DOCUMENTS_SQL, (fetch,))
+                document_rows = _limited("documents", cursor.fetchall(), limit, truncated)
+                document_steps: dict[str, list[DocumentStep]] = {}
+                if document_rows:
+                    cursor.execute(_EVIDENCE_DOCUMENT_STEPS_SQL, ([row[0] for row in document_rows],))
+                    for row in cursor.fetchall():
+                        document_steps.setdefault(row[0], []).append(DocumentStep(*row[1:]))
+                cursor.execute(_EVIDENCE_ANSWERS_SQL, (since, until, since, fetch))
+                answer_rows = _limited("answers", cursor.fetchall(), limit, truncated)
+                reviews: dict[str, list[ReviewStep]] = {}
+                if answer_rows:
+                    cursor.execute(_EVIDENCE_REVIEWS_SQL, ([row[0] for row in answer_rows],))
+                    for row in cursor.fetchall():
+                        reviews.setdefault(row[0], []).append(ReviewStep(*row[1:]))
+                cursor.execute(_EVIDENCE_INCIDENTS_SQL, (since, since, fetch))
+                incident_rows = _limited("incidents", cursor.fetchall(), limit, truncated)
+                incident_steps: dict[str, list[IncidentStep]] = {}
+                if incident_rows:
+                    cursor.execute(_EVIDENCE_INCIDENT_STEPS_SQL, ([row[0] for row in incident_rows],))
+                    for row in cursor.fetchall():
+                        incident_steps.setdefault(row[0], []).append(IncidentStep(*row[1:]))
+                cursor.execute(_EVIDENCE_LIMITS_SQL, (fetch,))
+                limit_rows = _limited("limits", cursor.fetchall(), limit, truncated)
+                cursor.execute(_EVIDENCE_PRIVACY_SQL, (since, since, fetch))
+                request_rows = _limited("privacy_requests", cursor.fetchall(), limit, truncated)
+                cursor.execute(_EVIDENCE_HOLDS_SQL, (fetch,))
+                hold_rows = _limited("legal_holds", cursor.fetchall(), limit, truncated)
+                cursor.execute(_EVIDENCE_NOTICES_SQL, (fetch,))
+                notice_rows = _limited("notices", cursor.fetchall(), limit, truncated)
+                due_before = until - RETENTION_GRACE
+                cursor.execute(_EVIDENCE_RETENTION_SQL, (due_before,) * 7)
+                retention_rows = cursor.fetchall()
+                cursor.execute(_EVIDENCE_DENIED_SQL, (since, until))
+                denied_rows = cursor.fetchall()
+        overdue: dict[str, tuple[int, datetime | None]] = {item.value: (0, None) for item in RecordClass}
+        for record_class, count, oldest in retention_rows:
+            known_count, known_oldest = overdue[record_class]
+            dates = [value for value in (known_oldest, oldest) if value is not None]
+            overdue[record_class] = (known_count + count, min(dates, default=None))
+        return EvidenceSnapshot(
+            since=since,
+            until=until,
+            documents=tuple(
+                DocumentEvidence(
+                    row[0],
+                    row[1],
+                    row[2],
+                    row[3],
+                    row[4],
+                    row[5],
+                    row[6],
+                    row[7],
+                    row[8],
+                    tuple(document_steps.get(row[0], ())),
+                )
+                for row in document_rows
+            ),
+            answers=tuple(
+                AnswerEvidence(
+                    row[0],
+                    row[1],
+                    row[2],
+                    row[3],
+                    row[4],
+                    tuple(sorted({str(item["document_id"]) for item in row[5]})),
+                    tuple(reviews.get(row[0], ())),
+                )
+                for row in answer_rows
+            ),
+            incidents=tuple(
+                IncidentEvidence(
+                    row[0],
+                    row[1],
+                    row[2],
+                    row[3],
+                    _documented_fields(dict(zip(INCIDENT_ANALYSIS_FIELDS, row[4:8], strict=True))),
+                    tuple(incident_steps.get(row[0], ())),
+                )
+                for row in incident_rows
+            ),
+            limits=tuple(LimitEvidence(*row) for row in limit_rows),
+            privacy_requests=tuple(PrivacyEvidence(*row) for row in request_rows),
+            legal_holds=tuple(HoldEvidence(row[0], tuple(row[1]), row[2], row[3], row[4]) for row in hold_rows),
+            notices=tuple(NoticeEvidence(*row) for row in notice_rows),
+            retention=tuple(
+                RetentionEvidence(item.value, overdue[item.value][0], overdue[item.value][1]) for item in RecordClass
+            ),
+            denied=tuple(DeniedAttempts(*row) for row in denied_rows),
+            truncated=frozenset(truncated),
+        )
+
+    def list_audit_events(
+        self,
+        principal: UserPrincipal,
+        *,
+        since: datetime,
+        until: datetime,
+        limit: int,
+        outcome: str | None = None,
+        action_prefix: str | None = None,
+    ) -> tuple[AuditTrailEntry, ...]:
+        _require_evidence(principal)
+        with self._connect() as connection:
+            with connection.cursor() as cursor:
+                self._tenant(cursor, principal.tenant_id)
+                cursor.execute(
+                    _SELECT_AUDIT_TRAIL_SQL,
+                    (since, until, outcome, outcome, action_prefix, action_prefix, action_prefix, limit),
+                )
+                return tuple(
+                    AuditTrailEntry(
+                        row[0],
+                        row[1],
+                        row[2].astimezone(UTC),
+                        row[3],
+                        row[4],
+                        row[5],
+                        row[6],
+                        row[7],
+                        row[8] or {},
+                        row[9].strip(),
+                    )
+                    for row in cursor.fetchall()
+                )
+
     def create_legal_hold(
         self,
         principal: UserPrincipal,
@@ -3117,6 +3515,69 @@ def _limit_set(row: tuple[Any, ...]) -> OperatingLimitSet:
         source_withdrawn=bool(row[23]),
     )
 
+
+# Evidence datasets for control tests. Row-level security limits every statement to the tenant; the
+# column order matches the records in evidence_data. Texts of documents, answers and incidents are
+# never read, only lengths, states, times and pseudonyms.
+_EVIDENCE_DOCUMENTS_SQL = """SELECT document_id::text, created_by_token, status, release_status, created_at,
+    released_at, review_due_at, withdrawn_at, deleted_at
+    FROM documents ORDER BY created_at DESC LIMIT %s"""
+_EVIDENCE_DOCUMENT_STEPS_SQL = """SELECT document_id::text, event_type, actor_token, actor_role, occurred_at
+    FROM document_events WHERE document_id = ANY(%s::uuid[]) ORDER BY occurred_at, event_id"""
+# Answers of the period, answers decided in it, and every answer still waiting for a second person.
+_EVIDENCE_ANSWERS_SQL = """SELECT a.answer_id::text, a.actor_token, a.risk_class, a.review_status, a.generated_at,
+    a.citations
+    FROM analysis_runs a
+    WHERE (a.generated_at >= %s AND a.generated_at <= %s)
+       OR a.review_status = 'needs_expert'
+       OR (a.review_status = 'draft' AND a.risk_class = 'heightened')
+       OR EXISTS (SELECT 1 FROM analysis_reviews r WHERE r.answer_id = a.answer_id AND r.reviewed_at >= %s)
+    ORDER BY a.generated_at DESC LIMIT %s"""
+_EVIDENCE_REVIEWS_SQL = """SELECT answer_id::text, status, reason_code, reviewer_token, reviewer_role, reviewed_at
+    FROM analysis_reviews WHERE answer_id = ANY(%s::uuid[]) ORDER BY reviewed_at, review_id"""
+_EVIDENCE_INCIDENTS_SQL = """SELECT i.incident_id::text, i.severity, i.status, i.created_at,
+    char_length(btrim(i.containment_action, E' \\t\\n\\r')), char_length(btrim(i.root_cause, E' \\t\\n\\r')),
+    char_length(btrim(i.corrective_action, E' \\t\\n\\r')), char_length(btrim(i.effectiveness_check, E' \\t\\n\\r'))
+    FROM incidents i
+    WHERE i.created_at >= %s
+       OR EXISTS (SELECT 1 FROM incident_events e WHERE e.incident_id = i.incident_id AND e.occurred_at >= %s)
+    ORDER BY i.created_at DESC LIMIT %s"""
+_EVIDENCE_INCIDENT_STEPS_SQL = """SELECT incident_id::text, event_type, previous_status, new_status, actor_token,
+    actor_role, occurred_at
+    FROM incident_events WHERE incident_id = ANY(%s::uuid[]) ORDER BY occurred_at, event_id"""
+_EVIDENCE_LIMITS_SQL = """SELECT limit_set_id::text, asset_id, version, status, proposed_by_token, decided_by_token,
+    proposed_at, decided_at, source_document_id::text
+    FROM operating_limits ORDER BY proposed_at DESC LIMIT %s"""
+_EVIDENCE_PRIVACY_SQL = """SELECT request_id::text, status, requested_at, due_at, completed_at
+    FROM privacy_requests
+    WHERE requested_at >= %s OR completed_at >= %s OR status NOT IN ('completed', 'denied')
+    ORDER BY requested_at DESC LIMIT %s"""
+_EVIDENCE_HOLDS_SQL = """SELECT hold_id::text, record_classes, review_at, created_at, released_at
+    FROM legal_holds ORDER BY created_at DESC LIMIT %s"""
+_EVIDENCE_NOTICES_SQL = """SELECT actor_token, notice_type, version, accepted_at
+    FROM notice_acceptances WHERE notice_type = 'ai_literacy' ORDER BY accepted_at LIMIT %s"""
+# Records that the nightly deletion should already have removed, per record class of the legal holds.
+# Superseded and rejected operating limits follow the audit retention.
+_EVIDENCE_RETENTION_SQL = """SELECT 'ai_interaction', count(*), min(retention_until) FROM analysis_runs
+        WHERE retention_until < %s
+    UNION ALL SELECT 'audit_event', count(*), min(retention_until) FROM audit_events WHERE retention_until < %s
+    UNION ALL SELECT 'audit_event', count(*), min(retention_until) FROM operating_limits WHERE retention_until < %s
+    UNION ALL SELECT 'contract_acceptance', count(*), min(retention_until) FROM notice_acceptances
+        WHERE retention_until < %s
+    UNION ALL SELECT 'data_subject_request', count(*), min(retention_until) FROM privacy_requests
+        WHERE retention_until < %s
+    UNION ALL SELECT 'incident', count(*), min(retention_until) FROM incidents WHERE retention_until < %s
+    UNION ALL SELECT 'uploaded_content', count(*), min(retention_until) FROM documents WHERE retention_until < %s"""
+_EVIDENCE_DENIED_SQL = """SELECT action, coalesce(metadata->>'reason_code', ''), count(*)::int
+    FROM audit_events WHERE outcome = 'denied' AND occurred_at >= %s AND occurred_at <= %s
+    GROUP BY 1, 2 ORDER BY 1, 2"""
+_SELECT_AUDIT_TRAIL_SQL = """SELECT sequence_id, event_id::text, occurred_at, action, outcome, actor_token,
+    resource_type, resource_token, metadata, event_hash
+    FROM audit_events
+    WHERE occurred_at >= %s AND occurred_at <= %s
+      AND (%s::text IS NULL OR outcome = %s)
+      AND (%s::text IS NULL OR left(action, char_length(%s)) = %s)
+    ORDER BY sequence_id DESC LIMIT %s"""
 
 _SELECT_AUDIT_CHAIN_SQL = """SELECT sequence_id, previous_hash, event_hash, event_id::text, action, outcome, actor_token,
     resource_type, resource_token, metadata, occurred_at, retention_until FROM audit_events ORDER BY sequence_id"""

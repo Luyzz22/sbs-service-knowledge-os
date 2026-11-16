@@ -17,7 +17,7 @@ Die Grundsätze Zweckbindung, Datenminimierung, Speicherbegrenzung, Integrität 
 | --- | --- | --- | --- |
 | Datenminimierung | Implementiert | keine Rohfragen in Logs; Fragewortlaut in der Datenbank nur während einer offenen Prüfung durch eine zweite Person; pseudonymisierte Akteure/Ressourcen; Metadaten-Allowlist | Felder im VVT und je Connector prüfen |
 | Privacy by Default | Implementiert | AI lokal standardmäßig aus; Produktion fail-closed; private Container; kein Tracking | Tenant-Konfiguration abnehmen |
-| Zugriff/Rollen | Implementiert/konfiguriert | Entra App-Rollen, Berechtigungsprüfung, Idle Timeout, Easy Auth | Conditional Access, Joiner/Mover/Leaver, Break-glass |
+| Zugriff/Rollen | Implementiert/konfiguriert | Entra App-Rollen einschließlich einer Prüferrolle ohne Zugriff auf Fachdaten, Berechtigungsprüfung, Idle Timeout, Easy Auth | Conditional Access, Joiner/Mover/Leaver, Break-glass |
 | Tenant-Isolation | Implementiert | PostgreSQL FORCE RLS einschließlich `tenants`; serverseitiger Azure-Search-Tenantfilter; getrennte Web-/Lifecycle-Rollen | Integrationstest gegen reale Azure-Instanz |
 | Verschlüsselung | Konfiguriert | TLS, Azure at rest, Infrastructure Encryption, private Endpunkte | Key-Lifecycle; CMK nur falls Risikoanalyse es verlangt |
 | Speicherbegrenzung | Implementiert | `retention_until`; genehmigungspflichtige Policy-ID; täglicher Propagationsjob; Legal Hold je Datenklasse mit Wiedervorlage, der den Löschlauf in der Datenbankfunktion aussetzt | fachlich/rechtlich genehmigte Fristen, Backup-Löschkonzept |
@@ -26,7 +26,7 @@ Die Grundsätze Zweckbindung, Datenminimierung, Speicherbegrenzung, Integrität 
 | Auftragsverarbeitung | Externes Gate | Providerliste technisch Azure-only | AVV/DPA nach Art. 28, Unterauftragsverarbeiter, Weisungen |
 | Drittlandtransfer | Externes Gate | regionale Standard-Deployments, private Endpunkte, Datenminimierung | TIA, SCC/DPF-Bewertung, FISA/EO/CLOUD-Act, Abuse Monitoring |
 | DSFA | Bedingt/extern | Risikogates und Datenfluss dokumentiert | Art.-35-Schwellenprüfung, DSB-Freigabe, ggf. DSFA |
-| TOM/Nachweis | Implementiert + extern | Audit-Hashkette mit nächtlicher Verifikation je Mandant und Ankern außerhalb der Datenbank, SBOM, CI-Scans, WAF, Runbooks | Penetrationstest, Berechtigungstest, Restore-/Incident-Übung |
+| TOM/Nachweis | Implementiert + extern | Audit-Hashkette mit nächtlicher Verifikation je Mandant und Ankern außerhalb der Datenbank; Kontrolltests aus den gespeicherten Daten und versiegeltes Nachweispaket ([Runbook](../runbooks/audit-evidence.md)); SBOM, CI-Scans, WAF, Runbooks | Penetrationstest, Berechtigungstest, Restore-/Incident-Übung |
 
 Ein deutscher Azure-Standort beseitigt ein Drittland-/Behördenzugriffsrisiko nicht automatisch, weil Anbieterstruktur, Remote Support, Telemetrie und rechtliche Zugriffsmöglichkeiten separat bewertet werden müssen.
 
@@ -102,6 +102,19 @@ Grenzwerte für Condition Monitoring und Fluidbewertung sind fachliche Vorgaben 
 | Rückverfolgbarkeit | Implementiert | Version, Quelle und Freigabedatum in Bewertung, Auditereignis und Incident; Auditereignisse in der Hashkette | Messwerte selbst werden nicht gespeichert |
 | Quellenänderung erkannt | Implementiert | Rückzug oder Ablösung des verknüpften Dokuments markiert die Fassung im Leitstand und sperrt die Freigabe offener Vorschläge | Abgleich mit Herstellermitteilungen außerhalb der Wissensbasis |
 | Ad-hoc-Grenzen | Bewusst zugelassen | Ohne freigegebene Fassung bleibt die Eingabe für eine einzelne Prüfung mit Bestätigung möglich und wird im Incident als „nicht freigegeben“ vermerkt | Betreiber entscheidet, ob Ad-hoc-Prüfungen zulässig sind |
+
+## Kontrolltests und Nachweise (ISO/IEC 27001, TISAX)
+
+Die Anwendung prüft ihre eigenen Regeln aus den gespeicherten Daten nach und stellt das Ergebnis einer Prüferrolle bereit. Die Zuordnung zu Anhang A der ISO/IEC 27001:2022 nennt, welche Maßnahme ein Test stützt; sie ist keine Konformitätsaussage. TISAX-Assessment, Zertifizierung und die organisatorischen Maßnahmen bleiben externes Gate. Ablauf und alle 14 Kontrollen stehen im [Runbook Nachweise für Audits](../runbooks/audit-evidence.md).
+
+| Maßnahme (Anhang A) | Status | Technische Evidenz | Restnachweis |
+| --- | --- | --- | --- |
+| A.5.3 Aufgabentrennung | Implementiert | Kontrolltests DOC-01, AI-01 und LIM-01 vergleichen die Pseudonyme beider Schritte für jede Freigabe im Zeitraum (`hydraulikdoc/evidence.py`, `tests/test_evidence.py`, `tests/test_postgres_integration.py`) | Aufgabentrennung in Administration und Betrieb der Plattform |
+| A.5.28 Sammlung von Beweismaterial, A.5.33 Schutz von Aufzeichnungen | Implementiert | Legal Hold mit Wiedervorlage (RET-02), Nachweispaket mit SHA-256 je Datei, Siegel und Kopf der Auditkette, Prüfskript | Aufbewahrung der Pakete und der externen Anker, Beweissicherungsverfahren |
+| A.5.34 Datenschutz und Schutz von PII | Implementiert + extern | Fristtest für Datenschutzanträge (PRIV-01); Befunde nennen Datensätze, das Auditprotokoll zeigt keine Personen, Aliasse gelten je Paket | Vertraulichkeitsvereinbarung und Übermittlungsweg für externe Auditoren |
+| A.5.35 Unabhängige Überprüfung, A.5.36 Einhaltung von Regeln | Unterstützt | Prüferrolle `HydraulikDoc.Auditor` ohne Zugriff auf Fachdaten und ohne schreibende Funktion; Kontrolltest AI-02; jeder Lauf als Auditereignis | Unabhängigkeit der prüfenden Person, Auditprogramm und Turnus |
+| A.8.10 Löschung von Informationen | Implementiert | RET-01 zählt je Datenklasse Datensätze über der Löschfrist, ausgenommen Klassen unter Legal Hold | Backup-Löschkonzept, Alarm auf den nächtlichen Lifecycle-Job |
+| A.8.15 Protokollierung, A.8.16 Überwachung | Implementiert + extern | LOG-01 prüft die Auditkette bei jedem Lauf; abgewiesene Versuche je Kontrolle aus dem Auditprotokoll | SIEM-Anbindung, nächtlicher Lauf der Kontrolltests mit Alarm (nicht umgesetzt) |
 
 ## Barrierefreiheit
 

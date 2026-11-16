@@ -81,6 +81,7 @@ Die Pipeline gibt die öffentliche Application-Gateway-IP aus. DNS A/AAAA-Konfig
 - eine sicherheitsrelevante Testfrage stellen und mit einem zweiten Konto aus der Prüfwarteschlange entscheiden; danach darf `analysis_runs.review_question` für diese Antwort leer sein;
 - Dokument löschen und Search/Blob/PostgreSQL-Propagation nachweisen;
 - WAF-, Defender-, Entra- und Container-Logs in das SIEM aufnehmen;
+- mit einem Konto der Rolle `HydraulikDoc.Auditor` anmelden: Es darf nur „Nachweise“, „Governance“ und „System“ sehen; die Kontrolltests ausführen und ein Nachweispaket mit `ops/scripts/verify-evidence-bundle.py` prüfen;
 - Backup-/Restore-Drill durchführen.
 
 ### Update einer bestehenden Instanz auf die Dokumentenlenkung

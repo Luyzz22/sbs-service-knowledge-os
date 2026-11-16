@@ -105,6 +105,16 @@ In PostgreSQL darf die Runtime-Rolle an `operating_limits` nur die Statusspalten
 - **Frage:** Der Wortlaut der Frage wird nur gespeichert, solange eine zweite Person entscheiden muss, und danach gelöscht. Wer gefragt hat, sieht die prüfende Person nicht.
 - **Auswertung:** Unter „Kennzahlen → KI-Qualität“ stehen Prüfquote, Ablehnungsquote und Ablehnungsgründe je Prompt- und Modellversion sowie Ablehnungen je Dokument, als CSV exportierbar für Supervisor und Admin. Es gibt keine Auswertung je Person.
 
+### Nachweise für Audits
+
+Die Seite „Nachweise“ steht Admins und der Prüferrolle offen (`evidence:read`, Entra-App-Rolle `HydraulikDoc.Auditor`, lokal `"role": "auditor"`). Die Prüferrolle sieht sonst nur die eigenen Hinweise und die Systemkonfiguration, keine Assets, Dokumente, Antworten oder Incidents.
+
+- **Kontrolltests:** 14 Tests lesen die gespeicherten Daten erneut und prüfen jede Regel unabhängig von dem Code, der sie durchgesetzt hat, etwa dass keine Freigabe von der hochladenden Person stammt und keine Antwort ein nicht freigegebenes Dokument zitiert. Ein Befund einer technisch erzwungenen Kontrolle ist ein Sicherheitsvorfall, einer überwachten Frist ein offener Punkt.
+- **Auditprotokoll:** Ereignisse des Zeitraums nach Ergebnis und Bereich, ohne Namen und ohne Pseudonyme.
+- **Nachweispaket:** ZIP mit Kontrollergebnissen, Auditereignissen und Konfiguration; das Manifest nennt die SHA-256-Summe jeder Datei und ist versiegelt. Prüfung mit `python ops/scripts/verify-evidence-bundle.py <paket.zip>`.
+
+Die Tests belegen die technische Durchsetzung in der Instanz, keine Konformität mit einer Norm. Ablauf, Kontrollen und Grenzen stehen im [Runbook](docs/runbooks/audit-evidence.md).
+
 ### Demo-Mandant für Vorführungen
 
 Für Vertriebs- und Schulungsdemos ohne Azure und ohne Kundendaten zusätzlich `AI_BACKEND=demo` setzen:
@@ -155,6 +165,7 @@ Zusätzlich ist eine nicht-leere `AI_EVALUATION_EVIDENCE_ID` aus der [fachlichen
 - [Security Policy](SECURITY.md)
 - [AI System Card](docs/compliance/ai-system-card.md)
 - [Incident Response](docs/runbooks/incident-response.md)
+- [Nachweise für Audits](docs/runbooks/audit-evidence.md)
 - [Backup und Restore](docs/runbooks/backup-restore.md)
 - [Datenschutz und Retention](docs/runbooks/privacy-retention.md)
 

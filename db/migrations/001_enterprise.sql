@@ -268,6 +268,7 @@ CREATE INDEX IF NOT EXISTS incidents_tenant_status_idx ON incidents(tenant_id, s
 CREATE INDEX IF NOT EXISTS incidents_tenant_created_idx ON incidents(tenant_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS incident_events_incident_idx ON incident_events(tenant_id, incident_id, occurred_at);
 CREATE INDEX IF NOT EXISTS audit_events_tenant_sequence_idx ON audit_events(tenant_id, sequence_id);
+CREATE INDEX IF NOT EXISTS audit_events_tenant_occurred_idx ON audit_events(tenant_id, occurred_at);
 -- At most one set in force and one open proposal per asset.
 CREATE UNIQUE INDEX IF NOT EXISTS operating_limits_released_idx
     ON operating_limits(tenant_id, asset_id) WHERE status = 'released';

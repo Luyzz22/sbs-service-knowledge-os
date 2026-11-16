@@ -12,6 +12,8 @@ from .config import AppSettings, AuthMode, ConfigurationError
 
 ROLE_PERMISSIONS: Mapping[str, frozenset[str]] = {
     "viewer": frozenset({"knowledge:read", "asset:read"}),
+    # Reads control evidence only: no documents, assets, answers or incidents, and no way to change anything.
+    "auditor": frozenset({"evidence:read", "audit:verify"}),
     "technician": frozenset(
         {
             "knowledge:read",
@@ -43,6 +45,7 @@ ROLE_PERMISSIONS: Mapping[str, frozenset[str]] = {
 
 _ROLE_ALIASES = {
     "hydraulikdoc.viewer": "viewer",
+    "hydraulikdoc.auditor": "auditor",
     "hydraulikdoc.technician": "technician",
     "hydraulikdoc.supervisor": "supervisor",
     "hydraulikdoc.admin": "admin",
