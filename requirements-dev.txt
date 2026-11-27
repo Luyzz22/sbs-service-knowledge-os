@@ -1,7 +1,7 @@
 -r requirements.txt
 bandit[toml]==1.9.4
-cyclonedx-bom==8.0.1
+cyclonedx-bom==9.0.0
 pip-audit==2.10.1
-ruff==0.17.5
+ruff==0.17.6
 mypy==2.4.1
 types-requests==2.33.0.20261030
