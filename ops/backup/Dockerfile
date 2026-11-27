@@ -1,4 +1,4 @@
-FROM postgres:17.11-bookworm@sha256:665dc7b37ac52a17e298511414c21d23ffa4e6a6ef6225b3e5d59c7afb35e994
+FROM postgres:17.12-bookworm@sha256:1eff563f6c868b9b433566e9f3cf6e5c79fbd3b95bf70ec7277d376cdbfc50d7
 
 RUN apt-get update && \
     apt-get install --yes --no-install-recommends ca-certificates restic && \
